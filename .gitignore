@@ -1,0 +1,32 @@
+# Xcode
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+*.xcodeproj/
+DerivedData/
+.derivedData*/
+build/
+*.xcarchive
+*.dSYM
+*.dSYM.zip
+
+# macOS
+.DS_Store
+
+# Local app artifacts
+Blitztext.app
+dist/
+models/
+*.mlmodel
+*.mlmodelc/
+*.mlpackage/
+
+# Secrets and local config
+.env
+.env.*
+*.local
+Secrets.swift
+*.xcconfig
+
+# Tooling
+node_modules/

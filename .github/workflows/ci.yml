@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos:
+    name: Build macOS app
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Secret hygiene scan
+        run: |
+          patterns_file=.github/secret-scan-patterns.txt
+          if [ ! -f "$patterns_file" ]; then
+            echo "Missing $patterns_file"
+            exit 1
+          fi
+          pattern="$(grep -vE '^[[:space:]]*(#|$)' "$patterns_file" | paste -sd'|' -)"
+          if [ -z "$pattern" ]; then
+            echo "No patterns loaded from $patterns_file"
+            exit 1
+          fi
+          if grep -RInE \
+              --exclude-dir=.git \
+              --exclude=secret-scan-patterns.txt \
+              "$pattern" .; then
+            echo "Potential secret or private project reference found."
+            exit 1
+          fi
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app || sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Install XcodeGen
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+
+      - name: Build
+        run: ./build.sh --debug
