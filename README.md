@@ -144,3 +144,12 @@ The current direction is documented in [ROADMAP.md](ROADMAP.md). Maintainer-faci
 Code is released under the MIT License. See [LICENSE](LICENSE).
 
 Project names, logos, and app icons are not automatically granted as trademarks or brand assets. See [TRADEMARKS.md](TRADEMARKS.md).
+
+## Legal / Impressum & Datenschutz
+
+This is an experimental, non-commercial open-source project, provided as-is under the MIT License without warranty or support. Nothing is sold here and no installation or operation is performed on your behalf.
+
+The companion website (blitztext.de) is operated by Blackboat Internet GmbH:
+
+- Impressum: https://www.blackboat.com/impressum
+- Datenschutz / Privacy: https://www.blackboat.com/datenschutz
