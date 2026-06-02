@@ -65,12 +65,16 @@ The app needs Microphone permission to record audio.
 
 For automatic paste into the previous app, grant Accessibility permission in macOS System Settings. Without it, you can still copy and paste manually.
 
+Blitztext does not need Full Disk Access. Auto-paste uses the Accessibility permission because the app simulates Cmd+V after putting the result on the clipboard.
+
 ## Troubleshooting
 
 - If `xcodebuild` reports that the active developer directory is only Command Line Tools, run `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`.
 - If the build cannot find XcodeGen, install it explicitly with `brew install xcodegen`.
 - If online transcription fails immediately, check whether the API key is present and valid.
 - If secure local mode is disabled, check whether a WhisperKit model is installed in the expected folder.
-- If paste does not work, check Accessibility permission.
+- If transcription works but paste does not, this is not an OpenAI billing issue. Check **Privacy & Security -> Accessibility**, restart Blitztext after changing the permission, and make sure the cursor is focused in a text field before starting the workflow.
+- If macOS shows multiple Blitztext entries under Accessibility, remove or disable stale entries, run the app from the final location (`/Applications` if you used `./build.sh --install`), then grant the permission again.
+- If the target app blocks synthetic paste or the target app was not detected, the result still stays on the clipboard so you can press Cmd+V manually.
 - If audio is missing, check Microphone permission and macOS input settings.
 - If you see OpenAI errors, verify model access and account billing.
