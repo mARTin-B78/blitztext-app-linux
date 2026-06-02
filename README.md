@@ -95,6 +95,8 @@ Blitztext asks for:
 
 If you do not grant Accessibility permission, you can still copy results manually.
 
+Full Disk Access is not required. If auto-paste does not work even though transcription succeeds, open **System Settings -> Privacy & Security -> Accessibility**, enable Blitztext there, restart Blitztext, and try again with the cursor focused in a text field. If macOS shows multiple Blitztext entries, remove or disable the old ones and grant the permission to the app you just built or installed.
+
 ## Data Flow
 
 The preview has no custom backend.

@@ -13,10 +13,7 @@ enum PopoverPage: Equatable {
 @MainActor
 final class AppState {
     private static let pasteRetryInitialAttempts = 22
-    private static let clipboardRestoreDelayAfterPaste: TimeInterval = 1.5
-    private static let clipboardFallbackRestoreDelay: TimeInterval = 60
     private static let concealedPasteboardType = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
-    private static let pasteboardMarkerType = NSPasteboard.PasteboardType("app.blitztext.pasteboard-marker")
 
     var activeWorkflow: (any Workflow)?
     var page: PopoverPage = .main
@@ -37,7 +34,6 @@ final class AppState {
     private var lastPopoverPasteTarget: PasteTarget?
     private var menuBarStatusResetTask: Task<Void, Never>?
     private var workflowCleanupTask: Task<Void, Never>?
-    private var pasteboardCleanupTask: Task<Void, Never>?
 
     // Persisted settings
     var appSettings: AppSettings {
@@ -294,20 +290,15 @@ final class AppState {
     }
 
     func copyToClipboard(_ text: String) {
-        _ = writeSensitiveTextToPasteboard(text)
+        writeSensitiveTextToPasteboard(text)
     }
 
     // MARK: - Auto-Paste
 
     /// Copies the text, restores focus when needed, then simulates Cmd+V.
-    /// The previous clipboard content is restored after paste when possible.
+    /// The text intentionally remains on the clipboard as a fallback if paste is blocked.
     private func pasteAtCursor(_ text: String, target: PasteTarget? = nil) {
-        let pasteboardState = writeSensitiveTextToPasteboard(text)
-        schedulePasteboardRestore(
-            marker: pasteboardState.marker,
-            previousContents: pasteboardState.previousContents,
-            after: Self.clipboardFallbackRestoreDelay
-        )
+        writeSensitiveTextToPasteboard(text)
 
         if isPopoverShown {
             NotificationCenter.default.post(name: .dismissPopover, object: nil)
@@ -322,45 +313,17 @@ final class AppState {
 
         attemptPasteTrusted(
             target: target,
-            attemptsRemaining: Self.pasteRetryInitialAttempts,
-            pasteboardState: pasteboardState
+            attemptsRemaining: Self.pasteRetryInitialAttempts
         )
     }
 
-    private func writeSensitiveTextToPasteboard(_ text: String) -> (marker: String, previousContents: PasteboardSnapshot) {
+    private func writeSensitiveTextToPasteboard(_ text: String) {
         let pasteboard = NSPasteboard.general
-        let previousContents = PasteboardSnapshot.capture(from: pasteboard)
-        let marker = UUID().uuidString
 
         pasteboard.clearContents()
-        pasteboard.declareTypes([.string, Self.concealedPasteboardType, Self.pasteboardMarkerType], owner: nil)
+        pasteboard.declareTypes([.string, Self.concealedPasteboardType], owner: nil)
         pasteboard.setString(text, forType: .string)
         pasteboard.setString("", forType: Self.concealedPasteboardType)
-        pasteboard.setString(marker, forType: Self.pasteboardMarkerType)
-
-        return (marker, previousContents)
-    }
-
-    private func schedulePasteboardRestore(
-        marker: String,
-        previousContents: PasteboardSnapshot,
-        after delay: TimeInterval
-    ) {
-        pasteboardCleanupTask?.cancel()
-        pasteboardCleanupTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(delay))
-            guard let self else { return }
-            self.restorePasteboardIfCurrent(marker: marker, previousContents: previousContents)
-        }
-    }
-
-    private func restorePasteboardIfCurrent(marker: String, previousContents: PasteboardSnapshot) {
-        let pasteboard = NSPasteboard.general
-        guard pasteboard.string(forType: Self.pasteboardMarkerType) == marker else {
-            return
-        }
-
-        previousContents.restore(to: pasteboard)
     }
 
     func prepareForPopoverPresentation() {
@@ -573,19 +536,13 @@ final class AppState {
 
     private func attemptPasteTrusted(
         target: PasteTarget?,
-        attemptsRemaining: Int,
-        pasteboardState: (marker: String, previousContents: PasteboardSnapshot)
+        attemptsRemaining: Int
     ) {
         let frontmostPid = NSWorkspace.shared.frontmostApplication?.processIdentifier
 
         if let target {
             if frontmostPid == target.processIdentifier {
                 performPaste()
-                schedulePasteboardRestore(
-                    marker: pasteboardState.marker,
-                    previousContents: pasteboardState.previousContents,
-                    after: Self.clipboardRestoreDelayAfterPaste
-                )
                 return
             }
 
@@ -611,8 +568,7 @@ final class AppState {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             self?.attemptPasteTrusted(
                 target: target,
-                attemptsRemaining: attemptsRemaining - 1,
-                pasteboardState: pasteboardState
+                attemptsRemaining: attemptsRemaining - 1
             )
         }
     }
@@ -659,36 +615,4 @@ private struct PasteTarget {
     let bundleIdentifier: String?
     let processIdentifier: pid_t
     let application: NSRunningApplication
-}
-
-private struct PasteboardSnapshot {
-    private let items: [[NSPasteboard.PasteboardType: Data]]
-
-    static func capture(from pasteboard: NSPasteboard) -> PasteboardSnapshot {
-        let capturedItems = pasteboard.pasteboardItems?.map { item in
-            item.types.reduce(into: [NSPasteboard.PasteboardType: Data]()) { values, type in
-                values[type] = item.data(forType: type)
-            }
-        } ?? []
-
-        return PasteboardSnapshot(items: capturedItems)
-    }
-
-    func restore(to pasteboard: NSPasteboard) {
-        pasteboard.clearContents()
-
-        guard !items.isEmpty else {
-            return
-        }
-
-        let restoredItems = items.map { values in
-            let item = NSPasteboardItem()
-            for (type, data) in values {
-                item.setData(data, forType: type)
-            }
-            return item
-        }
-
-        pasteboard.writeObjects(restoredItems)
-    }
 }
