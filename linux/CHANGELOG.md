@@ -9,6 +9,15 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-06-03
+
+### Changed
+- Redesigned the control-panel window: minimal flat layout, Ubuntu font
+  throughout, clickable workflow rows with hover (click to record / stop),
+  subtle dividers, and text-style Settings/Quit actions. Dropped the monogram
+  avatars and per-row buttons in favour of a cleaner, simpler look. The Settings
+  window picks up the same font and styling.
+
 ## [1.0.0] - 2026-06-03
 
 First release of the Linux port. The upstream project is a macOS-only menu-bar
@@ -49,5 +58,6 @@ into that field.
   AppIndicator typelibs and GNOME `ubuntu-appindicators` extension are already
   present on the target host).
 
-[Unreleased]: https://github.com/mARTin-B78/blitztext-app/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/mARTin-B78/blitztext-app/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/mARTin-B78/blitztext-app/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/mARTin-B78/blitztext-app/releases/tag/v1.0.0
