@@ -1,9 +1,8 @@
 """tkinter control panel for Blitztext — a Linux analogue of the macOS menu bar.
 
-Shows the workflow list with per-row Record buttons and a live status dot, plus
-a Settings window to edit hotkeys, the Whisper engine, the rewrite endpoint, and
-each workflow's prompt. Global hotkeys keep working in the background, so the
-panel is optional once it's running.
+A minimal, flat design: clickable workflow rows with hover, a single status dot,
+and the Ubuntu font throughout. Global hotkeys keep working in the background, so
+the panel is optional once it's running.
 """
 
 from __future__ import annotations
@@ -13,44 +12,135 @@ import queue
 import sys
 import threading
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import messagebox, ttk
 
 from . import __version__
 from .config import Config, load, save
 from .daemon import Daemon
 
-# Light palette, loosely matching the macOS panel.
-BG = "#ececf1"
-CARD = "#ffffff"
-TEXT = "#1c1c1e"
-MUTED = "#8a8a8e"
-BADGE = "#e3e3e8"
-DIVIDER = "#d8d8de"
-AVATAR_COLORS = ["#0a84ff", "#34c759", "#ff9f0a", "#ff375f", "#bf5af2", "#5ac8fa"]
-DOT = {
-    "loading": "#ff9f0a",
-    "idle": "#34c759",
-    "recording": "#ff3b30",
-    "busy": "#ff9f0a",
-    "done": "#34c759",
-    "error": "#ff3b30",
-}
-DOT_LABEL = {
-    "loading": "Loading model…",
-    "idle": "Ready",
-    "recording": "Recording…",
-    "busy": "Working…",
-    "done": "Ready",
-    "error": "Error",
-}
+# --- palette (light, minimal) ------------------------------------------------
+WIN = "#ffffff"
+TEXT = "#1a1a1c"
+SUBTLE = "#8e8e93"
+FAINT = "#b8b8be"
+HOVER = "#f5f5f7"
+LINE = "#ececee"
+ACCENT = "#0a84ff"
+GREEN = "#34c759"
+RED = "#ff3b30"
+AMBER = "#ff9f0a"
+
+DOT = {"loading": AMBER, "idle": GREEN, "recording": RED, "busy": AMBER, "done": GREEN, "error": RED}
+DOT_LABEL = {"loading": "Loading…", "idle": "Ready", "recording": "Recording",
+             "busy": "Working…", "done": "Ready", "error": "Error"}
+
+_FONT = "TkDefaultFont"
+_MONO = "TkFixedFont"
+
+
+def _pick_fonts(root: tk.Tk) -> None:
+    """Apply the nicest available UI/mono fonts to the default named fonts."""
+    global _FONT, _MONO
+    fams = set(tkfont.families(root))
+    for f in ("Ubuntu", "Cantarell", "Noto Sans", "DejaVu Sans"):
+        if f in fams:
+            _FONT = f
+            break
+    for f in ("Ubuntu Mono", "DejaVu Sans Mono", "Noto Sans Mono"):
+        if f in fams:
+            _MONO = f
+            break
+    if _FONT != "TkDefaultFont":
+        for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont"):
+            try:
+                tkfont.nametofont(name).configure(family=_FONT, size=11)
+            except tk.TclError:
+                pass
 
 
 def pretty_hotkey(hotkey: str) -> str:
     names = {"<ctrl>": "Ctrl", "<alt>": "Alt", "<shift>": "Shift", "<cmd>": "Super", "<space>": "Space"}
     parts = []
     for raw in hotkey.split("+"):
-        parts.append(names.get(raw, raw.strip("<>").upper() if len(raw.strip("<>")) == 1 else raw.strip("<>").title()))
-    return "+".join(parts)
+        inner = raw.strip("<>")
+        parts.append(names.get(raw, inner.upper() if len(inner) == 1 else inner.title()))
+    return " ".join(parts)
+
+
+class Row:
+    """One clickable workflow row."""
+
+    def __init__(self, app: "BlitztextGUI", parent: tk.Widget, wf):
+        self.app = app
+        self.wf = wf
+        self.dimmed = False
+
+        self.frame = tk.Frame(parent, bg=WIN, cursor="hand2")
+        self.frame.pack(fill="x")
+        self.strip = tk.Frame(self.frame, bg=WIN, width=3)
+        self.strip.pack(side="left", fill="y")
+
+        body = tk.Frame(self.frame, bg=WIN)
+        body.pack(side="left", fill="x", expand=True, padx=(18, 16), pady=11)
+
+        top = tk.Frame(body, bg=WIN)
+        top.pack(fill="x")
+        self.name = tk.Label(top, text=wf.name, font=(_FONT, 13), bg=WIN, fg=TEXT, anchor="w")
+        self.name.pack(side="left")
+        self.hint = tk.Label(top, text=pretty_hotkey(wf.hotkey), font=(_MONO, 9), bg=WIN, fg=FAINT, anchor="e")
+        self.hint.pack(side="right")
+
+        self.desc = None
+        if wf.description:
+            self.desc = tk.Label(body, text=wf.description, font=(_FONT, 9), bg=WIN, fg=SUBTLE, anchor="w")
+            self.desc.pack(fill="x")
+
+        self._widgets = [self.frame, body, top, self.name, self.hint] + ([self.desc] if self.desc else [])
+        for w in self._widgets:
+            w.bind("<Button-1>", lambda _e: self.app.on_row_click(self))
+            w.bind("<Enter>", lambda _e: self._hover(True))
+            w.bind("<Leave>", lambda _e: self._hover(False))
+
+    def _paint(self, bg: str) -> None:
+        for w in self._widgets:
+            w.configure(bg=bg)
+
+    def _hover(self, on: bool) -> None:
+        if self.dimmed or not self.app.daemon.ready:
+            return
+        self._paint(HOVER if on else WIN)
+        self.strip.configure(bg=HOVER if on else WIN)
+
+    def set_idle(self) -> None:
+        self.dimmed = False
+        self._paint(WIN)
+        self.strip.configure(bg=WIN)
+        self.name.configure(fg=TEXT)
+        if self.desc:
+            self.desc.configure(fg=SUBTLE)
+        self.hint.configure(text=pretty_hotkey(self.wf.hotkey), fg=FAINT)
+
+    def set_recording(self) -> None:
+        self.dimmed = False
+        self._paint(WIN)
+        self.strip.configure(bg=RED)
+        self.name.configure(fg=TEXT)
+        if self.desc:
+            self.desc.configure(fg=SUBTLE)
+        self.hint.configure(text="● Stop", fg=RED)
+
+    def set_busy(self) -> None:
+        self.hint.configure(text="Working…", fg=AMBER)
+
+    def set_dimmed(self) -> None:
+        self.dimmed = True
+        self._paint(WIN)
+        self.strip.configure(bg=WIN)
+        self.name.configure(fg=FAINT)
+        if self.desc:
+            self.desc.configure(fg=FAINT)
+        self.hint.configure(fg=FAINT)
 
 
 class BlitztextGUI:
@@ -60,22 +150,22 @@ class BlitztextGUI:
         self.tray = None
         self.daemon = Daemon(cfg, status_cb=self._status_cb)
         self._events: queue.Queue = queue.Queue()
-        self._active_wf: str | None = None
-        self._row_buttons: dict[str, tk.Button] = {}
+        self._rows: list[Row] = []
+        self._active: str | None = None
 
         self.root = tk.Tk()
         self.root.title("Blitztext")
-        self.root.configure(bg=BG)
-        self.root.minsize(420, 360)
+        self.root.configure(bg=WIN)
+        _pick_fonts(self.root)
+        self.root.minsize(380, 320)
+
         self._build_header()
+        tk.Frame(self.root, bg=LINE, height=1).pack(fill="x", padx=22)
         self._build_rows()
+        tk.Frame(self.root, bg=LINE, height=1).pack(fill="x", padx=22)
         self._build_footer()
 
-        # Disable controls until the model is loaded.
-        self._set_buttons_enabled(False)
         self.root.after(80, self._drain_events)
-
-        # Load model + start hotkeys off the UI thread.
         threading.Thread(target=self._startup, daemon=True).start()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -87,77 +177,50 @@ class BlitztextGUI:
         except Exception as exc:  # noqa: BLE001
             self._events.put(("error", None, f"Startup failed: {exc}"))
 
-    # -- header ---------------------------------------------------------------
+    # -- layout ---------------------------------------------------------------
     def _build_header(self) -> None:
-        head = tk.Frame(self.root, bg=BG)
-        head.pack(fill="x", padx=16, pady=(14, 8))
-        tk.Label(head, text="Blitztext", font=("", 15, "bold"), bg=BG, fg=TEXT).pack(side="left")
+        head = tk.Frame(self.root, bg=WIN)
+        head.pack(fill="x", padx=22, pady=(20, 14))
+        tk.Label(head, text="Blitztext", font=(_FONT, 17), bg=WIN, fg=TEXT).pack(side="left")
+        wrap = tk.Frame(head, bg=WIN)
+        wrap.pack(side="right")
+        self.dot = tk.Label(wrap, text="●", font=(_FONT, 10), bg=WIN, fg=AMBER)
+        self.dot.pack(side="left", padx=(0, 5))
+        self.status_label = tk.Label(wrap, text="Starting…", font=(_FONT, 11), bg=WIN, fg=SUBTLE)
+        self.status_label.pack(side="left")
 
-        status = tk.Frame(head, bg=BG)
-        status.pack(side="right")
-        self.dot = tk.Label(status, text="●", font=("", 12), bg=BG, fg=DOT["loading"])
-        self.dot.pack(side="left")
-        self.status_label = tk.Label(status, text="Starting…", font=("", 11), bg=BG, fg=MUTED)
-        self.status_label.pack(side="left", padx=(4, 0))
-
-    # -- workflow rows --------------------------------------------------------
     def _build_rows(self) -> None:
-        body = tk.Frame(self.root, bg=CARD, highlightthickness=1, highlightbackground=DIVIDER)
-        body.pack(fill="both", expand=True, padx=12, pady=4)
-        for i, wf in enumerate(self.cfg.workflows):
-            if i:
-                tk.Frame(body, bg=DIVIDER, height=1).pack(fill="x", padx=12)
-            row = tk.Frame(body, bg=CARD)
-            row.pack(fill="x", padx=12, pady=8)
+        body = tk.Frame(self.root, bg=WIN)
+        body.pack(fill="both", expand=True, padx=8, pady=6)
+        for wf in self.cfg.workflows:
+            self._rows.append(Row(self, body, wf))
 
-            color = AVATAR_COLORS[i % len(AVATAR_COLORS)]
-            avatar = tk.Canvas(row, width=32, height=32, bg=CARD, highlightthickness=0)
-            avatar.create_oval(3, 3, 29, 29, fill=color, outline="")
-            avatar.create_text(16, 16, text=(wf.name[:1] or "?").upper(), fill="white", font=("", 13, "bold"))
-            avatar.pack(side="left", padx=(0, 10))
-
-            mid = tk.Frame(row, bg=CARD)
-            mid.pack(side="left", fill="x", expand=True)
-            tk.Label(mid, text=wf.name, font=("", 12, "bold"), bg=CARD, fg=TEXT, anchor="w").pack(fill="x")
-            sub = wf.description or ("Transcribe only" if wf.mode == "transcribe" else "Transcribe → rewrite")
-            tk.Label(mid, text=sub, font=("", 10), bg=CARD, fg=MUTED, anchor="w").pack(fill="x")
-
-            badge = tk.Label(row, text=pretty_hotkey(wf.hotkey), font=("", 9), bg=BADGE, fg=MUTED, padx=6, pady=2)
-            badge.pack(side="left", padx=8)
-
-            btn = tk.Button(
-                row, text="● Rec", font=("", 10, "bold"), width=7,
-                relief="flat", bg="#e8453c", fg="white", activebackground="#c93b33", activeforeground="white",
-                command=lambda w=wf: self._on_record(w),
-            )
-            btn.pack(side="right")
-            self._row_buttons[wf.name] = btn
-
-    # -- footer ---------------------------------------------------------------
     def _build_footer(self) -> None:
-        foot = tk.Frame(self.root, bg=BG)
-        foot.pack(fill="x", padx=16, pady=(6, 12))
-        tk.Label(foot, text=f"recorder: {self.daemon.recorder_name}  ·  v{__version__}",
-                 font=("", 9), bg=BG, fg=MUTED).pack(side="left")
-        tk.Button(foot, text="Quit", font=("", 10), relief="flat", bg=BADGE, fg=TEXT,
-                  command=self.quit_all).pack(side="right")
-        tk.Button(foot, text="Settings", font=("", 10), relief="flat", bg=BADGE, fg=TEXT,
-                  command=self.open_settings).pack(side="right", padx=6)
+        foot = tk.Frame(self.root, bg=WIN)
+        foot.pack(fill="x", padx=22, pady=(12, 16))
+        tk.Label(foot, text=f"v{__version__}", font=(_FONT, 9), bg=WIN, fg=FAINT).pack(side="left")
+        self._text_button(foot, "Quit", self.quit_all).pack(side="right")
+        self._text_button(foot, "Settings", self.open_settings).pack(side="right", padx=(0, 18))
 
-    # -- record button --------------------------------------------------------
-    def _on_record(self, wf) -> None:
-        self.trigger_workflow(wf)
+    def _text_button(self, parent, label, cmd) -> tk.Label:
+        b = tk.Label(parent, text=label, font=(_FONT, 11), bg=WIN, fg=ACCENT, cursor="hand2")
+        b.bind("<Button-1>", lambda _e: cmd())
+        b.bind("<Enter>", lambda _e: b.configure(fg=TEXT))
+        b.bind("<Leave>", lambda _e: b.configure(fg=ACCENT))
+        return b
+
+    # -- interaction ----------------------------------------------------------
+    def on_row_click(self, row: Row) -> None:
+        if not self.daemon.ready or self.daemon._busy:
+            return
+        if self._active and row.wf.name != self._active:
+            return  # another workflow is recording
+        self.trigger_workflow(row.wf)
 
     def trigger_workflow(self, wf) -> None:
-        """Start/stop a workflow (from a row button or the tray menu)."""
         if not self.daemon.ready:
             return
         threading.Thread(target=lambda: self.daemon.toggle(wf), daemon=True).start()
-
-    def _set_buttons_enabled(self, enabled: bool) -> None:
-        state = "normal" if enabled else "disabled"
-        for btn in self._row_buttons.values():
-            btn.configure(state=state)
 
     # -- status plumbing (thread-safe via queue) ------------------------------
     def _status_cb(self, state: str, workflow: str | None, message: str) -> None:
@@ -166,34 +229,37 @@ class BlitztextGUI:
     def _drain_events(self) -> None:
         try:
             while True:
-                state, workflow, message = self._events.get_nowait()
-                self._apply_status(state, workflow, message)
+                self._apply_status(*self._events.get_nowait())
         except queue.Empty:
             pass
         self.root.after(80, self._drain_events)
 
     def _apply_status(self, state: str, workflow: str | None, message: str) -> None:
         label = DOT_LABEL.get(state, message) or message
-        self.dot.configure(fg=DOT.get(state, MUTED))
+        self.dot.configure(fg=DOT.get(state, SUBTLE))
         self.status_label.configure(text=label)
         if self.tray is not None:
             self.tray.update_status(state, label)
 
         if state == "recording":
-            self._active_wf = workflow
-            for name, btn in self._row_buttons.items():
-                if name == workflow:
-                    btn.configure(text="■ Stop", state="normal")
+            self._active = workflow
+            for r in self._rows:
+                r.set_recording() if r.wf.name == workflow else r.set_dimmed()
+        elif state == "busy":
+            for r in self._rows:
+                if r.wf.name == workflow:
+                    r.set_busy()
                 else:
-                    btn.configure(state="disabled")
-        elif state in ("busy", "loading"):
-            self._set_buttons_enabled(False)
-        elif state in ("idle", "done", "error"):
-            self._active_wf = None
-            for btn in self._row_buttons.values():
-                btn.configure(text="● Rec", state="normal")
+                    r.set_dimmed()
+        elif state == "loading":
+            for r in self._rows:
+                r.set_dimmed()
+        else:  # idle / done / error
+            self._active = None
+            for r in self._rows:
+                r.set_idle()
             if state == "error" and message:
-                self.status_label.configure(text=message[:48])
+                self.status_label.configure(text=message[:42], fg=RED)
 
     # -- settings / panel -----------------------------------------------------
     def open_settings(self) -> None:
@@ -209,7 +275,6 @@ class BlitztextGUI:
 
     # -- lifecycle ------------------------------------------------------------
     def _on_close(self) -> None:
-        # In tray mode the window close button just hides to the tray.
         if self.tray is not None:
             self.hide_panel()
         else:
@@ -232,7 +297,7 @@ class BlitztextGUI:
 
             if tray_mod.gi_available():
                 self.tray = tray_mod.Tray(self)
-                self.root.withdraw()  # live in the tray; panel opens on demand
+                self.root.withdraw()
                 self._pump_gtk()
             else:
                 print(tray_mod.INSTALL_HINT, file=sys.stderr)
@@ -247,11 +312,18 @@ class SettingsWindow:
         self.cfg = cfg
         self.win = tk.Toplevel(parent)
         self.win.title("Blitztext — Settings")
-        self.win.configure(bg=BG)
-        self.win.minsize(560, 480)
+        self.win.configure(bg=WIN)
+        self.win.minsize(560, 500)
+
+        style = ttk.Style(self.win)
+        try:
+            style.configure("TNotebook", background=WIN, borderwidth=0)
+            style.configure("TNotebook.Tab", padding=(14, 7), font=(_FONT, 10))
+        except tk.TclError:
+            pass
 
         nb = ttk.Notebook(self.win)
-        nb.pack(fill="both", expand=True, padx=10, pady=10)
+        nb.pack(fill="both", expand=True, padx=14, pady=14)
 
         self.vars: dict[str, tk.Variable] = {}
         self._build_general(nb)
@@ -261,26 +333,39 @@ class SettingsWindow:
         for idx, wf in enumerate(cfg.workflows):
             self._build_workflow_tab(nb, idx, wf)
 
-        bar = tk.Frame(self.win, bg=BG)
-        bar.pack(fill="x", padx=10, pady=(0, 10))
-        tk.Button(bar, text="Save & Restart", font=("", 10, "bold"), relief="flat",
-                  bg="#0a84ff", fg="white", command=self._save_restart).pack(side="right")
-        tk.Button(bar, text="Save", font=("", 10), relief="flat", bg=BADGE, fg=TEXT,
-                  command=self._save).pack(side="right", padx=6)
+        bar = tk.Frame(self.win, bg=WIN)
+        bar.pack(fill="x", padx=14, pady=(0, 14))
+        save_btn = tk.Label(bar, text="Save & Restart", font=(_FONT, 11), bg=ACCENT, fg="white",
+                            padx=14, pady=7, cursor="hand2")
+        save_btn.bind("<Button-1>", lambda _e: self._save_restart())
+        save_btn.pack(side="right")
+        save2 = tk.Label(bar, text="Save", font=(_FONT, 11), bg=HOVER, fg=TEXT, padx=14, pady=7, cursor="hand2")
+        save2.bind("<Button-1>", lambda _e: self._save())
+        save2.pack(side="right", padx=8)
         tk.Label(bar, text="Hotkey & model changes apply after restart.",
-                 font=("", 9), bg=BG, fg=MUTED).pack(side="left")
+                 font=(_FONT, 9), bg=WIN, fg=SUBTLE).pack(side="left")
 
-    def _field(self, parent, label, value, key, width=42):
-        frame = tk.Frame(parent, bg=BG)
-        frame.pack(fill="x", padx=14, pady=5)
-        tk.Label(frame, text=label, font=("", 10), bg=BG, fg=TEXT, width=16, anchor="w").pack(side="left")
+    def _field(self, parent, label, value, key):
+        frame = tk.Frame(parent, bg=WIN)
+        frame.pack(fill="x", padx=16, pady=6)
+        tk.Label(frame, text=label, font=(_FONT, 10), bg=WIN, fg=TEXT, width=16, anchor="w").pack(side="left")
         var = tk.StringVar(value=str(value))
         self.vars[key] = var
-        tk.Entry(frame, textvariable=var, width=width).pack(side="left", fill="x", expand=True)
+        tk.Entry(frame, textvariable=var, font=(_FONT, 10), relief="solid", bd=1,
+                 highlightthickness=0).pack(side="left", fill="x", expand=True, ipady=3)
+        return var
+
+    def _combo(self, parent, label, value, options, key):
+        frame = tk.Frame(parent, bg=WIN)
+        frame.pack(fill="x", padx=16, pady=6)
+        tk.Label(frame, text=label, font=(_FONT, 10), bg=WIN, fg=TEXT, width=16, anchor="w").pack(side="left")
+        var = tk.StringVar(value=value)
+        self.vars[key] = var
+        ttk.Combobox(frame, textvariable=var, values=options, state="readonly", width=18).pack(side="left")
         return var
 
     def _build_general(self, nb):
-        tab = tk.Frame(nb, bg=BG)
+        tab = tk.Frame(nb, bg=WIN)
         nb.add(tab, text="Engine")
         self._field(tab, "Whisper model", self.cfg.model, "model")
         self._combo(tab, "Device", self.cfg.device, ["auto", "cpu", "cuda"], "device")
@@ -290,12 +375,13 @@ class SettingsWindow:
         self._field(tab, "Type delay (ms)", self.cfg.type_delay_ms, "type_delay_ms")
         nv = tk.BooleanVar(value=self.cfg.notify)
         self.vars["notify"] = nv
-        f = tk.Frame(tab, bg=BG); f.pack(fill="x", padx=14, pady=5)
-        tk.Checkbutton(f, text="Desktop notifications", variable=nv, bg=BG, fg=TEXT,
-                       activebackground=BG, selectcolor=CARD).pack(side="left")
+        f = tk.Frame(tab, bg=WIN)
+        f.pack(fill="x", padx=16, pady=6)
+        tk.Checkbutton(f, text="Desktop notifications", variable=nv, bg=WIN, fg=TEXT,
+                       font=(_FONT, 10), activebackground=WIN, selectcolor=WIN).pack(side="left")
 
     def _build_rewrite(self, nb):
-        tab = tk.Frame(nb, bg=BG)
+        tab = tk.Frame(nb, bg=WIN)
         nb.add(tab, text="Rewrite LLM")
         self._field(tab, "Base URL", self.cfg.base_url, "base_url")
         self._field(tab, "API key env var", self.cfg.api_key_env, "api_key_env")
@@ -305,10 +391,10 @@ class SettingsWindow:
         present = "set ✓" if self.cfg.api_key else "NOT set"
         tk.Label(tab, text=f"OpenAI-compatible endpoint (OpenAI, vLLM, llama-swap…). "
                            f"Env {self.cfg.api_key_env}: {present}.",
-                 font=("", 9), bg=BG, fg=MUTED, wraplength=500, justify="left").pack(fill="x", padx=14, pady=(8, 0))
+                 font=(_FONT, 9), bg=WIN, fg=SUBTLE, wraplength=500, justify="left").pack(fill="x", padx=16, pady=(10, 0))
 
     def _build_workflow_tab(self, nb, idx, wf):
-        tab = tk.Frame(nb, bg=BG)
+        tab = tk.Frame(nb, bg=WIN)
         nb.add(tab, text=wf.name[:14])
         v: dict[str, tk.Variable] = {}
         self.wf_vars[idx] = v
@@ -317,29 +403,26 @@ class SettingsWindow:
                                 ("Hotkey", "hotkey", wf.hotkey),
                                 ("Model (opt.)", "model", wf.model or ""),
                                 ("Temp (opt.)", "temperature", "" if wf.temperature is None else wf.temperature)]:
-            frame = tk.Frame(tab, bg=BG); frame.pack(fill="x", padx=14, pady=4)
-            tk.Label(frame, text=label, font=("", 10), bg=BG, fg=TEXT, width=14, anchor="w").pack(side="left")
+            frame = tk.Frame(tab, bg=WIN)
+            frame.pack(fill="x", padx=16, pady=5)
+            tk.Label(frame, text=label, font=(_FONT, 10), bg=WIN, fg=TEXT, width=14, anchor="w").pack(side="left")
             sv = tk.StringVar(value=str(val))
             v[key] = sv
-            tk.Entry(frame, textvariable=sv).pack(side="left", fill="x", expand=True)
+            tk.Entry(frame, textvariable=sv, font=(_FONT, 10), relief="solid", bd=1,
+                     highlightthickness=0).pack(side="left", fill="x", expand=True, ipady=3)
 
-        mframe = tk.Frame(tab, bg=BG); mframe.pack(fill="x", padx=14, pady=4)
-        tk.Label(mframe, text="Mode", font=("", 10), bg=BG, fg=TEXT, width=14, anchor="w").pack(side="left")
-        mv = tk.StringVar(value=wf.mode); v["mode"] = mv
+        mframe = tk.Frame(tab, bg=WIN)
+        mframe.pack(fill="x", padx=16, pady=5)
+        tk.Label(mframe, text="Mode", font=(_FONT, 10), bg=WIN, fg=TEXT, width=14, anchor="w").pack(side="left")
+        mv = tk.StringVar(value=wf.mode)
+        v["mode"] = mv
         ttk.Combobox(mframe, textvariable=mv, values=["transcribe", "rewrite"], state="readonly", width=14).pack(side="left")
 
-        tk.Label(tab, text="Rewrite prompt (system):", font=("", 10), bg=BG, fg=TEXT, anchor="w").pack(fill="x", padx=14, pady=(8, 2))
-        txt = tk.Text(tab, height=10, wrap="word")
+        tk.Label(tab, text="Rewrite prompt (system):", font=(_FONT, 10), bg=WIN, fg=TEXT, anchor="w").pack(fill="x", padx=16, pady=(10, 2))
+        txt = tk.Text(tab, height=9, wrap="word", font=(_FONT, 10), relief="solid", bd=1, highlightthickness=0)
         txt.insert("1.0", wf.prompt)
-        txt.pack(fill="both", expand=True, padx=14, pady=(0, 10))
+        txt.pack(fill="both", expand=True, padx=16, pady=(0, 12))
         self.prompt_texts[idx] = txt
-
-    def _combo(self, parent, label, value, options, key):
-        frame = tk.Frame(parent, bg=BG); frame.pack(fill="x", padx=14, pady=5)
-        tk.Label(frame, text=label, font=("", 10), bg=BG, fg=TEXT, width=16, anchor="w").pack(side="left")
-        var = tk.StringVar(value=value); self.vars[key] = var
-        ttk.Combobox(frame, textvariable=var, values=options, state="readonly", width=18).pack(side="left")
-        return var
 
     def _collect(self) -> bool:
         try:
@@ -380,7 +463,7 @@ class SettingsWindow:
         if not self._collect():
             return
         save(self.cfg)
-        os.execv(sys.executable, [sys.executable, "-m", "blitztext", "gui"])
+        os.execv(sys.executable, [sys.executable, "-m", "blitztext", "tray"])
 
 
 def run_gui(tray_mode: bool = False) -> int:
