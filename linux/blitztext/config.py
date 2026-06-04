@@ -38,6 +38,13 @@ class Config:
     type_delay_ms: int = 12
     notify: bool = True
     language: str = "de"          # whisper hint; "" = autodetect
+    # input scheme
+    input_mode: str = "modifiers"   # "modifiers" (Ctrl+Win/Ctrl/Alt/Esc) | "hotkeys" (combos)
+    push_to_talk: bool = False
+    key_start: str = "<ctrl>+<cmd>"   # start recording (Ctrl+Win)
+    key_stop: str = "<ctrl>"          # stop -> paste
+    key_send: str = "<alt>"           # stop -> paste -> Enter
+    key_cancel: str = "<esc>"         # discard
     # whisper
     model: str = "small"
     device: str = "auto"          # auto | cuda | cpu
@@ -112,6 +119,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
     w = data.get("whisper", {})
     r = data.get("rewrite", {})
     rt = data.get("routing", {})
+    inp = data.get("input", {})
 
     cfg = Config(
         recorder=g.get("recorder", "auto"),
@@ -132,6 +140,12 @@ def load(path: Path = CONFIG_PATH) -> Config:
         routing_hotkey=rt.get("hotkey", "<ctrl>+<alt>+<space>"),
         routing_default=rt.get("default", ""),
         routing_threshold=float(rt.get("threshold", 0.82)),
+        input_mode=inp.get("mode", "modifiers"),
+        push_to_talk=bool(inp.get("push_to_talk", False)),
+        key_start=inp.get("start", "<ctrl>+<cmd>"),
+        key_stop=inp.get("stop", "<ctrl>"),
+        key_send=inp.get("send", "<alt>"),
+        key_cancel=inp.get("cancel", "<esc>"),
     )
 
     for entry in data.get("workflow", []):
@@ -209,6 +223,14 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "temperature": cfg.temperature,
             "timeout": cfg.timeout,
         },
+        "input": {
+            "mode": cfg.input_mode,
+            "push_to_talk": cfg.push_to_talk,
+            "start": cfg.key_start,
+            "stop": cfg.key_stop,
+            "send": cfg.key_send,
+            "cancel": cfg.key_cancel,
+        },
         "routing": {
             "enabled": cfg.routing_enabled,
             "hotkey": cfg.routing_hotkey,
@@ -271,6 +293,18 @@ output = "type"          # "type" = xdotool types it; "paste" = clipboard + Ctrl
 type_delay_ms = 12       # per-keystroke delay for xdotool type (raise if chars drop)
 notify = true            # desktop notifications for each phase
 language = "de"          # Whisper language hint; "" = autodetect
+
+[input]
+# How you start/stop dictation.
+#   mode = "modifiers"  ->  Ctrl+Win start | Ctrl stop+paste | Alt stop+paste+Enter | Esc cancel
+#   mode = "hotkeys"    ->  the per-preset combos + the [routing] hotkey below
+# Voice-keyword routing still applies to what you say in either mode.
+mode = "modifiers"
+push_to_talk = false     # modifiers mode: hold Start to record, release to stop+paste
+start = "<ctrl>+<cmd>"   # <cmd> = the Super/Windows key
+stop = "<ctrl>"
+send = "<alt>"
+cancel = "<esc>"
 
 [whisper]
 model = "small"          # tiny | base | small | medium | large-v3, or a local path

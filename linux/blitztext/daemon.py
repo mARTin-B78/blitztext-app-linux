@@ -81,35 +81,57 @@ class Daemon:
     def is_recording(self) -> bool:
         return self._recording is not None
 
-    # -- hotkey / button handler ----------------------------------------------
-    def toggle(self, workflow: Workflow) -> None:
-        """Called on each trigger: start recording, or stop + process."""
+    # -- recording control ----------------------------------------------------
+    def start_dictation(self, workflow: Workflow | None = None) -> None:
+        wf = workflow or self._route_workflow
         with self._lock:
-            if not self.ready:
-                self._notify("Please wait", "Model still loading…", "low")
+            if not self.ready or self._busy or self._recording is not None:
                 return
-            if self._busy:
-                self._notify("Busy", "Still processing the last clip…", "low")
-                return
+            self._target_window = active_window_id()
+            self._recording = Recording(self.recorder_name)
+            self._active_workflow = wf
+        self._emit("recording", wf.name, "Recording…")
+        self._notify(f"● {wf.name}", "Recording…")
 
+    def finish_dictation(self, send_enter: bool = False) -> None:
+        with self._lock:
             if self._recording is None:
-                self._target_window = active_window_id()
-                self._recording = Recording(self.recorder_name)
-                self._active_workflow = workflow
-                self._emit("recording", workflow.name, "Recording…")
-                self._notify(f"● {workflow.name}", "Recording… trigger again to stop.")
                 return
-
             rec, wf, win = self._recording, self._active_workflow, self._target_window
             self._recording = None
             self._active_workflow = None
             self._busy = True
-
         audio_path = rec.stop()
-        threading.Thread(target=self._process, args=(audio_path, wf, win), daemon=True).start()
+        threading.Thread(
+            target=self._process, args=(audio_path, wf, win, send_enter), daemon=True
+        ).start()
+
+    def cancel_dictation(self) -> None:
+        with self._lock:
+            if self._recording is None:
+                return
+            rec = self._recording
+            self._recording = None
+            self._active_workflow = None
+        rec.discard()
+        self._emit("idle", None, "Cancelled")
+        self._notify("Cancelled", "Recording discarded.", "low")
+
+    def toggle(self, workflow: Workflow) -> None:
+        """Start recording, or stop + process (used by GUI clicks and combos)."""
+        if not self.ready:
+            self._notify("Please wait", "Model still loading…", "low")
+            return
+        if self._busy:
+            self._notify("Busy", "Still processing the last clip…", "low")
+            return
+        if self._recording is None:
+            self.start_dictation(workflow)
+        else:
+            self.finish_dictation(send_enter=False)
 
     # -- worker ---------------------------------------------------------------
-    def _process(self, audio_path, workflow: Workflow, window_id) -> None:
+    def _process(self, audio_path, workflow: Workflow, window_id, send_enter: bool = False) -> None:
         label = workflow.name
         try:
             self._emit("busy", label, "Transcribing…")
@@ -172,6 +194,9 @@ class Daemon:
                 window_id=window_id,
                 type_delay_ms=self.cfg.type_delay_ms,
             )
+            if send_enter:
+                from .paste import press_enter
+                press_enter(window_id)
             self._emit("done", label, text)
             self._notify(f"✓ {label}", text[:80] + ("…" if len(text) > 80 else ""))
         except Exception as exc:  # noqa: BLE001 - surface any failure
@@ -203,6 +228,29 @@ class Daemon:
         self._listener.start()
         return self._listener
 
+    def start_input(self):
+        """Start the configured input handler; returns its listener (joinable)."""
+        if self.cfg.input_mode == "modifiers":
+            from .inputmode import ModifierScheme
+
+            self._scheme = ModifierScheme(
+                self,
+                start=self.cfg.key_start,
+                stop=self.cfg.key_stop,
+                send=self.cfg.key_send,
+                cancel=self.cfg.key_cancel,
+                push_to_talk=self.cfg.push_to_talk,
+            )
+            return self._scheme.start_listener()
+        return self.start_hotkeys()
+
+    def stop_input(self) -> None:
+        scheme = getattr(self, "_scheme", None)
+        if scheme is not None:
+            scheme.stop_listener()
+            self._scheme = None
+        self.stop_hotkeys()
+
     def stop_hotkeys(self) -> None:
         if self._listener is not None:
             self._listener.stop()
@@ -211,12 +259,17 @@ class Daemon:
     # -- headless run loop ----------------------------------------------------
     def run(self) -> None:
         self.prepare()
-        lines = [f"  {self.cfg.routing_hotkey}  →  Voice routing (speak a keyword)"] if self.cfg.routing_enabled else []
-        lines += [f"  {wf.hotkey}  →  {wf.name}" for wf in self.cfg.workflows if wf.hotkey]
-        print(f"[blitztext] ready. Recorder: {self.recorder_name}. Hotkeys:\n" + "\n".join(lines), file=sys.stderr)
-        self._notify("Blitztext ready", "Focus a text field and press a hotkey.")
+        if self.cfg.input_mode == "modifiers":
+            scheme = "Ctrl+Win start · Ctrl stop+paste · Alt stop+paste+Enter · Esc cancel"
+            print(f"[blitztext] ready. Recorder: {self.recorder_name}. Input: {scheme}", file=sys.stderr)
+        else:
+            lines = [f"  {self.cfg.routing_hotkey}  →  Voice routing"] if self.cfg.routing_enabled else []
+            lines += [f"  {wf.hotkey}  →  {wf.name}" for wf in self.cfg.workflows if wf.hotkey]
+            print(f"[blitztext] ready. Recorder: {self.recorder_name}. Hotkeys:\n" + "\n".join(lines), file=sys.stderr)
+        self._notify("Blitztext ready", "Focus a text field and start dictating.")
 
-        from pynput import keyboard
-
-        with keyboard.GlobalHotKeys(self._build_mapping()) as listener:
+        listener = self.start_input()
+        try:
             listener.join()
+        finally:
+            self.stop_input()

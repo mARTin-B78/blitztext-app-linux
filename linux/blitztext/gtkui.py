@@ -189,7 +189,7 @@ class App:
     def _startup(self) -> None:
         try:
             self.daemon.prepare()
-            self.daemon.start_hotkeys()
+            self.daemon.start_input()
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._apply_status, "error", None, f"Startup failed: {exc}")
 
@@ -274,7 +274,7 @@ class App:
 
     def quit_all(self) -> None:
         try:
-            self.daemon.stop_hotkeys()
+            self.daemon.stop_input()
         finally:
             Gtk.main_quit()
 
