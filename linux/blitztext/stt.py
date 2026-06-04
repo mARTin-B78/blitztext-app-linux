@@ -1,0 +1,152 @@
+"""Speech-to-text engine abstraction: local faster-whisper or remote endpoints.
+
+Engines are user-managed presets. Each is either the in-process local
+faster-whisper model, or a remote OpenAI-compatible server exposing
+`/audio/transcriptions` (faster-whisper-server, Groq, WhisperX, whisper.cpp's
+OpenAI shim, NVIDIA NIMs, …). Provides reachability checks (online/offline) and
+a benchmark helper (transcript + elapsed seconds).
+"""
+
+from __future__ import annotations
+
+import json
+import socket
+import time
+import urllib.error
+import urllib.request
+import uuid
+from dataclasses import dataclass, field
+from pathlib import Path
+from urllib.parse import urlparse
+
+
+@dataclass
+class STTEngine:
+    name: str
+    type: str = "local"        # "local" | "openai"
+    url: str = ""              # base URL incl. /v1 for remote, e.g. http://localhost:8010/v1
+    model: str = ""            # remote model id, or local whisper size override
+    api_key_env: str = ""      # env var holding a bearer key (optional)
+
+    @property
+    def is_local(self) -> bool:
+        return self.type == "local"
+
+
+class STTError(RuntimeError):
+    pass
+
+
+# --- reachability ------------------------------------------------------------
+def reachable(url: str, timeout: float = 2.0) -> bool:
+    """True if a TCP connection to the URL's host:port succeeds."""
+    host, port = _host_port(url)
+    if not host:
+        return False
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def status(engine: STTEngine, timeout: float = 2.0) -> bool:
+    """True if the engine is usable now (local always; remote = TCP reachable)."""
+    if engine.is_local:
+        return True
+    return reachable(engine.url, timeout)
+
+
+def _host_port(url: str) -> tuple[str | None, int]:
+    try:
+        u = urlparse(url if "://" in url else "http://" + url)
+        port = u.port or (443 if u.scheme == "https" else 80)
+        return u.hostname, port
+    except ValueError:
+        return None, 0
+
+
+# --- transcription -----------------------------------------------------------
+def transcribe(
+    engine: STTEngine,
+    audio_path: Path,
+    *,
+    language: str = "",
+    hotwords: str = "",
+    local_transcriber=None,
+    timeout: int = 60,
+) -> str:
+    if engine.is_local:
+        if local_transcriber is None:
+            raise STTError("Local engine selected but the model isn't loaded.")
+        return local_transcriber.transcribe(audio_path, language=language, hotwords=hotwords)
+    return _transcribe_remote(engine, audio_path, language=language, prompt=hotwords, timeout=timeout)
+
+
+def _transcribe_remote(engine: STTEngine, audio_path: Path, *, language: str, prompt: str, timeout: int) -> str:
+    import os
+
+    base = engine.url.rstrip("/")
+    endpoint = base + "/audio/transcriptions"
+    fields = {"model": engine.model or "whisper-1", "response_format": "json"}
+    if language:
+        fields["language"] = language
+    if prompt:
+        fields["prompt"] = prompt
+
+    headers = {}
+    key = os.environ.get(engine.api_key_env) if engine.api_key_env else None
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+
+    body, content_type = _multipart(fields, audio_path)
+    headers["Content-Type"] = content_type
+    req = urllib.request.Request(endpoint, data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:300]
+        raise STTError(f"HTTP {exc.code} from {endpoint}: {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise STTError(f"Cannot reach {endpoint}: {exc.reason}") from exc
+
+    try:
+        return (json.loads(raw).get("text") or "").strip()
+    except json.JSONDecodeError:
+        return raw.strip()  # some servers return plain text
+
+
+def _multipart(fields: dict, audio_path: Path) -> tuple[bytes, str]:
+    boundary = uuid.uuid4().hex
+    nl = b"\r\n"
+    out = bytearray()
+    for k, v in fields.items():
+        out += b"--" + boundary.encode() + nl
+        out += f'Content-Disposition: form-data; name="{k}"'.encode() + nl + nl
+        out += str(v).encode() + nl
+    out += b"--" + boundary.encode() + nl
+    out += f'Content-Disposition: form-data; name="file"; filename="{audio_path.name}"'.encode() + nl
+    out += b"Content-Type: audio/wav" + nl + nl
+    out += audio_path.read_bytes() + nl
+    out += b"--" + boundary.encode() + b"--" + nl
+    return bytes(out), f"multipart/form-data; boundary={boundary}"
+
+
+# --- benchmark ---------------------------------------------------------------
+@dataclass
+class BenchResult:
+    engine: str
+    ok: bool
+    text: str = ""
+    seconds: float = 0.0
+    error: str = ""
+
+
+def benchmark(engine: STTEngine, audio_path: Path, *, language: str = "", local_transcriber=None) -> BenchResult:
+    t0 = time.perf_counter()
+    try:
+        text = transcribe(engine, audio_path, language=language, local_transcriber=local_transcriber)
+        return BenchResult(engine.name, True, text, time.perf_counter() - t0)
+    except Exception as exc:  # noqa: BLE001 - report any failure to the UI
+        return BenchResult(engine.name, False, "", time.perf_counter() - t0, str(exc))

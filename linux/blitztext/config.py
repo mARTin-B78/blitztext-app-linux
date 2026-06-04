@@ -7,6 +7,9 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .llm import LLMEngine
+from .stt import STTEngine
+
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "blitztext"
 CONFIG_PATH = CONFIG_DIR / "config.toml"
 
@@ -51,8 +54,30 @@ class Config:
     routing_hotkey: str = "<ctrl>+<alt>+<space>"
     routing_default: str = ""        # preset name used when no keyword matches; "" = first
     routing_threshold: float = 0.82
+    # speech-to-text engines (presets)
+    stt_engines: list[STTEngine] = field(default_factory=list)
+    stt_active: str = ""
+    # llm engines (presets) for the rewrite step
+    llm_engines: list[LLMEngine] = field(default_factory=list)
+    llm_active: str = ""
     # workflows
     workflows: list[Workflow] = field(default_factory=list)
+
+    @property
+    def active_stt(self) -> STTEngine:
+        e = next((x for x in self.stt_engines if x.name == self.stt_active), None)
+        if e:
+            return e
+        return self.stt_engines[0] if self.stt_engines else STTEngine("Local", "local", model=self.model)
+
+    @property
+    def active_llm(self) -> LLMEngine:
+        e = next((x for x in self.llm_engines if x.name == self.llm_active), None)
+        if e:
+            return e
+        if self.llm_engines:
+            return self.llm_engines[0]
+        return LLMEngine("Default", self.base_url, self.rewrite_model, self.api_key_env, self.temperature)
 
     def preset_by_name(self, name: str | None) -> "Workflow | None":
         if not name:
@@ -127,6 +152,32 @@ def load(path: Path = CONFIG_PATH) -> Config:
     if not cfg.workflows:
         raise ValueError(f"No [[workflow]] entries defined in {path}")
 
+    # STT engines (default: a single local faster-whisper engine).
+    cfg.stt_engines = [
+        STTEngine(
+            name=e["name"],
+            type=e.get("type", "local"),
+            url=e.get("url", "").rstrip("/"),
+            model=e.get("model", ""),
+            api_key_env=e.get("api_key_env", ""),
+        )
+        for e in data.get("stt_engine", [])
+    ] or [STTEngine("Local faster-whisper", "local", model=cfg.model)]
+    cfg.stt_active = data.get("stt", {}).get("active", cfg.stt_engines[0].name)
+
+    # LLM engines (default: synthesized from the legacy [rewrite] block).
+    cfg.llm_engines = [
+        LLMEngine(
+            name=e["name"],
+            url=e.get("url", "https://api.openai.com/v1").rstrip("/"),
+            model=e.get("model", "gpt-4o-mini"),
+            api_key_env=e.get("api_key_env", ""),
+            temperature=float(e.get("temperature", cfg.temperature)),
+        )
+        for e in data.get("llm_engine", [])
+    ] or [LLMEngine("Default", cfg.base_url, cfg.rewrite_model, cfg.api_key_env, cfg.temperature)]
+    cfg.llm_active = data.get("llm", {}).get("active", cfg.llm_engines[0].name)
+
     return cfg
 
 
@@ -164,6 +215,20 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "default": cfg.routing_default,
             "threshold": cfg.routing_threshold,
         },
+        "stt": {"active": cfg.stt_active},
+        "stt_engine": [
+            {k: v for k, v in {
+                "name": e.name, "type": e.type, "url": e.url,
+                "model": e.model, "api_key_env": e.api_key_env,
+            }.items() if v or k in ("name", "type")}
+            for e in cfg.stt_engines
+        ],
+        "llm": {"active": cfg.llm_active},
+        "llm_engine": [
+            {"name": e.name, "url": e.url, "model": e.model,
+             "api_key_env": e.api_key_env, "temperature": e.temperature}
+            for e in cfg.llm_engines
+        ],
         "workflow": [],
     }
     for wf in cfg.workflows:
@@ -234,6 +299,47 @@ enabled = true
 hotkey = "<ctrl>+<alt>+<space>"
 default = "Transcribe"   # preset used when no keyword is recognised
 threshold = 0.82         # 0..1 fuzzy-match strictness (higher = stricter)
+
+# ----------------------------------------------------------------------------
+# Speech-to-text engines (presets). The active one is used for transcription.
+#   type = "local"  -> in-process faster-whisper (uses [whisper] above)
+#   type = "openai" -> remote OpenAI-compatible /audio/transcriptions server
+#                      (faster-whisper-server, Groq, WhisperX, NIMs, ...)
+# ----------------------------------------------------------------------------
+[stt]
+active = "Local faster-whisper"
+
+[[stt_engine]]
+name = "Local faster-whisper"
+type = "local"
+
+# [[stt_engine]]
+# name = "faster-whisper-server"
+# type = "openai"
+# url = "http://localhost:8010/v1"
+# model = "Systran/faster-whisper-base"
+# api_key_env = ""            # e.g. GROQ_API_KEY for a cloud endpoint
+
+# ----------------------------------------------------------------------------
+# LLM engines (presets) for the rewrite step. Any OpenAI-compatible chat API
+# (OpenAI, vLLM, llama-swap, Ollama /v1, LM Studio, Groq, OpenRouter, ...).
+# ----------------------------------------------------------------------------
+[llm]
+active = "Default"
+
+[[llm_engine]]
+name = "Default"
+url = "https://api.openai.com/v1"
+model = "gpt-4o-mini"
+api_key_env = "OPENAI_API_KEY"
+temperature = 0.3
+
+# [[llm_engine]]
+# name = "Local llama-swap"
+# url = "http://localhost:28080/v1"
+# model = "Qwen3.5-4B"
+# api_key_env = ""
+# temperature = 0.3
 
 # ----------------------------------------------------------------------------
 # Workflows / presets. mode = "transcribe" types the raw transcript. mode =

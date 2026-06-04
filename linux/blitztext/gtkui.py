@@ -24,8 +24,8 @@ from .config import Config, load, save  # noqa: E402
 from .daemon import Daemon  # noqa: E402
 
 ICON_PATHS = [
-    "/usr/share/icons/hicolor/scalable/apps/blitztext.svg",
-    str(Path(__file__).resolve().parent.parent / "packaging" / "blitztext.svg"),
+    "/usr/share/icons/hicolor/256x256/apps/blitztext.png",
+    str(Path(__file__).resolve().parent.parent / "packaging" / "blitztext.png"),
 ]
 
 CSS = b"""

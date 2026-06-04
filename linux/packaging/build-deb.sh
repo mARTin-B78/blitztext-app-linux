@@ -52,8 +52,11 @@ exec /opt/blitztext/venv/bin/python -m blitztext "$@"
 EOF
 
 install -Dm644 "$HERE/$PKG.desktop"  "$ROOT/usr/share/applications/$PKG.desktop"
-install -Dm644 "$HERE/$PKG.svg"      "$ROOT/usr/share/icons/hicolor/scalable/apps/$PKG.svg"
 install -Dm644 "$HERE/copyright"     "$ROOT/usr/share/doc/$PKG/copyright"
+# App icon (extracted from the macOS AppIcon) at several hicolor sizes.
+for s in 32 48 64 128 256; do
+    install -Dm644 "$HERE/${PKG}_${s}.png" "$ROOT/usr/share/icons/hicolor/${s}x${s}/apps/${PKG}.png"
+done
 
 # 3) DEBIAN control + maintainer scripts ------------------------------------
 SIZE_KB="$(du -sk "$ROOT" | cut -f1)"
