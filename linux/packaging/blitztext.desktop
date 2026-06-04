@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Blitztext
+GenericName=Voice Dictation
+Comment=Speak and have the text typed into any field
+Exec=blitztext tray
+Icon=blitztext
+Terminal=false
+Categories=Utility;AudioVideo;Accessibility;
+Keywords=dictation;speech;voice;transcription;whisper;stt;
+StartupNotify=false

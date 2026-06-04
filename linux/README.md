@@ -37,6 +37,24 @@ transcribes, optionally rewrites, and types the result where your cursor is.
 
 ## Install
 
+### Option A — Debian package (recommended on Ubuntu/Debian)
+
+Build a `.deb` and install it with the Software app or apt:
+
+```bash
+cd linux
+bash packaging/build-deb.sh            # -> dist/blitztext_<ver>_arm64.deb
+sudo apt install ./dist/blitztext_*.deb   # or double-click the .deb in Files
+```
+
+This installs `blitztext` to `/opt/blitztext` (a self-contained bundle — no pip
+step), adds a **Blitztext** entry to your app grid, and pulls in the system deps
+(`python3-gi`, `xdotool`, `libnotify-bin`, a recorder). Launch it from the app
+grid, or run `blitztext` / `blitztext gui` from a terminal. Remove with
+`sudo apt remove blitztext`.
+
+### Option B — run from source (venv)
+
 ```bash
 cd linux
 ./install.sh
@@ -44,6 +62,11 @@ cd linux
 
 This creates `.venv`, installs `faster-whisper` + `pynput`, and writes the
 default config to `~/.config/blitztext/config.toml`.
+
+> For the **tray** from source, the venv must be built on a Python that can see
+> the system `python3-gi` — `install.sh` uses `python3 -m venv
+> --system-site-packages`, so use the system `/usr/bin/python3` (a conda/miniforge
+> Python won't see the apt-installed `gi`). The `.deb` handles this for you.
 
 ## Run
 
@@ -62,17 +85,18 @@ export OPENAI_API_KEY=sk-...
 
 The tray is the closest match to the macOS menu-bar app: a status icon with a
 menu listing every workflow (click to record), plus **Show panel**, **Settings…**,
-and **Quit**. It needs PyGObject once (the GTK/AppIndicator typelibs and the
-GNOME `ubuntu-appindicators` extension are already present here):
+and **Quit**. It needs PyGObject (`python3-gi`) and the GTK/AppIndicator
+typelibs — already present on a standard Ubuntu GNOME install (the `.deb`
+declares them as dependencies):
 
 ```bash
-sudo apt install python3-gi      # one-time; no build, just the bindings
+sudo apt install python3-gi      # usually already installed
 .venv/bin/python -m blitztext tray
 ```
 
-If PyGObject is missing, `tray` prints this hint and falls back to the window.
-(The venv is created with `--system-site-packages` so it can see the
-apt-installed `gi`.)
+If PyGObject isn't visible, `tray` prints this hint and falls back to the
+window. The venv is created with `--system-site-packages` so it can see the
+system `gi` — build it from `/usr/bin/python3`, not a conda/miniforge Python.
 
 Either way, focus any text field and trigger a workflow — by tray menu, panel
 button, or hotkey (defaults):
