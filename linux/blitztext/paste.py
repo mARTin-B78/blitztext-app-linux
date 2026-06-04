@@ -54,6 +54,15 @@ def deliver(text: str, *, mode: str = "type", window_id: str | None = None, type
     )
 
 
+def press_enter(window_id: str | None = None) -> None:
+    """Send Return to the focused/target window (auto-send after paste)."""
+    if not shutil.which("xdotool"):
+        return
+    _focus(window_id)
+    time.sleep(0.08)
+    subprocess.run(["xdotool", "key", "--clearmodifiers", "Return"], check=False)
+
+
 def _set_clipboard(text: str) -> bool:
     """Best-effort clipboard set; returns False if no clipboard tool is available."""
     for argv in (["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"], ["wl-copy"]):
