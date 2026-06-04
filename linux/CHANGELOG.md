@@ -9,6 +9,22 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-04
+
+### Added
+- **Debian package** (`packaging/build-deb.sh`) producing an installable
+  `blitztext_<ver>_arm64.deb` with a desktop entry, app icon, and a `blitztext`
+  launcher. Installs via the Software app or `apt install ./…deb`. Bundles a
+  relocatable venv with all Python deps (no pip/network at install) and declares
+  system deps (python3-gi, xdotool, libnotify-bin, a recorder) so they pull in
+  automatically. The bundled venv is built on the system `/usr/bin/python3`, so
+  the tray works out of the box.
+
+### Notes
+- `python3-gi` is already present on a standard Ubuntu GNOME install; the tray
+  only seemed unavailable from source when the project venv was built from a
+  non-system Python (e.g. conda/miniforge). The `.deb` avoids this entirely.
+
 ## [1.0.1] - 2026-06-03
 
 ### Changed
@@ -58,6 +74,7 @@ into that field.
   AppIndicator typelibs and GNOME `ubuntu-appindicators` extension are already
   present on the target host).
 
-[Unreleased]: https://github.com/mARTin-B78/blitztext-app/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/mARTin-B78/blitztext-app/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/mARTin-B78/blitztext-app/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/mARTin-B78/blitztext-app/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/mARTin-B78/blitztext-app/releases/tag/v1.0.0
