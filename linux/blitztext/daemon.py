@@ -88,7 +88,7 @@ class Daemon:
             if not self.ready or self._busy or self._recording is not None:
                 return
             self._target_window = active_window_id()
-            self._recording = Recording(self.recorder_name)
+            self._recording = Recording(self.recorder_name, self.cfg.mic)
             self._active_workflow = wf
         self._emit("recording", wf.name, "Recording…")
         self._notify(f"● {wf.name}", "Recording…")
