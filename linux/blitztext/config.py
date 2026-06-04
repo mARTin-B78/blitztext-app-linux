@@ -17,6 +17,8 @@ class Workflow:
     hotkey: str
     mode: str  # "transcribe" | "rewrite"
     prompt: str = ""
+    # Spoken trigger phrases for voice routing (matched at start/end of speech).
+    keywords: list[str] = field(default_factory=list)
     # Optional per-workflow overrides of the [rewrite] defaults.
     model: str | None = None
     temperature: float | None = None
@@ -44,8 +46,29 @@ class Config:
     rewrite_model: str = "gpt-4o-mini"
     temperature: float = 0.3
     timeout: int = 45
+    # voice-keyword routing
+    routing_enabled: bool = True
+    routing_hotkey: str = "<ctrl>+<alt>+<space>"
+    routing_default: str = ""        # preset name used when no keyword matches; "" = first
+    routing_threshold: float = 0.82
     # workflows
     workflows: list[Workflow] = field(default_factory=list)
+
+    def preset_by_name(self, name: str | None) -> "Workflow | None":
+        if not name:
+            return None
+        return next((w for w in self.workflows if w.name == name), None)
+
+    @property
+    def default_preset(self) -> "Workflow | None":
+        return self.preset_by_name(self.routing_default) or (self.workflows[0] if self.workflows else None)
+
+    @property
+    def all_keywords(self) -> list[str]:
+        out: list[str] = []
+        for w in self.workflows:
+            out.extend(w.keywords)
+        return out
 
     @property
     def api_key(self) -> str | None:
@@ -63,6 +86,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
     g = data.get("general", {})
     w = data.get("whisper", {})
     r = data.get("rewrite", {})
+    rt = data.get("routing", {})
 
     cfg = Config(
         recorder=g.get("recorder", "auto"),
@@ -79,15 +103,20 @@ def load(path: Path = CONFIG_PATH) -> Config:
         rewrite_model=r.get("model", "gpt-4o-mini"),
         temperature=float(r.get("temperature", 0.3)),
         timeout=int(r.get("timeout", 45)),
+        routing_enabled=bool(rt.get("enabled", True)),
+        routing_hotkey=rt.get("hotkey", "<ctrl>+<alt>+<space>"),
+        routing_default=rt.get("default", ""),
+        routing_threshold=float(rt.get("threshold", 0.82)),
     )
 
     for entry in data.get("workflow", []):
         cfg.workflows.append(
             Workflow(
                 name=entry["name"],
-                hotkey=entry["hotkey"],
+                hotkey=entry.get("hotkey", ""),
                 mode=entry.get("mode", "transcribe"),
                 prompt=entry.get("prompt", ""),
+                keywords=list(entry.get("keywords", [])),
                 model=entry.get("model"),
                 temperature=entry.get("temperature"),
                 description=entry.get("description", ""),
@@ -129,10 +158,18 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "temperature": cfg.temperature,
             "timeout": cfg.timeout,
         },
+        "routing": {
+            "enabled": cfg.routing_enabled,
+            "hotkey": cfg.routing_hotkey,
+            "default": cfg.routing_default,
+            "threshold": cfg.routing_threshold,
+        },
         "workflow": [],
     }
     for wf in cfg.workflows:
         entry: dict = {"name": wf.name, "hotkey": wf.hotkey, "mode": wf.mode}
+        if wf.keywords:
+            entry["keywords"] = wf.keywords
         if wf.prompt:
             entry["prompt"] = wf.prompt
         if wf.model:
@@ -189,25 +226,35 @@ model = "gpt-4o-mini"            # default model for rewrite workflows
 temperature = 0.3
 timeout = 45
 
+[routing]
+# Voice-keyword routing: ONE hotkey to dictate. Say a preset's keyword at the
+# START or END of your speech and that preset is applied; otherwise the default
+# preset is used. (Per-preset hotkeys below still work as direct shortcuts.)
+enabled = true
+hotkey = "<ctrl>+<alt>+<space>"
+default = "Transcribe"   # preset used when no keyword is recognised
+threshold = 0.82         # 0..1 fuzzy-match strictness (higher = stricter)
+
 # ----------------------------------------------------------------------------
-# Workflows. mode = "transcribe" types the raw transcript. mode = "rewrite"
-# sends the transcript through the LLM with `prompt` as the system prompt.
-# Any workflow may override the [rewrite] defaults with its own:
-#     model = "gpt-4o"
-#     temperature = 0.4
+# Workflows / presets. mode = "transcribe" types the raw transcript. mode =
+# "rewrite" sends it through the LLM with `prompt` as the system prompt.
+#   keywords = spoken trigger phrases for voice routing (start or end of speech)
+#   hotkey   = optional direct global hotkey ("" = none; voice routing is primary)
+# A workflow may override the [rewrite] defaults with its own model/temperature.
 # ----------------------------------------------------------------------------
 
 [[workflow]]
 name = "Transcribe"
 icon = "⚡"
 description = "Speak, get plain text."
-hotkey = "<ctrl>+<alt>+<space>"
+hotkey = ""
 mode = "transcribe"
 
 [[workflow]]
 name = "Nicer email"
 icon = "✉"
 description = "Rough notes → polished email."
+keywords = ["nicer email", "bessere email", "schöne mail"]
 hotkey = "<ctrl>+<alt>+e"
 mode = "rewrite"
 prompt = '''Du bist ein Schreibassistent fuer E-Mails. Du erhaeltst ein gesprochenes Transkript.
@@ -223,6 +270,7 @@ Schreibe daraus eine freundliche, gut formulierte und etwas ausfuehrlichere E-Ma
 name = "Improve text"
 icon = "✨"
 description = "Speak → cleaner writing."
+keywords = ["improve text", "verbessere text", "bessere schreibweise"]
 hotkey = "<ctrl>+<alt>+i"
 mode = "rewrite"
 prompt = '''Du bist ein Lektor und Schreibassistent. Verbessere den folgenden gesprochenen Text:
@@ -235,6 +283,7 @@ prompt = '''Du bist ein Lektor und Schreibassistent. Verbessere den folgenden ge
 name = "Calm down"
 icon = "☺"
 description = "Frustrated in → calm out."
+keywords = ["calm down", "beruhige das", "entspannte nachricht"]
 hotkey = "<ctrl>+<alt>+c"
 mode = "rewrite"
 prompt = '''Du erhaeltst ein gesprochenes, frustriertes oder veraergertes Transkript.
@@ -246,6 +295,7 @@ Gib NUR die umformulierte Nachricht zurueck, keine Erklaerungen.'''
 name = "Add emojis"
 icon = "✿"
 description = "Text in → emojis out."
+keywords = ["add emojis", "mit emojis", "emojis dazu"]
 hotkey = "<ctrl>+<alt>+j"
 mode = "rewrite"
 prompt = '''Du erhaeltst ein gesprochenes Transkript. Gib den Text moeglichst originalgetreu

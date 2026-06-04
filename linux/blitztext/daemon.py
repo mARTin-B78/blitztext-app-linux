@@ -1,7 +1,8 @@
 """Hotkey-driven engine: toggle recording per workflow, then transcribe + deliver.
 
-Used by both the headless CLI (`run`) and the tkinter GUI. A status callback
-lets the GUI reflect each phase; desktop notifications fire regardless.
+Used by the headless CLI (`run`) and the GTK GUI. A status callback lets the UI
+reflect each phase; desktop notifications fire regardless. Supports voice-keyword
+routing: one hotkey records, then the spoken keyword selects the preset.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from .notify import notify
 from .paste import active_window_id, deliver
 from .recorder import Recording, detect_recorder
 from .rewrite import RewriteError, rewrite
+from .routing import route
 from .transcribe import Transcriber
 
 # status_cb(state, workflow_name, message)
@@ -32,6 +34,8 @@ class Daemon:
         self._target_window: str | None = None
         self._busy = False
         self._listener = None
+        # Synthetic preset used by the voice-routing hotkey.
+        self._route_workflow = Workflow(name="Voice", hotkey=cfg.routing_hotkey, mode="route")
 
         self.recorder_name = detect_recorder(cfg.recorder)
         self.transcriber: Transcriber | None = None
@@ -96,33 +100,55 @@ class Daemon:
 
     # -- worker ---------------------------------------------------------------
     def _process(self, audio_path, workflow: Workflow, window_id) -> None:
+        label = workflow.name
         try:
-            self._emit("busy", workflow.name, "Transcribing…")
-            self._notify(f"⌛ {workflow.name}", "Transcribing…")
-            text = self.transcriber.transcribe(audio_path, language=self.cfg.language)
+            self._emit("busy", label, "Transcribing…")
+            self._notify(f"⌛ {label}", "Transcribing…")
+            hotwords = ", ".join(self.cfg.all_keywords) if workflow.mode == "route" else ""
+            text = self.transcriber.transcribe(audio_path, language=self.cfg.language, hotwords=hotwords)
 
             if not text:
-                self._emit("idle", workflow.name, "No speech detected")
+                self._emit("idle", label, "No speech detected")
                 self._notify("Nothing heard", "No speech detected.", "low")
                 return
 
-            if workflow.mode == "rewrite" and workflow.prompt:
-                self._emit("busy", workflow.name, "Rewriting…")
-                self._notify(f"⌛ {workflow.name}", "Rewriting…")
+            # Voice routing: pick the preset from a spoken keyword, strip it.
+            if workflow.mode == "route":
+                res = route(text, self.cfg.workflows, threshold=self.cfg.routing_threshold)
+                target = self.cfg.preset_by_name(res.preset_name) or self.cfg.default_preset
+                text = res.text
+                label = target.name if target else "Transcribe"
+                via = f"“{res.keyword}”" if res.keyword else "default"
+                self._emit("busy", label, f"→ {label} ({via})")
+                self._notify(f"🎙 {label}", f"matched: {via}")
+            else:
+                target = workflow
+
+            if target and target.mode == "rewrite" and target.prompt:
+                if not text:
+                    self._emit("idle", label, "Only a keyword heard")
+                    self._notify("Nothing to do", "Only the keyword was heard.", "low")
+                    return
+                self._emit("busy", label, "Rewriting…")
+                self._notify(f"⌛ {label}", "Rewriting…")
                 try:
                     text = rewrite(
                         text,
-                        workflow.prompt,
+                        target.prompt,
                         base_url=self.cfg.base_url,
                         api_key=self.cfg.api_key,
-                        model=workflow.model or self.cfg.rewrite_model,
-                        temperature=workflow.temperature if workflow.temperature is not None else self.cfg.temperature,
+                        model=target.model or self.cfg.rewrite_model,
+                        temperature=target.temperature if target.temperature is not None else self.cfg.temperature,
                         timeout=self.cfg.timeout,
                     )
                 except RewriteError as exc:
-                    self._emit("error", workflow.name, str(exc))
+                    self._emit("error", label, str(exc))
                     self._notify("Rewrite failed", str(exc), "critical")
                     return
+
+            if not text:
+                self._emit("idle", label, "Nothing to type")
+                return
 
             deliver(
                 text,
@@ -130,10 +156,10 @@ class Daemon:
                 window_id=window_id,
                 type_delay_ms=self.cfg.type_delay_ms,
             )
-            self._emit("done", workflow.name, text)
-            self._notify(f"✓ {workflow.name}", text[:80] + ("…" if len(text) > 80 else ""))
+            self._emit("done", label, text)
+            self._notify(f"✓ {label}", text[:80] + ("…" if len(text) > 80 else ""))
         except Exception as exc:  # noqa: BLE001 - surface any failure
-            self._emit("error", workflow.name, str(exc))
+            self._emit("error", label, str(exc))
             self._notify("Error", str(exc), "critical")
             print(f"[blitztext] error: {exc}", file=sys.stderr)
         finally:
@@ -143,12 +169,21 @@ class Daemon:
             self._emit("idle", None, "Ready")
 
     # -- hotkeys --------------------------------------------------------------
+    def _build_mapping(self) -> dict:
+        """hotkey -> callback, skipping empty hotkeys, plus the routing hotkey."""
+        mapping: dict = {}
+        for wf in self.cfg.workflows:
+            if wf.hotkey:
+                mapping[wf.hotkey] = (lambda wf=wf: self.toggle(wf))
+        if self.cfg.routing_enabled and self.cfg.routing_hotkey:
+            mapping[self.cfg.routing_hotkey] = (lambda: self.toggle(self._route_workflow))
+        return mapping
+
     def start_hotkeys(self):
         """Register global hotkeys non-blocking; returns the pynput listener."""
         from pynput import keyboard
 
-        mapping = {wf.hotkey: (lambda wf=wf: self.toggle(wf)) for wf in self.cfg.workflows}
-        self._listener = keyboard.GlobalHotKeys(mapping)
+        self._listener = keyboard.GlobalHotKeys(self._build_mapping())
         self._listener.start()
         return self._listener
 
@@ -160,12 +195,12 @@ class Daemon:
     # -- headless run loop ----------------------------------------------------
     def run(self) -> None:
         self.prepare()
-        lines = "\n".join(f"  {wf.hotkey}  →  {wf.name}" for wf in self.cfg.workflows)
-        print(f"[blitztext] ready. Recorder: {self.recorder_name}. Hotkeys:\n{lines}", file=sys.stderr)
+        lines = [f"  {self.cfg.routing_hotkey}  →  Voice routing (speak a keyword)"] if self.cfg.routing_enabled else []
+        lines += [f"  {wf.hotkey}  →  {wf.name}" for wf in self.cfg.workflows if wf.hotkey]
+        print(f"[blitztext] ready. Recorder: {self.recorder_name}. Hotkeys:\n" + "\n".join(lines), file=sys.stderr)
         self._notify("Blitztext ready", "Focus a text field and press a hotkey.")
 
         from pynput import keyboard
 
-        mapping = {wf.hotkey: (lambda wf=wf: self.toggle(wf)) for wf in self.cfg.workflows}
-        with keyboard.GlobalHotKeys(mapping) as listener:
+        with keyboard.GlobalHotKeys(self._build_mapping()) as listener:
             listener.join()
