@@ -11,11 +11,12 @@ import sys
 import threading
 from typing import Callable
 
+from . import llm, stt
 from .config import Config, Workflow
+from .llm import LLMError
 from .notify import notify
 from .paste import active_window_id, deliver
 from .recorder import Recording, detect_recorder
-from .rewrite import RewriteError, rewrite
 from .routing import route
 from .transcribe import Transcriber
 
@@ -33,6 +34,7 @@ class Daemon:
         self._active_workflow: Workflow | None = None
         self._target_window: str | None = None
         self._busy = False
+        self._prepared = False
         self._listener = None
         # Synthetic preset used by the voice-routing hotkey.
         self._route_workflow = Workflow(name="Voice", hotkey=cfg.routing_hotkey, mode="route")
@@ -53,19 +55,27 @@ class Daemon:
 
     # -- model load (slow; call off the UI thread) ----------------------------
     def prepare(self) -> None:
-        self._emit("loading", None, f"Loading Whisper '{self.cfg.model}'…")
-        self._notify("Loading model…", f"Whisper '{self.cfg.model}' ({self.cfg.device})")
-        self.transcriber = Transcriber(
-            model=self.cfg.model,
-            device=self.cfg.device,
-            compute_type=self.cfg.compute_type,
-            beam_size=self.cfg.beam_size,
-        )
+        engine = self.cfg.active_stt
+        if engine.is_local:
+            model = engine.model or self.cfg.model
+            self._emit("loading", None, f"Loading Whisper '{model}'…")
+            self._notify("Loading model…", f"Whisper '{model}' ({self.cfg.device})")
+            self.transcriber = Transcriber(
+                model=model,
+                device=self.cfg.device,
+                compute_type=self.cfg.compute_type,
+                beam_size=self.cfg.beam_size,
+            )
+        else:
+            # Remote STT engine — no local model to load.
+            self.transcriber = None
+            self._emit("loading", None, f"Using {engine.name}")
+        self._prepared = True
         self._emit("idle", None, "Ready")
 
     @property
     def ready(self) -> bool:
-        return self.transcriber is not None
+        return getattr(self, "_prepared", False)
 
     @property
     def is_recording(self) -> bool:
@@ -105,7 +115,14 @@ class Daemon:
             self._emit("busy", label, "Transcribing…")
             self._notify(f"⌛ {label}", "Transcribing…")
             hotwords = ", ".join(self.cfg.all_keywords) if workflow.mode == "route" else ""
-            text = self.transcriber.transcribe(audio_path, language=self.cfg.language, hotwords=hotwords)
+            text = stt.transcribe(
+                self.cfg.active_stt,
+                audio_path,
+                language=self.cfg.language,
+                hotwords=hotwords,
+                local_transcriber=self.transcriber,
+                timeout=self.cfg.timeout,
+            )
 
             if not text:
                 self._emit("idle", label, "No speech detected")
@@ -132,16 +149,15 @@ class Daemon:
                 self._emit("busy", label, "Rewriting…")
                 self._notify(f"⌛ {label}", "Rewriting…")
                 try:
-                    text = rewrite(
-                        text,
+                    text = llm.chat(
+                        self.cfg.active_llm,
                         target.prompt,
-                        base_url=self.cfg.base_url,
-                        api_key=self.cfg.api_key,
-                        model=target.model or self.cfg.rewrite_model,
-                        temperature=target.temperature if target.temperature is not None else self.cfg.temperature,
+                        text,
+                        model=target.model or None,
+                        temperature=target.temperature,
                         timeout=self.cfg.timeout,
                     )
-                except RewriteError as exc:
+                except LLMError as exc:
                     self._emit("error", label, str(exc))
                     self._notify("Rewrite failed", str(exc), "critical")
                     return
