@@ -49,11 +49,15 @@ class Transcriber:
                     print(f"[blitztext] {dev} unavailable ({exc}); trying next device", file=sys.stderr)
         raise RuntimeError(f"Failed to load Whisper model '{model}': {last_err}")
 
-    def transcribe(self, audio_path: Path, language: str = "") -> str:
-        segments, _info = self._model.transcribe(
-            str(audio_path),
-            language=language or None,
-            beam_size=self.beam_size,
-            vad_filter=True,
-        )
+    def transcribe(self, audio_path: Path, language: str = "", hotwords: str = "") -> str:
+        kwargs = dict(language=language or None, beam_size=self.beam_size, vad_filter=True)
+        if hotwords:
+            # Bias recognition toward the routing keywords so they transcribe
+            # reliably. Older faster-whisper builds lack `hotwords`; fall back.
+            kwargs["hotwords"] = hotwords
+        try:
+            segments, _info = self._model.transcribe(str(audio_path), **kwargs)
+        except TypeError:
+            kwargs.pop("hotwords", None)
+            segments, _info = self._model.transcribe(str(audio_path), **kwargs)
         return " ".join(seg.text.strip() for seg in segments).strip()
