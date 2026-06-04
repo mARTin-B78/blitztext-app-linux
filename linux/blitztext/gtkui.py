@@ -256,7 +256,7 @@ class App:
     def open_settings(self) -> None:
         from .gtksettings import SettingsDialog
 
-        SettingsDialog(self.win, self.cfg).run_dialog()
+        SettingsDialog(self.win, self.cfg, daemon=self.daemon).run_dialog()
 
     def show_panel(self) -> None:
         self.win.show_all()

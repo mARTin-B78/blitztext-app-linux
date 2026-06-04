@@ -19,6 +19,13 @@ _RECORDERS: dict[str, list[str]] = {
     "arecord": ["arecord", "-q", "-f", "S16_LE", "-r", "16000", "-c", "1", "-t", "wav"],
 }
 
+# How to point each recorder at a specific pactl/pipewire source.
+_DEVICE_FLAG: dict[str, list[str]] = {
+    "pw-record": ["--target"],
+    "parecord": ["-d"],
+    "arecord": [],  # ALSA names differ from pactl; fall back to default device
+}
+
 
 def detect_recorder(preference: str = "auto") -> str:
     if preference != "auto":
@@ -34,9 +41,13 @@ def detect_recorder(preference: str = "auto") -> str:
 class Recording:
     """A single in-progress recording. Start on construction, call stop()."""
 
-    def __init__(self, recorder: str):
+    def __init__(self, recorder: str, device: str = ""):
         self._tmp = Path(tempfile.mkstemp(prefix="blitztext-", suffix=".wav")[1])
-        argv = list(_RECORDERS[recorder]) + [str(self._tmp)]
+        argv = list(_RECORDERS[recorder])
+        flag = _DEVICE_FLAG.get(recorder, [])
+        if device and flag:
+            argv += flag + [device]
+        argv += [str(self._tmp)]
         # arecord writes to the file given as a positional arg; the others too.
         self._proc = subprocess.Popen(
             argv,

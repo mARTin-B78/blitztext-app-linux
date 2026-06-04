@@ -34,6 +34,7 @@ class Workflow:
 class Config:
     # general
     recorder: str = "auto"
+    mic: str = ""                 # pactl/pipewire source name; "" = default device
     output: str = "type"          # type | paste
     type_delay_ms: int = 12
     notify: bool = True
@@ -129,6 +130,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
 
     cfg = Config(
         recorder=g.get("recorder", "auto"),
+        mic=g.get("mic", ""),
         output=g.get("output", "type"),
         type_delay_ms=int(g.get("type_delay_ms", 4)),
         notify=bool(g.get("notify", True)),
@@ -215,6 +217,7 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
     data: dict = {
         "general": {
             "recorder": cfg.recorder,
+            "mic": cfg.mic,
             "output": cfg.output,
             "type_delay_ms": cfg.type_delay_ms,
             "notify": cfg.notify,
