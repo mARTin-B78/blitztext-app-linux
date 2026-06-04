@@ -45,6 +45,11 @@ class Config:
     key_stop: str = "<ctrl>"          # stop -> paste
     key_send: str = "<alt>"           # stop -> paste -> Enter
     key_cancel: str = "<esc>"         # discard
+    # quality gate
+    min_speech_seconds: float = 0.4
+    silence_rms: float = 150.0
+    reject_hallucinations: bool = True
+    strip_trailing_punctuation: bool = False
     # whisper
     model: str = "small"
     device: str = "auto"          # auto | cuda | cpu
@@ -120,6 +125,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
     r = data.get("rewrite", {})
     rt = data.get("routing", {})
     inp = data.get("input", {})
+    q = data.get("quality", {})
 
     cfg = Config(
         recorder=g.get("recorder", "auto"),
@@ -146,6 +152,10 @@ def load(path: Path = CONFIG_PATH) -> Config:
         key_stop=inp.get("stop", "<ctrl>"),
         key_send=inp.get("send", "<alt>"),
         key_cancel=inp.get("cancel", "<esc>"),
+        min_speech_seconds=float(q.get("min_speech_seconds", 0.4)),
+        silence_rms=float(q.get("silence_rms", 150.0)),
+        reject_hallucinations=bool(q.get("reject_hallucinations", True)),
+        strip_trailing_punctuation=bool(q.get("strip_trailing_punctuation", False)),
     )
 
     for entry in data.get("workflow", []):
@@ -237,6 +247,12 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "default": cfg.routing_default,
             "threshold": cfg.routing_threshold,
         },
+        "quality": {
+            "min_speech_seconds": cfg.min_speech_seconds,
+            "silence_rms": cfg.silence_rms,
+            "reject_hallucinations": cfg.reject_hallucinations,
+            "strip_trailing_punctuation": cfg.strip_trailing_punctuation,
+        },
         "stt": {"active": cfg.stt_active},
         "stt_engine": [
             {k: v for k, v in {
@@ -305,6 +321,14 @@ start = "<ctrl>+<cmd>"   # <cmd> = the Super/Windows key
 stop = "<ctrl>"
 send = "<alt>"
 cancel = "<esc>"
+
+[quality]
+# Reject silence/too-short clips and the stock phrases Whisper invents on
+# silence (e.g. "Thank you.", "Untertitel ...") so you don't paste garbage.
+min_speech_seconds = 0.4         # discard clips shorter than this
+silence_rms = 150.0              # discard clips quieter than this RMS (0..32767)
+reject_hallucinations = true
+strip_trailing_punctuation = false
 
 [whisper]
 model = "small"          # tiny | base | small | medium | large-v3, or a local path

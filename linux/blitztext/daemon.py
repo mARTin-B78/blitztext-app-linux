@@ -11,7 +11,7 @@ import sys
 import threading
 from typing import Callable
 
-from . import llm, stt
+from . import llm, quality, stt
 from .config import Config, Workflow
 from .llm import LLMError
 from .notify import notify
@@ -134,6 +134,15 @@ class Daemon:
     def _process(self, audio_path, workflow: Workflow, window_id, send_enter: bool = False) -> None:
         label = workflow.name
         try:
+            # Quality gate: drop silent / too-short clips before we even transcribe.
+            duration, rms = quality.analyze_wav(audio_path)
+            if quality.too_quiet(duration, rms,
+                                 min_seconds=self.cfg.min_speech_seconds,
+                                 silence_rms=self.cfg.silence_rms):
+                self._emit("idle", label, "Too quiet")
+                self._notify("Nothing heard", "No speech detected.", "low")
+                return
+
             self._emit("busy", label, "Transcribing…")
             self._notify(f"⌛ {label}", "Transcribing…")
             hotwords = ", ".join(self.cfg.all_keywords) if workflow.mode == "route" else ""
@@ -146,7 +155,8 @@ class Daemon:
                 timeout=self.cfg.timeout,
             )
 
-            if not text:
+            text = quality.clean(text, strip_trailing_punctuation=self.cfg.strip_trailing_punctuation)
+            if not text or (self.cfg.reject_hallucinations and quality.is_hallucination(text, duration)):
                 self._emit("idle", label, "No speech detected")
                 self._notify("Nothing heard", "No speech detected.", "low")
                 return
