@@ -71,7 +71,7 @@ class Tray:
         self._build_menu()
 
     def _build_menu(self) -> None:
-        from .gui import pretty_hotkey
+        from .gtkui import pretty_hotkey
 
         Gtk = self._Gtk
         menu = Gtk.Menu()

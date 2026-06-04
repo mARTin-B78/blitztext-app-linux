@@ -31,7 +31,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if cmd in ("gui", "tray"):
         ensure_default(CONFIG_PATH)
-        from .gui import run_gui
+        from .gtkui import run_gui
 
         return run_gui(tray_mode=(cmd == "tray"))
 
