@@ -1,0 +1,255 @@
+"""Configuration loading and the default config template."""
+
+from __future__ import annotations
+
+import os
+import tomllib
+from dataclasses import dataclass, field
+from pathlib import Path
+
+CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "blitztext"
+CONFIG_PATH = CONFIG_DIR / "config.toml"
+
+
+@dataclass
+class Workflow:
+    name: str
+    hotkey: str
+    mode: str  # "transcribe" | "rewrite"
+    prompt: str = ""
+    # Optional per-workflow overrides of the [rewrite] defaults.
+    model: str | None = None
+    temperature: float | None = None
+    # Cosmetic, used by the GUI.
+    description: str = ""
+    icon: str = "⚡"
+
+
+@dataclass
+class Config:
+    # general
+    recorder: str = "auto"
+    output: str = "type"          # type | paste
+    type_delay_ms: int = 12
+    notify: bool = True
+    language: str = "de"          # whisper hint; "" = autodetect
+    # whisper
+    model: str = "small"
+    device: str = "auto"          # auto | cuda | cpu
+    compute_type: str = "auto"    # auto | int8 | float16 | int8_float16
+    beam_size: int = 5
+    # rewrite (OpenAI-compatible)
+    base_url: str = "https://api.openai.com/v1"
+    api_key_env: str = "OPENAI_API_KEY"
+    rewrite_model: str = "gpt-4o-mini"
+    temperature: float = 0.3
+    timeout: int = 45
+    # workflows
+    workflows: list[Workflow] = field(default_factory=list)
+
+    @property
+    def api_key(self) -> str | None:
+        return os.environ.get(self.api_key_env) or None
+
+
+def load(path: Path = CONFIG_PATH) -> Config:
+    """Load config from TOML, creating a default file on first run."""
+    if not path.exists():
+        ensure_default(path)
+
+    with path.open("rb") as fh:
+        data = tomllib.load(fh)
+
+    g = data.get("general", {})
+    w = data.get("whisper", {})
+    r = data.get("rewrite", {})
+
+    cfg = Config(
+        recorder=g.get("recorder", "auto"),
+        output=g.get("output", "type"),
+        type_delay_ms=int(g.get("type_delay_ms", 4)),
+        notify=bool(g.get("notify", True)),
+        language=g.get("language", "de"),
+        model=w.get("model", "small"),
+        device=w.get("device", "auto"),
+        compute_type=w.get("compute_type", "auto"),
+        beam_size=int(w.get("beam_size", 5)),
+        base_url=r.get("base_url", "https://api.openai.com/v1").rstrip("/"),
+        api_key_env=r.get("api_key_env", "OPENAI_API_KEY"),
+        rewrite_model=r.get("model", "gpt-4o-mini"),
+        temperature=float(r.get("temperature", 0.3)),
+        timeout=int(r.get("timeout", 45)),
+    )
+
+    for entry in data.get("workflow", []):
+        cfg.workflows.append(
+            Workflow(
+                name=entry["name"],
+                hotkey=entry["hotkey"],
+                mode=entry.get("mode", "transcribe"),
+                prompt=entry.get("prompt", ""),
+                model=entry.get("model"),
+                temperature=entry.get("temperature"),
+                description=entry.get("description", ""),
+                icon=entry.get("icon", "⚡"),
+            )
+        )
+
+    if not cfg.workflows:
+        raise ValueError(f"No [[workflow]] entries defined in {path}")
+
+    return cfg
+
+
+def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
+    """Write the config back to TOML (used by the settings UI).
+
+    Note: inline comments from the template are not preserved on save.
+    """
+    import tomli_w
+
+    data: dict = {
+        "general": {
+            "recorder": cfg.recorder,
+            "output": cfg.output,
+            "type_delay_ms": cfg.type_delay_ms,
+            "notify": cfg.notify,
+            "language": cfg.language,
+        },
+        "whisper": {
+            "model": cfg.model,
+            "device": cfg.device,
+            "compute_type": cfg.compute_type,
+            "beam_size": cfg.beam_size,
+        },
+        "rewrite": {
+            "base_url": cfg.base_url,
+            "api_key_env": cfg.api_key_env,
+            "model": cfg.rewrite_model,
+            "temperature": cfg.temperature,
+            "timeout": cfg.timeout,
+        },
+        "workflow": [],
+    }
+    for wf in cfg.workflows:
+        entry: dict = {"name": wf.name, "hotkey": wf.hotkey, "mode": wf.mode}
+        if wf.prompt:
+            entry["prompt"] = wf.prompt
+        if wf.model:
+            entry["model"] = wf.model
+        if wf.temperature is not None:
+            entry["temperature"] = wf.temperature
+        if wf.description:
+            entry["description"] = wf.description
+        if wf.icon and wf.icon != "⚡":
+            entry["icon"] = wf.icon
+        data["workflow"].append(entry)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as fh:
+        tomli_w.dump(data, fh)
+
+
+def ensure_default(path: Path = CONFIG_PATH) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_text(DEFAULT_CONFIG, encoding="utf-8")
+    return path
+
+
+# Hotkey syntax is pynput's GlobalHotKeys format, e.g. "<ctrl>+<alt>+space".
+DEFAULT_CONFIG = """\
+# Blitztext for Linux — configuration
+# Hotkey format follows pynput: <ctrl> <alt> <shift> <cmd> + a letter/keyname.
+# Each hotkey TOGGLES recording: press to start speaking, press again to finish.
+
+[general]
+recorder = "auto"        # auto | pw-record | parecord | arecord
+output = "type"          # "type" = xdotool types it; "paste" = clipboard + Ctrl+V
+type_delay_ms = 12       # per-keystroke delay for xdotool type (raise if chars drop)
+notify = true            # desktop notifications for each phase
+language = "de"          # Whisper language hint; "" = autodetect
+
+[whisper]
+model = "small"          # tiny | base | small | medium | large-v3, or a local path
+device = "auto"          # auto | cuda | cpu  (auto tries cuda, falls back to cpu)
+compute_type = "auto"    # auto | int8 | float16 | int8_float16
+beam_size = 5
+
+[rewrite]
+# OpenAI-compatible chat endpoint. Define your own provider/API/model here.
+# Point base_url at OpenAI, OR any local server that speaks the OpenAI chat API
+# (vLLM, llama-swap, Ollama's /v1, LM Studio, ...). Examples:
+#   base_url = "https://api.openai.com/v1"          (OpenAI)
+#   base_url = "http://localhost:8000/v1"           (local vLLM / llama-swap)
+# api_key_env names the ENV VAR holding the key (local servers often ignore it).
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+model = "gpt-4o-mini"            # default model for rewrite workflows
+temperature = 0.3
+timeout = 45
+
+# ----------------------------------------------------------------------------
+# Workflows. mode = "transcribe" types the raw transcript. mode = "rewrite"
+# sends the transcript through the LLM with `prompt` as the system prompt.
+# Any workflow may override the [rewrite] defaults with its own:
+#     model = "gpt-4o"
+#     temperature = 0.4
+# ----------------------------------------------------------------------------
+
+[[workflow]]
+name = "Transcribe"
+icon = "⚡"
+description = "Speak, get plain text."
+hotkey = "<ctrl>+<alt>+<space>"
+mode = "transcribe"
+
+[[workflow]]
+name = "Nicer email"
+icon = "✉"
+description = "Rough notes → polished email."
+hotkey = "<ctrl>+<alt>+e"
+mode = "rewrite"
+prompt = '''Du bist ein Schreibassistent fuer E-Mails. Du erhaeltst ein gesprochenes Transkript.
+Schreibe daraus eine freundliche, gut formulierte und etwas ausfuehrlichere E-Mail:
+- Korrigiere Rechtschreibung und Grammatik
+- Formuliere hoeflich, klar und professionell
+- Ergaenze sinnvolle Hoeflichkeitsfloskeln (Anrede/Gruss), wenn passend
+- Behalte die urspruengliche Aussage und Absicht bei, erfinde keine Fakten
+- Antworte in der Sprache des Transkripts
+- Gib NUR den E-Mail-Text zurueck, keine Erklaerungen'''
+
+[[workflow]]
+name = "Improve text"
+icon = "✨"
+description = "Speak → cleaner writing."
+hotkey = "<ctrl>+<alt>+i"
+mode = "rewrite"
+prompt = '''Du bist ein Lektor und Schreibassistent. Verbessere den folgenden gesprochenen Text:
+- Korrigiere Rechtschreibung und Grammatik
+- Verbessere Formulierung und Lesefluss, behalte die Bedeutung bei
+- Antworte in der Sprache des Transkripts
+- Gib NUR den verbesserten Text zurueck, keine Erklaerungen'''
+
+[[workflow]]
+name = "Calm down"
+icon = "☺"
+description = "Frustrated in → calm out."
+hotkey = "<ctrl>+<alt>+c"
+mode = "rewrite"
+prompt = '''Du erhaeltst ein gesprochenes, frustriertes oder veraergertes Transkript.
+Formuliere es in eine ruhige, sachliche und hoefliche Nachricht um, die dasselbe
+Anliegen professionell vermittelt. Antworte in der Sprache des Transkripts.
+Gib NUR die umformulierte Nachricht zurueck, keine Erklaerungen.'''
+
+[[workflow]]
+name = "Add emojis"
+icon = "✿"
+description = "Text in → emojis out."
+hotkey = "<ctrl>+<alt>+j"
+mode = "rewrite"
+prompt = '''Du erhaeltst ein gesprochenes Transkript. Gib den Text moeglichst originalgetreu
+zurueck, fuege aber regelmaessig passende Emojis ein (etwa alle 1-2 Saetze).
+Korrigiere offensichtliche Fehler, behalte Stil und Bedeutung bei.
+Gib NUR den Text mit Emojis zurueck, keine Erklaerungen.'''
+"""
