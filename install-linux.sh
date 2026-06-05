@@ -22,7 +22,7 @@
 set -euo pipefail
 
 REPO="https://github.com/mARTin-B78/blitztext-app-linux.git"
-BRANCH="main"
+BRANCH="${BRANCH:-main}"
 
 # --- helpers ----------------------------------------------------------------
 info()  { echo -e "\033[1;34m==>\033[0m \033[1m$*\033[0m"; }
