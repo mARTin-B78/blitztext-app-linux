@@ -70,29 +70,14 @@ class WakewordListener:
             audio_start = {"type": "audio-start", "data": {"rate": 16000, "width": 2, "channels": 1}}
             sock.sendall((json.dumps(audio_start) + "\n").encode("utf-8"))
 
-            # Start recording subprocess (16kHz, 16-bit, mono)
-            cmd = ["pw-record", "--rate=16000", "--channels=1", "--format=s16", "-"]
-            if self.mic:
-                cmd.extend(["--target", self.mic])
+            # Start reading thread
+            read_active = True
             
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-            
-            try:
-                sock.settimeout(1.0)
-                while not self._stop_event.is_set() and proc.poll() is None:
-                    # Read chunk
-                    chunk = proc.stdout.read(3200) # 100ms of 16kHz 16-bit mono
-                    if not chunk:
-                        break
-                    
-                    # Send chunk
-                    header = {"type": "audio-chunk", "data": {"rate": 16000, "width": 2, "channels": 1}, "payload_length": len(chunk)}
-                    sock.sendall((json.dumps(header) + "\n").encode("utf-8"))
-                    sock.sendall(chunk)
-
-                    # Check for responses (detections)
-                    try:
-                        while True:
+            def read_loop():
+                try:
+                    sock.settimeout(1.0)
+                    while read_active and not self._stop_event.is_set():
+                        try:
                             # Read line
                             line = b""
                             while not line.endswith(b"\n"):
@@ -118,15 +103,40 @@ class WakewordListener:
                                     if not received:
                                         break
                                     remaining -= len(received)
+                        except socket.timeout:
+                            pass
+                except Exception:
+                    pass
+            
+            reader_thread = threading.Thread(target=read_loop, daemon=True)
+            reader_thread.start()
 
-                    except socket.timeout:
-                        pass # No messages received, continue streaming
+            # Start recording subprocess (16kHz, 16-bit, mono)
+            cmd = ["pw-record", "--rate=16000", "--channels=1", "--format=s16", "-"]
+            if self.mic:
+                cmd.extend(["--target", self.mic])
+            
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            
+            try:
+                while not self._stop_event.is_set() and proc.poll() is None:
+                    # Read chunk
+                    chunk = proc.stdout.read(3200) # 100ms of 16kHz 16-bit mono
+                    if not chunk:
+                        break
+                    
+                    # Send chunk
+                    header = {"type": "audio-chunk", "data": {"rate": 16000, "width": 2, "channels": 1}, "payload_length": len(chunk)}
+                    sock.sendall((json.dumps(header) + "\n").encode("utf-8"))
+                    sock.sendall(chunk)
             finally:
+                read_active = False
                 proc.terminate()
                 try:
                     proc.wait(timeout=1.0)
                 except subprocess.TimeoutExpired:
                     proc.kill()
+                reader_thread.join(timeout=1.0)
 
     def _handle_detection(self):
         if time.time() < self._cooldown_until:
