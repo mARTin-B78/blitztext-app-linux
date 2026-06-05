@@ -344,6 +344,12 @@ class SettingsDialog:
         self.stt_url.connect("changed", lambda _e: self._schedule_models("stt"))
         self.stt_key.connect("changed", lambda _e: self._schedule_models("stt"))
         self.stt_type.connect("changed", self._stt_type_changed)
+
+        sep = Gtk.Separator(); sep.set_margin_top(4); form.pack_start(sep, False, False, 4)
+        form.pack_start(Gtk.Label(label="Local engine (faster-whisper) — device & precision", xalign=0.0), False, False, 0)
+        self.stt_device = _labeled(form, "Device", _combo(["auto", "cpu", "cuda"], self.cfg.device))
+        self.stt_compute = _labeled(form, "Compute type", _combo(["auto", "int8", "float16", "int8_float16"], self.cfg.compute_type))
+
         self.stt_result = Gtk.Label(xalign=0.0); self.stt_result.set_line_wrap(True)
         box.pack_start(self.stt_result, False, False, 2)
         self._stt_load(self.stt_combo.get_active())
@@ -368,6 +374,7 @@ class SettingsDialog:
         box.pack_start(bar, False, False, 2)
 
         form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL); box.pack_start(form, False, False, 2)
+        self.llm_type = _labeled(form, "Type", _combo(["local", "cloud"]))
         self.llm_url = _url_field(form, "Base URL", "http://localhost:28080/v1  ·  https://api.openai.com/v1",
                                   lambda: self._populate_models(self.llm_model, self.llm_url.get_text().strip(), self.llm_key.get_text().strip()))
         self.llm_model = _labeled(form, "Model", _model_combo("pick after entering URL"))
@@ -386,7 +393,7 @@ class SettingsDialog:
         self.stt_type.set_active(["local", "openai"].index(e.type) if e.type in ("local", "openai") else 0)
         self.stt_url.set_text(e.url); self.stt_key.set_text(e.api_key_env)
         if e.type == "local":
-            _fill_combo(self.stt_model, ["tiny", "base", "small", "medium", "large-v3"], e.model)
+            _fill_combo(self.stt_model, ["tiny", "base", "small", "medium", "large-v3"], e.model or self.cfg.model)
         else:
             _fill_combo(self.stt_model, [], e.model)
             self._populate_models(self.stt_model, e.url, e.api_key_env)
@@ -450,6 +457,7 @@ class SettingsDialog:
         if not (0 <= idx < len(self.cfg.llm_engines)):
             return
         e = self.cfg.llm_engines[idx]
+        self.llm_type.set_active(["local", "cloud"].index(e.type) if e.type in ("local", "cloud") else 1)
         self.llm_url.set_text(e.url)
         self.llm_key.set_text(e.api_key_env); self.llm_temp.set_text(str(e.temperature))
         _fill_combo(self.llm_model, [], e.model)
@@ -461,6 +469,7 @@ class SettingsDialog:
         if not (0 <= idx < len(self.cfg.llm_engines)):
             return
         e = self.cfg.llm_engines[idx]
+        e.type = self.llm_type.get_active_text() or "cloud"
         e.url = self.llm_url.get_text().strip().rstrip("/")
         e.model = _combo_text(self.llm_model)
         e.api_key_env = self.llm_key.get_text().strip()
@@ -609,12 +618,6 @@ class SettingsDialog:
         _labeled(page, "Notifications", self.gen_notify)
         self.gen_boot = Gtk.Switch(); self.gen_boot.set_active(autostart.is_enabled()); self.gen_boot.set_halign(Gtk.Align.START)
         _labeled(page, "Launch on login", self.gen_boot)
-
-        page.pack_start(Gtk.Separator(), False, False, 8)
-        page.pack_start(Gtk.Label(label="Local Whisper (for the local STT engine)", xalign=0.0), False, False, 2)
-        self.gen_model = _labeled(page, "Model", _entry(self.cfg.model))
-        self.gen_device = _labeled(page, "Device", _combo(["auto", "cpu", "cuda"], self.cfg.device))
-        self.gen_compute = _labeled(page, "Compute type", _combo(["auto", "int8", "float16", "int8_float16"], self.cfg.compute_type))
         self._start_meter()
 
     def _selected_mic_name(self) -> str:
@@ -700,9 +703,8 @@ class SettingsDialog:
             c.output = self.gen_output.get_active_text() or "type"
             c.language = self.gen_lang.get_text().strip()
             c.notify = self.gen_notify.get_active()
-            c.model = self.gen_model.get_text().strip()
-            c.device = self.gen_device.get_active_text() or "auto"
-            c.compute_type = self.gen_compute.get_active_text() or "auto"
+            c.device = self.stt_device.get_active_text() or "auto"
+            c.compute_type = self.stt_compute.get_active_text() or "auto"
             autostart.set_enabled(self.gen_boot.get_active())
         except ValueError as exc:
             self._error(f"Check numeric fields: {exc}")

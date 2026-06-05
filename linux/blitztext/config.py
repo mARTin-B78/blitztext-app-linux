@@ -199,6 +199,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
             model=e.get("model", "gpt-4o-mini"),
             api_key_env=e.get("api_key_env", ""),
             temperature=float(e.get("temperature", cfg.temperature)),
+            type=e.get("type", "cloud"),
         )
         for e in data.get("llm_engine", [])
     ] or [LLMEngine("Default", cfg.base_url, cfg.rewrite_model, cfg.api_key_env, cfg.temperature)]
@@ -266,7 +267,7 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
         ],
         "llm": {"active": cfg.llm_active},
         "llm_engine": [
-            {"name": e.name, "url": e.url, "model": e.model,
+            {"name": e.name, "type": e.type, "url": e.url, "model": e.model,
              "api_key_env": e.api_key_env, "temperature": e.temperature}
             for e in cfg.llm_engines
         ],
@@ -390,6 +391,7 @@ active = "Default"
 
 [[llm_engine]]
 name = "Default"
+type = "cloud"           # "local" | "cloud"
 url = "https://api.openai.com/v1"
 model = "gpt-4o-mini"
 api_key_env = "OPENAI_API_KEY"
@@ -397,6 +399,7 @@ temperature = 0.3
 
 # [[llm_engine]]
 # name = "Local llama-swap"
+# type = "local"
 # url = "http://localhost:28080/v1"
 # model = "Qwen3.5-4B"
 # api_key_env = ""
