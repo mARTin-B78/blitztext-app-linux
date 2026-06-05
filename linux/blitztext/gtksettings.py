@@ -336,6 +336,7 @@ class SettingsDialog:
         box.pack_start(bar, False, False, 2)
 
         form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL); box.pack_start(form, False, False, 2)
+        self.stt_name = _labeled(form, "Name", _entry(placeholder="e.g. faster-whisper GPU"))
         self.stt_type = _labeled(form, "Type", _combo(["local", "openai"]))
         self.stt_url = _url_field(form, "URL", "http://localhost:8010/v1   (blank for local)",
                                   lambda: self._populate_models(self.stt_model, self.stt_url.get_text().strip(), self.stt_key.get_text().strip()))
@@ -374,6 +375,7 @@ class SettingsDialog:
         box.pack_start(bar, False, False, 2)
 
         form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL); box.pack_start(form, False, False, 2)
+        self.llm_name = _labeled(form, "Name", _entry(placeholder="e.g. Local Qwen"))
         self.llm_type = _labeled(form, "Type", _combo(["local", "cloud"]))
         self.llm_url = _url_field(form, "Base URL", "http://localhost:28080/v1  ·  https://api.openai.com/v1",
                                   lambda: self._populate_models(self.llm_model, self.llm_url.get_text().strip(), self.llm_key.get_text().strip()))
@@ -390,6 +392,7 @@ class SettingsDialog:
         if not (0 <= idx < len(self.cfg.stt_engines)):
             return
         e = self.cfg.stt_engines[idx]
+        self.stt_name.set_text(e.name)
         self.stt_type.set_active(["local", "openai"].index(e.type) if e.type in ("local", "openai") else 0)
         self.stt_url.set_text(e.url); self.stt_key.set_text(e.api_key_env)
         if e.type == "local":
@@ -404,10 +407,14 @@ class SettingsDialog:
         if not (0 <= idx < len(self.cfg.stt_engines)):
             return
         e = self.cfg.stt_engines[idx]
+        new_name = self.stt_name.get_text().strip() or e.name
+        e.name = new_name
         e.type = self.stt_type.get_active_text() or "local"
         e.url = self.stt_url.get_text().strip().rstrip("/")
         e.model = _combo_text(self.stt_model)
         e.api_key_env = self.stt_key.get_text().strip()
+        if self.stt_combo.get_active_text() != new_name:
+            self.stt_combo.remove(idx); self.stt_combo.insert_text(idx, new_name); self.stt_combo.set_active(idx)
 
     def _stt_changed(self, combo):
         new = combo.get_active()
@@ -457,6 +464,7 @@ class SettingsDialog:
         if not (0 <= idx < len(self.cfg.llm_engines)):
             return
         e = self.cfg.llm_engines[idx]
+        self.llm_name.set_text(e.name)
         self.llm_type.set_active(["local", "cloud"].index(e.type) if e.type in ("local", "cloud") else 1)
         self.llm_url.set_text(e.url)
         self.llm_key.set_text(e.api_key_env); self.llm_temp.set_text(str(e.temperature))
@@ -469,10 +477,14 @@ class SettingsDialog:
         if not (0 <= idx < len(self.cfg.llm_engines)):
             return
         e = self.cfg.llm_engines[idx]
+        new_name = self.llm_name.get_text().strip() or e.name
+        e.name = new_name
         e.type = self.llm_type.get_active_text() or "cloud"
         e.url = self.llm_url.get_text().strip().rstrip("/")
         e.model = _combo_text(self.llm_model)
         e.api_key_env = self.llm_key.get_text().strip()
+        if self.llm_combo.get_active_text() != new_name:
+            self.llm_combo.remove(idx); self.llm_combo.insert_text(idx, new_name); self.llm_combo.set_active(idx)
         if _isfloat(self.llm_temp.get_text().strip()):
             e.temperature = float(self.llm_temp.get_text().strip())
 
