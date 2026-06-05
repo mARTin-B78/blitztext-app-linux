@@ -18,7 +18,8 @@ from pathlib import Path
 import gi
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import GLib, Gtk  # noqa: E402
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 from . import audio, autostart, llm, stt  # noqa: E402
 from .config import Config, save  # noqa: E402
@@ -33,6 +34,36 @@ GREEN, RED, GREY = "#34c759", "#ff3b30", "#b8b8be"
 
 def _dot(color: str) -> str:
     return f'<span foreground="{color}">●</span>'
+
+
+# --- key capture (for the "Set" bind buttons) -------------------------------
+_MOD_ORDER = ["ctrl", "alt", "shift", "cmd"]
+
+
+def _keyval_token(keyval: int) -> str | None:
+    name = Gdk.keyval_name(keyval) or ""
+    table = {
+        "Control_L": "ctrl", "Control_R": "ctrl",
+        "Alt_L": "alt", "Alt_R": "alt", "ISO_Level3_Shift": "alt",
+        "Super_L": "cmd", "Super_R": "cmd", "Meta_L": "cmd", "Meta_R": "cmd",
+        "Shift_L": "shift", "Shift_R": "shift",
+        "Escape": "esc", "space": "space", "Return": "enter", "Tab": "tab",
+        "BackSpace": "backspace", "Delete": "delete",
+    }
+    if name in table:
+        return table[name]
+    if len(name) == 1 and name.isprintable():
+        return name.lower()
+    if len(name) >= 2 and name[0] in "Ff" and name[1:].isdigit():
+        return name.lower()  # F1..F12
+    return None
+
+
+def _format_combo(tokens: list[str]) -> str:
+    mods = [t for t in _MOD_ORDER if t in tokens]
+    rest = [t for t in tokens if t not in _MOD_ORDER]
+    parts = [(t if len(t) == 1 else f"<{t}>") for t in mods + rest]
+    return "+".join(parts)
 
 
 def _labeled(parent: Gtk.Box, label: str, widget: Gtk.Widget, width: int = 130) -> Gtk.Widget:
@@ -132,6 +163,10 @@ class SettingsDialog:
         self._build_input(_page(nb, "Input"))
         self._build_general(_page(nb, "General"))
 
+        self._bind_entry = None
+        self._bind_pressed: list[str] = []
+        self.dlg.connect("key-press-event", self._on_bind_press)
+        self.dlg.connect("key-release-event", self._on_bind_release)
         self.dlg.connect("response", self._on_response)
         self.dlg.connect("destroy", lambda *_: self._stop_meter())
 
@@ -155,7 +190,7 @@ class SettingsDialog:
         self.wf_name = _labeled(form, "Name", _entry(placeholder="Preset name"))
         self.wf_desc = _labeled(form, "Description", _entry(placeholder="Short description shown in the panel"))
         self.wf_keywords = _labeled(form, "Keywords (comma)", _entry(placeholder="nicer email, bessere email"))
-        self.wf_hotkey = _labeled(form, "Hotkey (optional)", _entry(placeholder="<ctrl>+<alt>+e   (blank = none)"))
+        self.wf_hotkey = self._key_field(form, "Hotkey (optional)", "", placeholder="click Set, or e.g. <ctrl>+<alt>+e", width=130)
         self.wf_mode = _labeled(form, "Mode", _combo(["transcribe", "rewrite"]))
         self.wf_model = _labeled(form, "LLM model (opt.)", _entry(placeholder="blank = use the active LLM engine's model"))
         self.wf_temp = _labeled(form, "Temperature (opt.)", _entry(placeholder="blank = engine default (e.g. 0.3)"))
@@ -451,15 +486,53 @@ class SettingsDialog:
             GLib.idle_add(self.llm_dot.set_markup, _dot(lc))
         threading.Thread(target=check, daemon=True).start()
 
+    # -- key binding ("Set" button captures the next keypress) ---
+    def _key_field(self, page: Gtk.Box, label: str, value: str, placeholder: str = "", width: int = 150) -> Gtk.Entry:
+        row = Gtk.Box(spacing=10); row.set_margin_top(3); row.set_margin_bottom(3)
+        lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(width, -1)
+        row.pack_start(lbl, False, False, 0)
+        entry = Gtk.Entry(); entry.set_text(value); entry.set_hexpand(True)
+        if placeholder:
+            entry.set_placeholder_text(placeholder)
+        row.pack_start(entry, True, True, 0)
+        btn = Gtk.Button(label="Set")
+        btn.connect("clicked", lambda _b, e=entry: self._bind_key(e))
+        row.pack_start(btn, False, False, 0)
+        page.pack_start(row, False, False, 0)
+        return entry
+
+    def _bind_key(self, entry: Gtk.Entry) -> None:
+        self._bind_entry = entry
+        self._bind_pressed = []
+        entry.set_text("")
+        entry.set_placeholder_text("press the key to bind…")
+
+    def _on_bind_press(self, _w, event) -> bool:
+        if self._bind_entry is None:
+            return False
+        tok = _keyval_token(event.keyval)
+        if tok and tok not in self._bind_pressed:
+            self._bind_pressed.append(tok)
+        return True  # swallow while binding
+
+    def _on_bind_release(self, _w, event) -> bool:
+        if self._bind_entry is None:
+            return False
+        combo = _format_combo(self._bind_pressed)
+        if combo:
+            self._bind_entry.set_text(combo)
+        self._bind_entry = None
+        return True
+
     # ===== Input ============================================================
     def _build_input(self, page: Gtk.Box) -> None:
         self.in_mode = _labeled(page, "Input mode", _combo(["modifiers", "hotkeys"], self.cfg.input_mode))
         self.in_ptt = Gtk.Switch(); self.in_ptt.set_active(self.cfg.push_to_talk); self.in_ptt.set_halign(Gtk.Align.START)
         _labeled(page, "Push-to-talk", self.in_ptt)
-        self.in_start = _labeled(page, "Start", _entry(self.cfg.key_start))
-        self.in_stop = _labeled(page, "Stop + paste", _entry(self.cfg.key_stop))
-        self.in_send = _labeled(page, "Stop + paste + Enter", _entry(self.cfg.key_send))
-        self.in_cancel = _labeled(page, "Cancel", _entry(self.cfg.key_cancel))
+        self.in_start = self._key_field(page, "Start", self.cfg.key_start)
+        self.in_stop = self._key_field(page, "Stop + paste", self.cfg.key_stop)
+        self.in_send = self._key_field(page, "Stop + paste + Enter", self.cfg.key_send)
+        self.in_cancel = self._key_field(page, "Cancel", self.cfg.key_cancel)
         page.pack_start(Gtk.Separator(), False, False, 8)
         page.pack_start(Gtk.Label(label="Quality gate", xalign=0.0), False, False, 2)
         self.q_min = _labeled(page, "Min seconds", _entry(self.cfg.min_speech_seconds))
