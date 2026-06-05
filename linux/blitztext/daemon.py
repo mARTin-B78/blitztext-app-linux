@@ -134,7 +134,7 @@ class Daemon:
             self._vad_meter = None
 
     def _play_sound(self, sound_name: str) -> None:
-        import os, subprocess
+        import os, subprocess, shutil
         path = f"/usr/share/sounds/freedesktop/stereo/{sound_name}.oga"
         if os.path.exists(path) and shutil.which("pw-play"):
             subprocess.Popen(["pw-play", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
