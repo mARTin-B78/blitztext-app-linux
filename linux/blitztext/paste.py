@@ -10,12 +10,19 @@ delivery, so a brief focus change during processing doesn't misfire.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import time
 
 
+def _is_wayland() -> bool:
+    return os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
+
+
 def active_window_id() -> str | None:
+    if _is_wayland():
+        return None  # Wayland compositors don't allow global window ID queries
     if not shutil.which("xdotool"):
         return None
     try:
@@ -29,7 +36,7 @@ def active_window_id() -> str | None:
 
 
 def _focus(window_id: str | None) -> None:
-    if window_id:
+    if window_id and not _is_wayland() and shutil.which("xdotool"):
         subprocess.run(["xdotool", "windowactivate", "--sync", window_id], check=False)
         time.sleep(0.05)
 
@@ -37,35 +44,59 @@ def _focus(window_id: str | None) -> None:
 def deliver(text: str, *, mode: str = "type", window_id: str | None = None, type_delay_ms: int = 4) -> None:
     if not text:
         return
-    if not shutil.which("xdotool"):
+
+    wayland = _is_wayland()
+    if not wayland and not shutil.which("xdotool"):
         raise RuntimeError("xdotool not found; cannot type into the focused window.")
+    if wayland and not shutil.which("wtype") and not shutil.which("ydotool"):
+        raise RuntimeError("wtype or ydotool not found; cannot type in Wayland session.")
 
     _focus(window_id)
     # Give the user time to release the hotkey modifiers before we synthesize input.
     time.sleep(0.12)
 
     if mode == "paste" and _set_clipboard(text):
-        subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+v"], check=False)
+        if wayland:
+            if shutil.which("wtype"):
+                subprocess.run(["wtype", "-M", "ctrl", "v", "-m", "ctrl"], check=False)
+            else:
+                subprocess.run(["ydotool", "key", "ctrl+v"], check=False)
+        else:
+            subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+v"], check=False)
         return
 
-    subprocess.run(
-        ["xdotool", "type", "--clearmodifiers", "--delay", str(type_delay_ms), "--", text],
-        check=False,
-    )
+    if wayland:
+        if shutil.which("wtype"):
+            subprocess.run(["wtype", "-d", str(type_delay_ms), "--", text], check=False)
+        else:
+            subprocess.run(["ydotool", "type", "-d", str(type_delay_ms), text], check=False)
+    else:
+        subprocess.run(
+            ["xdotool", "type", "--clearmodifiers", "--delay", str(type_delay_ms), "--", text],
+            check=False,
+        )
 
 
 def press_enter(window_id: str | None = None) -> None:
     """Send Return to the focused/target window (auto-send after paste)."""
-    if not shutil.which("xdotool"):
+    wayland = _is_wayland()
+    if not wayland and not shutil.which("xdotool"):
         return
     _focus(window_id)
     time.sleep(0.08)
-    subprocess.run(["xdotool", "key", "--clearmodifiers", "Return"], check=False)
+    
+    if wayland:
+        if shutil.which("wtype"):
+            subprocess.run(["wtype", "-k", "Return"], check=False)
+        else:
+            subprocess.run(["ydotool", "key", "enter"], check=False)
+    else:
+        subprocess.run(["xdotool", "key", "--clearmodifiers", "Return"], check=False)
 
 
 def _set_clipboard(text: str) -> bool:
     """Best-effort clipboard set; returns False if no clipboard tool is available."""
-    for argv in (["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"], ["wl-copy"]):
+    for argv in (["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]):
         if shutil.which(argv[0]):
             try:
                 subprocess.run(argv, input=text.encode("utf-8"), check=True)

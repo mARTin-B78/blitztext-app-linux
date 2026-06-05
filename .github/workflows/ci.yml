@@ -50,3 +50,36 @@ jobs:
 
       - name: Build
         run: ./build.sh --debug
+
+  test-linux:
+    name: Test Linux app
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-gi gir1.2-gtk-3.0 gir1.2-appindicator3-0.1 libgirepository1.0-dev libcairo2-dev python3-dev
+          cd linux
+          pip install -r requirements.txt
+          pip install pytest ruff PyGObject
+
+      - name: Syntax check
+        run: |
+          cd linux
+          python -m py_compile blitztext/*.py
+
+      - name: Run Pytest
+        run: |
+          cd linux
+          PYTHONPATH=. pytest tests

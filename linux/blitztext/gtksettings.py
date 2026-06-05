@@ -689,6 +689,12 @@ class SettingsDialog:
         _labeled(page, "Reject hallucinations", self.q_halluc)
         self.q_strip = Gtk.Switch(); self.q_strip.set_active(self.cfg.strip_trailing_punctuation); self.q_strip.set_halign(Gtk.Align.START)
         _labeled(page, "Strip trailing punctuation", self.q_strip)
+        page.pack_start(Gtk.Separator(), False, False, 8)
+        page.pack_start(Gtk.Label(label="Hands-free (Wakeword)", xalign=0.0), False, False, 2)
+        self.ww_enabled = Gtk.Switch(); self.ww_enabled.set_active(self.cfg.wakeword_enabled); self.ww_enabled.set_halign(Gtk.Align.START)
+        _labeled(page, "Enable wakeword", self.ww_enabled)
+        self.ww_uri = _labeled(page, "Wyoming URI", _entry(self.cfg.wakeword_uri, placeholder="tcp://127.0.0.1:10400"))
+        self.ww_model = _labeled(page, "Model name", _entry(self.cfg.wakeword_model, placeholder="okay_computer"))
 
     # ===== General ==========================================================
     def _build_general(self, page: Gtk.Box) -> None:
@@ -896,6 +902,9 @@ class SettingsDialog:
             c.silence_rms = float(self.q_rms.get_text())
             c.reject_hallucinations = self.q_halluc.get_active()
             c.strip_trailing_punctuation = self.q_strip.get_active()
+            c.wakeword_enabled = self.ww_enabled.get_active()
+            c.wakeword_uri = self.ww_uri.get_text().strip()
+            c.wakeword_model = self.ww_model.get_text().strip()
             c.mic = self._selected_mic_name()
             c.output = self.gen_output.get_active_text() or "type"
             c.language = self.gen_lang.get_text().strip()

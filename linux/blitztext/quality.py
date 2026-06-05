@@ -63,9 +63,6 @@ def is_hallucination(text: str, duration: float) -> bool:
         return True
     if duration <= 2.5 and norm in _HALLUCINATIONS:
         return True
-    # A very short clip that produced only a stock phrase is suspect too.
-    if duration <= 1.5 and len(norm.split()) <= 2 and norm in _HALLUCINATIONS:
-        return True
     return False
 
 
