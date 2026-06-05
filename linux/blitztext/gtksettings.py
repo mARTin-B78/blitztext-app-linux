@@ -853,6 +853,17 @@ class SettingsDialog:
         ft = Gtk.FileFilter(); ft.set_name("Text (.txt)"); ft.add_pattern("*.txt"); reff.add_filter(ft)
         self.bench_ref = _labeled(page, "Reference (.txt)", reff)
 
+        def _on_wav_set(_b):
+            fn = wavf.get_filename()
+            if not fn: return
+            p = Path(fn)
+            for ext in (".reference.txt", ".txt"):
+                cand = p.with_name(p.stem + ext)
+                if cand.exists():
+                    reff.set_filename(str(cand))
+                    break
+        wavf.connect("file-set", _on_wav_set)
+
         run = Gtk.Button(label="Run benchmark"); run.connect("clicked", self._run_bench)
         run.set_halign(Gtk.Align.START)
         page.pack_start(run, False, False, 6)
