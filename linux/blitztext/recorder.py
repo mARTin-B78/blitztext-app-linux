@@ -6,6 +6,7 @@ available — no Python audio bindings or device configuration required.
 
 from __future__ import annotations
 
+import os
 import shutil
 import signal
 import subprocess
@@ -42,7 +43,9 @@ class Recording:
     """A single in-progress recording. Start on construction, call stop()."""
 
     def __init__(self, recorder: str, device: str = ""):
-        self._tmp = Path(tempfile.mkstemp(prefix="blitztext-", suffix=".wav")[1])
+        fd, path = tempfile.mkstemp(prefix="blitztext-", suffix=".wav")
+        os.close(fd)
+        self._tmp = Path(path)
         argv = list(_RECORDERS[recorder])
         flag = _DEVICE_FLAG.get(recorder, [])
         if device and flag:
