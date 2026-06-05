@@ -18,7 +18,7 @@ CONFIG_PATH = CONFIG_DIR / "config.toml"
 class Workflow:
     name: str
     hotkey: str
-    mode: str  # "transcribe" | "rewrite"
+    mode: str  # "transcribe" | "rewrite" | "stream"
     prompt: str = ""
     # Spoken trigger phrases for voice routing (matched at start/end of speech).
     keywords: list[str] = field(default_factory=list)
@@ -366,7 +366,8 @@ threshold = 0.82         # 0..1 fuzzy-match strictness (higher = stricter)
 # Speech-to-text engines (presets). The active one is used for transcription.
 #   type = "local"  -> in-process faster-whisper (uses [whisper] above)
 #   type = "openai" -> remote OpenAI-compatible /audio/transcriptions server
-#                      (faster-whisper-server, Groq, WhisperX, NIMs, ...)
+#                      (faster-whisper-server, Groq, WhisperX, batch ASR NIMs, ...)
+#   type = "riva_realtime" -> Riva/NIM realtime WebSocket STT, for mode="stream"
 # ----------------------------------------------------------------------------
 [stt]
 active = "Local faster-whisper"
@@ -381,6 +382,13 @@ type = "local"
 # url = "http://localhost:8010/v1"
 # model = "Systran/faster-whisper-base"
 # api_key_env = ""            # e.g. GROQ_API_KEY for a cloud endpoint
+
+# [[stt_engine]]
+# name = "Nemotron ASR Streaming"
+# type = "riva_realtime"
+# url = "http://localhost:8006/v1"
+# model = ""                  # blank = use the realtime server default
+# api_key_env = ""
 
 # ----------------------------------------------------------------------------
 # LLM engines (presets) for the rewrite step. Any OpenAI-compatible chat API
@@ -408,6 +416,7 @@ temperature = 0.3
 # ----------------------------------------------------------------------------
 # Workflows / presets. mode = "transcribe" types the raw transcript. mode =
 # "rewrite" sends it through the LLM with `prompt` as the system prompt.
+# "stream" writes live words via a riva_realtime STT engine.
 #   keywords = spoken trigger phrases for voice routing (start or end of speech)
 #   hotkey   = optional direct global hotkey ("" = none; voice routing is primary)
 # A workflow may override the [rewrite] defaults with its own model/temperature.
@@ -419,6 +428,13 @@ icon = "⚡"
 description = "Speak, get plain text."
 hotkey = ""
 mode = "transcribe"
+
+# [[workflow]]
+# name = "STT Streaming"
+# icon = "⚡"
+# description = "Live words while you speak."
+# hotkey = "<ctrl>+<alt>+s"
+# mode = "stream"
 
 [[workflow]]
 name = "Nicer email"

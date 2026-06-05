@@ -1,80 +1,115 @@
 # Setup
 
-This guide is for people who want to build and inspect the preview themselves.
+This guide is for people who want to build and inspect Blitztext App Linux themselves.
 
 ## 1. Requirements
 
-- macOS 14 or newer
-- Full Xcode, with Command Line Tools installed
-- XcodeGen
-- Homebrew, if you want to install XcodeGen with `brew install xcodegen`
-- Optional for online workflows: an OpenAI API key
-- Optional for secure local transcription: a local WhisperKit/CoreML model
+- Linux desktop with an X11 session
+- Python 3.11+
+- `xdotool`
+- `notify-send` from `libnotify-bin`
+- one recorder: `pw-record`, `parecord`, or `arecord`
+- GTK/PyGObject for the tray and settings UI (`python3-gi` on Ubuntu/Debian)
+- Optional rewrite workflows: an OpenAI-compatible chat endpoint and API key if needed
+- Optional realtime STT streaming: a Riva/NIM realtime server such as Nemotron ASR Streaming
 
-Install XcodeGen manually if needed:
-
-```bash
-brew install xcodegen
-```
-
-## 2. Clone And Build
+On Ubuntu/Debian:
 
 ```bash
-git clone https://github.com/cmagnussen/blitztext-app.git
-cd blitztext-app
-./build.sh --debug
+sudo apt install xdotool libnotify-bin pipewire-bin python3-gi
 ```
 
-To launch after building:
+## 2. Clone And Install
 
 ```bash
-./build.sh --run
+git clone https://github.com/mARTin-B78/blitztext-app-linux.git
+cd blitztext-app-linux/linux
+./install.sh
 ```
 
-## 3. Configure OpenAI For Online Workflows
+If your local repository still uses the older `blitztext-app` name, the commands are the same once you `cd linux`.
 
-Open the app settings and paste your own OpenAI API key if you want online transcription or rewriting workflows.
+## 3. Run
 
-The preview currently uses:
-
-- `whisper-1` for transcription
-- `gpt-4o-mini` for lightweight rewriting
-- `gpt-4o` for the calmer-message workflow
-
-You are responsible for API access, billing, and data handling in your own OpenAI account.
-
-Never commit your API key into this repository, issues, logs, or screenshots.
-
-You can skip this step if you only want to test local transcription with a local WhisperKit model.
-
-## 4. Optional Local Transcription
-
-To use secure local transcription, choose a compatible WhisperKit CoreML model in the app and click **Installieren**. Blitztext stores models in:
-
-```text
-~/Library/Application Support/Blitztext/models/whisperkit/
+```bash
+.venv/bin/python -m blitztext tray
 ```
 
-Recommended first model: `openai_whisper-small_216MB`.
+Alternatives:
 
-See [local-models.md](local-models.md) for the exact command, model links, and expected folder layout.
+```bash
+.venv/bin/python -m blitztext gui
+.venv/bin/python -m blitztext run
+.venv/bin/python -m blitztext config-path
+```
 
-## 5. macOS Permissions
+## 4. Debian Package
 
-The app needs Microphone permission to record audio.
+```bash
+cd linux
+bash packaging/build-deb.sh
+sudo apt install ./dist/blitztext_*.deb
+blitztext tray
+```
 
-For automatic paste into the previous app, grant Accessibility permission in macOS System Settings. Without it, you can still copy and paste manually.
+The package installs Blitztext under `/opt/blitztext`, adds a desktop entry, and bundles the Python dependencies from `requirements.txt`.
 
-Blitztext does not need Full Disk Access. Auto-paste uses the Accessibility permission because the app simulates Cmd+V after putting the result on the clipboard.
+## 5. Configure STT Engines
+
+Open **Settings > Engines**.
+
+Common options:
+
+- `local`: in-process `faster-whisper`
+- `openai`: OpenAI-compatible batch `/audio/transcriptions` endpoint
+- `riva_realtime`: Riva/NIM realtime WebSocket transcription for `mode = "stream"`
+
+For Nemotron ASR Streaming:
+
+```toml
+[[stt_engine]]
+name = "Nemotron ASR Streaming"
+type = "riva_realtime"
+url = "http://127.0.0.1:8006/v1"
+model = ""
+```
+
+Then create or edit a workflow with:
+
+```toml
+mode = "stream"
+```
+
+## 6. Configure Rewrite Workflows
+
+Rewrite workflows use an OpenAI-compatible chat endpoint. You can point them at OpenAI, LiteLLM, llama-swap, vLLM, LM Studio, or another compatible server.
+
+For OpenAI:
+
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
+Then set the LLM engine in **Settings > Engines** or edit `~/.config/blitztext/config.toml`.
+
+Never commit API keys into this repository, issues, logs, or screenshots.
+
+## 7. Permissions And Desktop Session
+
+Blitztext needs microphone access through your Linux audio stack and uses `xdotool` to type into the currently focused X11 window.
+
+If text delivery does not work:
+
+- confirm you are on X11, not Wayland
+- check that `xdotool getactivewindow` works in a terminal
+- focus a normal text field before triggering a workflow
+- try `output = "paste"` or `output = "type"` in config
 
 ## Troubleshooting
 
-- If `xcodebuild` reports that the active developer directory is only Command Line Tools, run `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`.
-- If the build cannot find XcodeGen, install it explicitly with `brew install xcodegen`.
-- If online transcription fails immediately, check whether the API key is present and valid.
-- If secure local mode is disabled, check whether a WhisperKit model is installed in the expected folder.
-- If transcription works but paste does not, this is not an OpenAI billing issue. Check **Privacy & Security -> Accessibility**, restart Blitztext after changing the permission, and make sure the cursor is focused in a text field before starting the workflow.
-- If macOS shows multiple Blitztext entries under Accessibility, remove or disable stale entries, run the app from the final location (`/Applications` if you used `./build.sh --install`), then grant the permission again.
-- If the target app blocks synthetic paste or the target app was not detected, the result still stays on the clipboard so you can press Cmd+V manually.
-- If audio is missing, check Microphone permission and macOS input settings.
-- If you see OpenAI errors, verify model access and account billing.
+- If the tray does not start, confirm `python3-gi` is visible to the venv. `install.sh` uses `--system-site-packages` for this reason.
+- If local Whisper is slow on arm64, use a smaller model such as `small`, `base`, or `tiny`.
+- If realtime streaming connects but produces poor text, confirm the server language. The tested Nemotron ASR Streaming NIM is `en-US`.
+- If a batch STT endpoint returns `bad model`, check whether it is actually a streaming-only NIM. Use `riva_realtime` for realtime services and `openai` only for batch-compatible services.
+- If audio is missing, check the selected microphone in **Settings > General** and watch the input level meter.
+- If rewriting fails, verify your LLM endpoint, model name, API key environment variable, and account billing if using a cloud provider.

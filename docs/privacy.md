@@ -1,36 +1,46 @@
 # Privacy Notes
 
-Blitztext macOS Preview does not include a hosted backend.
+Blitztext App Linux does not include a hosted backend.
 
-When you use the online workflows, your Mac sends data directly to OpenAI:
+Data goes only to the engines and endpoints you configure:
 
-- audio recordings for transcription
-- transcribed or typed text for rewriting
-- custom terms and prompt context if you configured them
+- local `faster-whisper` for local batch transcription
+- your configured OpenAI-compatible STT endpoint for remote batch transcription
+- your configured Riva/NIM realtime endpoint for streaming transcription
+- your configured OpenAI-compatible chat endpoint for rewriting workflows
 
-When **Sicherer Lokaler Modus** is enabled and a WhisperKit/CoreML model is installed, transcription runs on your Mac and does not send audio to OpenAI. Rewriting workflows still require OpenAI and are paused while secure local mode is active.
-
-You are responsible for your OpenAI account, API usage, costs, and data handling.
+You are responsible for API access, billing, endpoint security, and data handling for any remote or local service you connect.
 
 ## Local Data
 
 The app stores:
 
-- your OpenAI API key in the user's macOS Keychain
-- workflow settings in local app support storage
-- optional WhisperKit/CoreML model folders in local app support storage
-- temporary audio files while a transcription is being processed; the app attempts to delete each recording when the workflow ends or is cancelled
+- workflow, hotkey, engine, model, microphone, and UI settings in `~/.config/blitztext/config.toml`
+- temporary audio files while a batch transcription is being processed; the app attempts to delete each recording when the workflow ends or is cancelled
+- local Python dependencies in the source venv or bundled package venv
 
-Workflow output may also be placed on your clipboard so it can be pasted into another app. Auto-paste marks the clipboard entry as concealed for compatible clipboard managers, but the generated text intentionally remains on the clipboard as a fallback if automatic paste is blocked. Clipboard managers, macOS, or other apps may still observe clipboard contents while they are present.
+Blitztext does not store API keys itself. Instead, config entries name environment variables such as `OPENAI_API_KEY`; you provide those variables in your shell, service, or desktop environment.
 
-The app uses the system TLS trust store for OpenAI and Hugging Face requests. It does not currently pin certificates. A user-installed or managed root certificate can therefore affect HTTPS trust decisions on that Mac.
+Workflow output may be typed directly into the focused X11 window or placed on the clipboard, depending on the configured output mode. Clipboard managers and other apps may observe clipboard contents while they are present.
 
-Settings such as custom prompts, custom terms, and context are stored in local app support storage as plain JSON. Do not put secrets into those fields.
+## Network Data Flow
+
+```text
+Local batch STT:      microphone -> temporary WAV -> local faster-whisper
+Remote batch STT:     microphone -> temporary WAV -> configured /audio/transcriptions endpoint
+Realtime STT:         microphone PCM chunks -> configured Riva/NIM realtime WebSocket endpoint
+Rewrite workflows:    transcript text -> configured OpenAI-compatible chat endpoint
+Delivery:             generated text -> xdotool / clipboard -> focused app
+```
+
+The app uses your system trust store for HTTPS connections made by Python libraries. It does not pin certificates.
 
 ## Offline Scope
 
-Only transcription can run locally. Any workflow that rewrites, improves, or transforms text still uses OpenAI.
+Batch transcription can run locally with `faster-whisper`. Realtime transcription can be local if your Riva/NIM server is local. Rewriting is local only if you configure a local OpenAI-compatible LLM endpoint.
+
+Do not describe a workflow as fully offline unless every configured endpoint is local and you have verified the network path.
 
 ## Sensitive Content
 
-Do not use this preview with confidential, regulated, or highly sensitive content unless you have reviewed the code, your OpenAI settings, and your legal/privacy requirements.
+Do not use this preview with confidential, regulated, or highly sensitive content unless you have reviewed the code, your local services, your remote provider settings, and your legal/privacy requirements.

@@ -801,8 +801,8 @@ class SettingsDialog:
         changelog = _read_first(paths["changelog"])
         license_text = _read_first(paths["license"])
 
-        title = Gtk.Label(label="Blitztext", xalign=0.0)
-        title.set_markup("<b>Blitztext</b>")
+        title = Gtk.Label(label="Blitztext App Linux", xalign=0.0)
+        title.set_markup("<b>Blitztext App Linux</b>")
         page.pack_start(title, False, False, 0)
 
         version = Gtk.Label(label=f"Version {__version__}", xalign=0.0)
@@ -810,8 +810,8 @@ class SettingsDialog:
         page.pack_start(version, False, False, 2)
 
         source = Gtk.LinkButton.new_with_label(
-            "https://github.com/mARTin-B78/blitztext-app",
-            "Source: github.com/mARTin-B78/blitztext-app",
+            "https://github.com/mARTin-B78/blitztext-app-linux",
+            "Source: github.com/mARTin-B78/blitztext-app-linux",
         )
         source.set_halign(Gtk.Align.START)
         page.pack_start(source, False, False, 4)

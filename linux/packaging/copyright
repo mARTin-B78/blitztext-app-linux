@@ -1,6 +1,6 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: blitztext
-Source: https://github.com/mARTin-B78/blitztext-app
+Upstream-Name: blitztext-app-linux
+Source: https://github.com/mARTin-B78/blitztext-app-linux
 
 Files: *
 Copyright: 2026 Martin Bierschenk

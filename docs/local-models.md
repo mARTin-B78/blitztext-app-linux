@@ -1,72 +1,78 @@
-# Local Models
+# Local And Realtime Speech Models
 
-Blitztext can run transcription locally with WhisperKit/CoreML. The app does not bundle a speech model, but it can download the selected compatible model from Hugging Face into the local cache.
+Blitztext App Linux supports two local-first speech paths:
 
-## Recommended First Model
+- in-process `faster-whisper` for batch transcription
+- external Riva/NIM realtime servers for live streaming transcription
 
-Use Whisper Small for the first local test. It is multilingual, supports German, and is much lighter than the large variants.
+The app does not bundle speech models. You choose the model in Settings or in `~/.config/blitztext/config.toml`.
 
-- [argmaxinc/whisperkit-coreml: openai_whisper-small_216MB](https://huggingface.co/argmaxinc/whisperkit-coreml/tree/main/openai_whisper-small_216MB)
+## Local Batch Transcription
 
-Local cache path:
+The default local engine uses `faster-whisper`.
+
+Recommended first model:
+
+```toml
+[whisper]
+model = "small"
+device = "auto"
+compute_type = "auto"
+```
+
+Useful model sizes:
+
+- `tiny`: fastest, lowest quality
+- `base`: small and responsive
+- `small`: good first default for dictation
+- `medium`: better quality, slower
+- `large-v3`: highest quality, much heavier
+
+You can also use a local model path supported by `faster-whisper`.
+
+## Realtime Riva/NIM Transcription
+
+For live words while speaking, use a `riva_realtime` STT engine. The tested Nemotron ASR Streaming NIM exposes a WebSocket endpoint through `/v1/realtime` and reports this model:
 
 ```text
-~/Library/Application Support/Blitztext/models/whisperkit/openai_whisper-small_216MB
+cache-aware-parakeet-rnnt-en-US-asr-streaming-sortformer
 ```
 
-## Other Compatible Models
+Recommended engine config:
 
-You can also install larger WhisperKit CoreML models into the same cache directory:
-
-- [openai_whisper-large-v3-v20240930_626MB](https://huggingface.co/argmaxinc/whisperkit-coreml/tree/main/openai_whisper-large-v3-v20240930_626MB)
-- [openai_whisper-large-v3-v20240930_turbo_632MB](https://huggingface.co/argmaxinc/whisperkit-coreml/tree/main/openai_whisper-large-v3-v20240930_turbo_632MB)
-
-The app detects installed model folders that contain `AudioEncoder.mlmodelc`, `MelSpectrogram.mlmodelc`, and `TextDecoder.mlmodelc`.
-
-## Install From The App
-
-Open Blitztext, go to **Settings > Anpassen**, choose a local model, and click **Installieren**. You can also switch on **Sicherer Lokaler Modus** from the main popover; if the selected model is missing, Blitztext starts the download and installs it into the local cache.
-
-After the model is installed, the Blitztext transcription workflow can run in local mode. The rewriting workflows still use OpenAI, so they are paused while secure local mode is active.
-
-## Optional Manual Install
-
-If you prefer the CLI path, install the Hugging Face CLI so the `hf` command is available:
-
-```bash
-python3 -m pip install --upgrade "huggingface_hub[cli]"
+```toml
+[[stt_engine]]
+name = "Nemotron ASR Streaming"
+type = "riva_realtime"
+url = "http://127.0.0.1:8006/v1"
+model = ""
 ```
 
-Create the local model cache:
+Use `model = ""` to keep the server default. For the tested Nemotron container, set the general language to English:
 
-```bash
-mkdir -p "$HOME/Library/Application Support/Blitztext/models/whisperkit"
+```toml
+[general]
+language = "en"
 ```
 
-Download the recommended first model:
+## Batch NIMs And Other STT Servers
 
-```bash
-hf download argmaxinc/whisperkit-coreml \
-  --include 'openai_whisper-small_216MB/*' \
-  --local-dir "$HOME/Library/Application Support/Blitztext/models/whisperkit" \
-  --max-workers 4
+Use `type = "openai"` only for servers that implement batch `/v1/audio/transcriptions` correctly.
+
+Example:
+
+```toml
+[[stt_engine]]
+name = "Parakeet batch ASR"
+type = "openai"
+url = "http://127.0.0.1:8090/v1"
+model = "parakeet-tdt-0.6b-v3"
 ```
 
-Expected folder layout:
-
-```text
-~/Library/Application Support/Blitztext/models/whisperkit/
-  openai_whisper-small_216MB/
-    AudioEncoder.mlmodelc/
-    MelSpectrogram.mlmodelc/
-    TextDecoder.mlmodelc/
-```
-
-If the folder is nested differently, the app will not detect the model.
+Streaming-only NIMs may still show `/v1/audio/transcriptions` in Swagger, but return `bad model` or `No Offline ASR models found`. Use `riva_realtime` for those.
 
 ## Notes
 
-- First use can be slower because the model has to load and prewarm.
-- Local transcription avoids sending audio to OpenAI for the Blitztext workflow.
-- The app currently supports local transcription only, not local rewriting.
-- Models are downloaded on demand so the repository and app package stay small and auditable.
+- First local Whisper use can be slower because the model has to load or download.
+- Realtime streaming needs `sounddevice` and `websockets`; both are in `linux/requirements.txt`.
+- The benchmark tab is for batch engines. Streaming engines are live-only and are not benchmarked with WAV uploads.

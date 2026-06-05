@@ -9,6 +9,13 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+### Added
+- **Realtime STT streaming mode**: new `mode = "stream"` workflow support and a
+  `riva_realtime` STT engine for Riva/NIM WebSocket transcription, including a
+  Settings shortcut for Nemotron ASR Streaming on `http://127.0.0.1:8006/v1`.
+- **Settings About tab** with the app version, source link, changelog, and
+  license text.
+
 ## [1.1.0] - 2026-06-04
 
 ### Added
@@ -74,7 +81,7 @@ into that field.
   AppIndicator typelibs and GNOME `ubuntu-appindicators` extension are already
   present on the target host).
 
-[Unreleased]: https://github.com/mARTin-B78/blitztext-app/compare/v1.1.0...HEAD
-[1.1.0]: https://github.com/mARTin-B78/blitztext-app/compare/v1.0.1...v1.1.0
-[1.0.1]: https://github.com/mARTin-B78/blitztext-app/compare/v1.0.0...v1.0.1
-[1.0.0]: https://github.com/mARTin-B78/blitztext-app/releases/tag/v1.0.0
+[Unreleased]: https://github.com/mARTin-B78/blitztext-app-linux/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/mARTin-B78/blitztext-app-linux/compare/v1.0.1...v1.1.0
+[1.0.1]: https://github.com/mARTin-B78/blitztext-app-linux/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/mARTin-B78/blitztext-app-linux/releases/tag/v1.0.0

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build a self-contained .deb for Blitztext (Ubuntu/Debian, arm64).
 #
-# Bundles a relocatable venv with the Python deps (faster-whisper, pynput,
-# tomli-w) under /opt/blitztext so installation needs no pip/network. System
+# Bundles a relocatable venv with the Python deps from requirements.txt under
+# /opt/blitztext so installation needs no pip/network. System
 # integration (python3-gi, xdotool, libnotify-bin, a recorder) is declared via
 # Depends so the Software app / apt pull them in.
 set -euo pipefail

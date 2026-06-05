@@ -1,137 +1,151 @@
-# Blitztext App
+# Blitztext App Linux
 
-Blitztext App is an experimental open-source macOS menubar app for turning speech into text.
+Blitztext App Linux is an experimental open-source Linux dictation app: focus any text field, press a hotkey, speak, and the text is typed back into the app you were using. It can also rewrite rough speech with an OpenAI-compatible LLM, or write live words through a Riva/NIM realtime STT server.
 
-It is intentionally small and unfinished. The goal is to make a real workflow visible and hackable: press a hotkey, speak, get text back, optionally rewrite it, and paste it into the app you were using.
+This is a native host tool, not a browser app and not a hosted service. It is intentionally small, inspectable, and still rough around the edges.
 
-This is a learning and experimentation project, not a polished product.
+> Preview status: Linux/X11, bring your own local models or endpoints, no hosted Blitztext backend, no warranty, no support guarantee.
 
-> Preview status: bring your own OpenAI API key, no hosted backend, no warranty, no support guarantee.
+## Inspiration
+
+Blitztext App Linux is inspired by [cmagnussen/blitztext-app](https://github.com/cmagnussen/blitztext-app), the original macOS menu-bar workflow for turning speech into text and cleaner writing. This Linux version keeps the spirit of that workflow while using Linux-native pieces: GTK, AppIndicator, global hotkeys, local `faster-whisper`, optional Riva/NIM realtime STT, and `xdotool` delivery.
 
 ## What It Does
 
-- **Blitztext**: record speech and transcribe it.
-- **Blitztext+**: record speech, transcribe it, then turn the rough draft into cleaner writing.
-- **Blitztext $%&!**: turn frustrated speech into a calmer message.
-- **Blitztext :)**: add fitting emojis to dictated text.
+- **Dictate**: record speech and type the raw transcript into the focused field.
+- **Rewrite**: transcribe speech, send it to an OpenAI-compatible LLM, and type the improved result.
+- **Calm down / email / emoji workflows**: use configurable prompts for common writing transformations.
+- **Realtime STT streaming**: stream mic audio to a Riva/NIM realtime server, such as Nemotron ASR Streaming, and type stable words while you speak.
+- **Benchmark STT engines**: compare local and remote batch transcription engines against a reference clip.
 
 ## Important Preview Notes
 
-- macOS only.
-- Bring your own OpenAI API key.
+- Linux first; tested on Ubuntu/GNOME with X11.
+- Auto-typing uses `xdotool`, so Wayland needs future `wtype`/`ydotool` support.
+- Batch transcription can run locally with `faster-whisper`.
+- Live streaming can use a local Riva/NIM realtime WebSocket endpoint.
+- Rewrite workflows call the OpenAI-compatible LLM endpoint you configure.
 - No hosted Blitztext backend is included or provided.
-- In online mode, audio and text are sent directly from the app to the OpenAI API.
-- Optional local transcription via WhisperKit/CoreML if you install a compatible model locally.
-- `./build.sh` creates a locally ad-hoc-signed development app. No notarized release binary is provided.
-- Not production ready.
+- Debian packaging exists for local installation, but this is still preview software.
 - No warranty and no support guarantee.
 
 You are welcome to use, fork, adapt, and share this project under the license terms.
 
-The intent is not to ship a one-click finished app. The intent is to make a real AI workflow understandable: clone it, build it, read the code, change it, break it, fix it, and suggest improvements. If you only want to download something and never look inside, this preview will probably feel rough. If you want to learn how a small native macOS AI app is put together, you are in the right place.
+The intent is not to ship a one-click finished product. The intent is to make a real AI workflow understandable: clone it, build it, read the code, change it, break it, fix it, and suggest improvements. If you only want to download something and never look inside, this preview will probably feel rough. If you want to learn how a small native Linux AI dictation tool is put together, you are in the right place.
 
 ## Screenshots
 
-<table>
-  <tr>
-    <td><img src="docs/screenshots/online-mode.png" alt="Blitztext online transcription mode" width="420"></td>
-    <td><img src="docs/screenshots/local-mode.png" alt="Blitztext secure local transcription mode" width="420"></td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/local-model-picker.png" alt="Blitztext local model picker" width="420"></td>
-    <td><img src="docs/screenshots/settings-customize.png" alt="Blitztext settings and customization view" width="420"></td>
-  </tr>
-</table>
+The old macOS screenshots were removed from this Linux-facing README so the docs do not misrepresent the app. Current Linux screenshots should show:
+
+- the GTK control panel with workflow rows
+- Settings > Engines with local, OpenAI-compatible, and `riva_realtime` STT engines
+- Settings > Benchmark results
+- Settings > About with version, source, changelog, and license
+
+The Linux icon assets live in [`linux/packaging`](linux/packaging/).
 
 ## Requirements
 
-- macOS 14 or newer
-- Xcode 16 or newer (Swift 5.10), with Command Line Tools installed and selected for `xcodebuild`
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen) to generate the Xcode project
-- For online transcription and rewriting: an OpenAI API key with access to:
-  - `whisper-1` for transcription
-  - `gpt-4o-mini` and optionally `gpt-4o` for rewriting
-- For local-only transcription: a WhisperKit CoreML model in:
-  `~/Library/Application Support/Blitztext/models/whisperkit/`
+- Linux desktop with an **X11 session**.
+- Host tools: `xdotool`, `notify-send` from `libnotify-bin`, and one recorder: `pw-record`, `parecord`, or `arecord`.
+- Python 3.11+ when running from source.
+- Optional rewrite workflows: an OpenAI-compatible chat endpoint and API key if needed.
+- Optional realtime STT streaming: a Riva/NIM realtime server reachable through `/v1/realtime`.
 
-The build also pulls one Swift Package dependency automatically:
-
-- [`argmax-oss-swift`](https://github.com/argmaxinc/argmax-oss-swift) (WhisperKit) — used for local on-device transcription.
-
-Install XcodeGen if needed:
+On Ubuntu/Debian:
 
 ```bash
-brew install xcodegen
+sudo apt install xdotool libnotify-bin pipewire-bin python3-gi
 ```
 
-## Build And Run
+## Install And Run
+
+Recommended local package path:
 
 ```bash
-git clone https://github.com/cmagnussen/blitztext-app.git
-cd blitztext-app
-./build.sh --run
+cd linux
+bash packaging/build-deb.sh
+sudo apt install ./dist/blitztext_*.deb
+blitztext tray
 ```
 
-For a local install into `/Applications`:
+Run from source:
 
 ```bash
-./build.sh --install --run
+cd linux
+./install.sh
+.venv/bin/python -m blitztext tray
 ```
 
-The generated `.app` is ad-hoc signed for local development only. Do not treat it as a trusted redistributable binary. A public binary release would need Developer ID signing and notarization.
+Other entry points:
 
-On first launch, either paste your own OpenAI API key for online workflows or install a WhisperKit CoreML model for local transcription. Rewriting workflows still require OpenAI.
+```bash
+.venv/bin/python -m blitztext gui
+.venv/bin/python -m blitztext run
+.venv/bin/python -m blitztext config-path
+.venv/bin/python -m blitztext --version
+```
 
-For fully local transcription, install a WhisperKit CoreML model and enable **Sicherer Lokaler Modus** in the app.
-
-For a slower, more explicit walkthrough, see [docs/setup.md](docs/setup.md).
-
-## Permissions
-
-Blitztext asks for:
-
-- **Microphone**: to record your voice.
-- **Accessibility**: to paste the result back into the app you were using.
-
-If you do not grant Accessibility permission, you can still copy results manually.
-
-Full Disk Access is not required. If auto-paste does not work even though transcription succeeds, open **System Settings -> Privacy & Security -> Accessibility**, enable Blitztext there, restart Blitztext, and try again with the cursor focused in a text field. If macOS shows multiple Blitztext entries, remove or disable the old ones and grant the permission to the app you just built or installed.
+For the full Linux guide, see [linux/README.md](linux/README.md). For setup details, see [docs/setup.md](docs/setup.md).
 
 ## Data Flow
 
 The preview has no custom backend.
 
 ```text
-Online transcription: Your Mac -> OpenAI Audio Transcriptions API
-Text rewriting:       Your Mac -> OpenAI Chat Completions API
-Local transcription:  Your Mac -> WhisperKit/CoreML on device
+Batch transcription:    Your Linux desktop -> local faster-whisper or your configured STT endpoint
+Realtime streaming:     Your Linux desktop -> your configured Riva/NIM realtime endpoint
+Text rewriting:         Your Linux desktop -> your configured OpenAI-compatible chat endpoint
+Text delivery:          Blitztext -> xdotool -> focused X11 window
 ```
-
-The app stores your OpenAI API key in the user's macOS Keychain.
 
 Read [docs/privacy.md](docs/privacy.md) before using the preview with sensitive content.
 
 ## Project Structure
 
 ```text
-BlitztextMac/
-  App/          App lifecycle and paste handling
-  Features/     Workflows, menu bar UI, settings
-  Services/     Recording, OpenAI calls, hotkeys, local storage
-  Views/        Shared SwiftUI views
-build.sh        Local build script
-docs/           Setup, privacy, roadmap, preflight, landing page notes
+linux/
+  blitztext/      Linux app package: GTK UI, daemon, STT/LLM engines, config
+  packaging/      Debian package script, desktop entry, icon assets
+  README.md       Detailed Linux guide
+BlitztextMac/     Legacy/upstream macOS app code kept for reference
+build.sh          Legacy macOS build script
+README.md         Linux-first project overview
+docs/             Setup, privacy, roadmap, release notes, web brief
 ```
 
-## Local Models
+## Configuration
 
-Local transcription is available as an experimental WhisperKit/CoreML path. The app does not bundle a model; choose one in the app, click install, and then switch on **Sicherer Lokaler Modus** from the menu bar or settings.
+Blitztext writes configuration to:
 
-See [docs/local-models.md](docs/local-models.md).
+```text
+~/.config/blitztext/config.toml
+```
+
+The Settings window can edit workflows, STT engines, LLM engines, input mode, microphone, language, benchmark clips, and About metadata. You can also edit the TOML directly.
+
+## Realtime STT Streaming
+
+For Nemotron ASR Streaming, add a realtime engine in **Settings > Engines** with `+ Stream`, save/restart, then create or edit a workflow with `mode = "stream"`.
+
+```toml
+[[stt_engine]]
+name = "Nemotron ASR Streaming"
+type = "riva_realtime"
+url = "http://127.0.0.1:8006/v1"
+model = ""
+
+[[workflow]]
+name = "STT Streaming"
+hotkey = "<ctrl>+<alt>+s"
+mode = "stream"
+```
+
+The tested Nemotron ASR Streaming NIM exposes an English `en-US` model, so use `language = "en"` or `language = "en-US"` in `[general]` for that engine.
 
 ## Contributing
 
-Contributions are welcome, especially if they make the preview easier to build, understand, or fork.
+Contributions are welcome, especially if they make the preview easier to build, understand, test, or fork.
 
 Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 
@@ -153,5 +167,5 @@ This is an experimental, non-commercial open-source project, provided as-is unde
 
 The companion website (blitztext.de) is operated by Blackboat Internet GmbH:
 
-- Impressum: https://www.blackboat.com/impressum
-- Datenschutz / Privacy: https://www.blackboat.com/datenschutz
+- Impressum: https://martin-bierschenk.de/impressum/
+- Datenschutz / Privacy: https://martin-bierschenk.de/datenschutz/

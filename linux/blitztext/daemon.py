@@ -17,12 +17,13 @@ from .llm import LLMError
 from .logbuffer import log
 from .notify import notify
 from .paste import active_window_id, deliver
+from .streaming import RivaRealtimeStreamer
 from .recorder import Recording, detect_recorder
 from .routing import route
 from .transcribe import Transcriber
 
 # status_cb(state, workflow_name, message)
-#   state in {"loading", "idle", "recording", "busy", "done", "error"}
+#   state in {"loading", "idle", "recording", "streaming", "busy", "done", "error"}
 StatusCallback = Callable[[str, str | None, str], None]
 
 
@@ -32,6 +33,8 @@ class Daemon:
         self.status_cb = status_cb
         self._lock = threading.Lock()
         self._recording: Recording | None = None
+        self._streaming: RivaRealtimeStreamer | None = None
+        self._stream_segment_text = ""
         self._active_workflow: Workflow | None = None
         self._target_window: str | None = None
         self._busy = False
@@ -83,28 +86,78 @@ class Daemon:
 
     @property
     def is_recording(self) -> bool:
-        return self._recording is not None
+        return self._recording is not None or self._streaming is not None
 
     # -- recording control ----------------------------------------------------
     def start_dictation(self, workflow: Workflow | None = None) -> None:
         wf = workflow or self._route_workflow
+        streamer: RivaRealtimeStreamer | None = None
         with self._lock:
-            if not self.ready or self._busy or self._recording is not None:
+            if not self.ready or self._busy or self.is_recording:
                 return
             self._target_window = active_window_id()
-            self._recording = Recording(self.recorder_name, self.cfg.mic)
             self._active_workflow = wf
+            if wf.mode == "stream":
+                engine = self.cfg.active_stt
+                if not engine.is_streaming:
+                    self._active_workflow = None
+                    self._emit("error", wf.name, "Active STT engine is not realtime streaming")
+                    self._notify("Streaming unavailable", "Select a riva_realtime STT engine.", "critical")
+                    return
+                self._stream_segment_text = ""
+                streamer = RivaRealtimeStreamer(
+                    engine,
+                    device=self.cfg.mic,
+                    language=self._stream_language(),
+                    on_text=self._on_stream_text,
+                    on_status=lambda msg: log(f"stream: {msg}"),
+                    on_error=lambda exc, label=wf.name: self._on_stream_error(label, exc),
+                )
+                self._streaming = streamer
+            else:
+                self._recording = Recording(self.recorder_name, self.cfg.mic)
+
+        if streamer is not None:
+            self._emit("streaming", wf.name, "Live transcript…")
+            self._notify(f"● {wf.name}", "Live transcript…")
+            try:
+                streamer.start()
+            except Exception as exc:  # noqa: BLE001
+                with self._lock:
+                    if self._streaming is streamer:
+                        self._streaming = None
+                        self._active_workflow = None
+                self._emit("error", wf.name, str(exc))
+                self._notify("Streaming failed", str(exc), "critical")
+            return
+
         self._emit("recording", wf.name, "Recording…")
         self._notify(f"● {wf.name}", "Recording…")
 
     def finish_dictation(self, send_enter: bool = False) -> None:
         with self._lock:
-            if self._recording is None:
-                return
-            rec, wf, win = self._recording, self._active_workflow, self._target_window
-            self._recording = None
-            self._active_workflow = None
-            self._busy = True
+            if self._streaming is not None:
+                streamer, wf, win = self._streaming, self._active_workflow, self._target_window
+                self._streaming = None
+                self._active_workflow = None
+                self._stream_segment_text = ""
+            else:
+                streamer = None
+                if self._recording is None:
+                    return
+                rec, wf, win = self._recording, self._active_workflow, self._target_window
+                self._recording = None
+                self._active_workflow = None
+                self._busy = True
+        if streamer is not None:
+            streamer.stop()
+            if send_enter:
+                from .paste import press_enter
+                press_enter(win)
+            self._emit("done", wf.name if wf else None, "Streaming stopped")
+            self._emit("idle", None, "Ready")
+            return
+
         audio_path = rec.stop()
         threading.Thread(
             target=self._process, args=(audio_path, wf, win, send_enter), daemon=True
@@ -112,11 +165,24 @@ class Daemon:
 
     def cancel_dictation(self) -> None:
         with self._lock:
-            if self._recording is None:
-                return
-            rec = self._recording
-            self._recording = None
-            self._active_workflow = None
+            if self._streaming is not None:
+                streamer = self._streaming
+                self._streaming = None
+                self._active_workflow = None
+                self._stream_segment_text = ""
+                rec = None
+            else:
+                streamer = None
+                if self._recording is None:
+                    return
+                rec = self._recording
+                self._recording = None
+                self._active_workflow = None
+        if streamer is not None:
+            streamer.stop()
+            self._emit("idle", None, "Cancelled")
+            self._notify("Cancelled", "Streaming stopped.", "low")
+            return
         rec.discard()
         self._emit("idle", None, "Cancelled")
         self._notify("Cancelled", "Recording discarded.", "low")
@@ -129,10 +195,55 @@ class Daemon:
         if self._busy:
             self._notify("Busy", "Still processing the last clip…", "low")
             return
-        if self._recording is None:
+        if not self.is_recording:
             self.start_dictation(workflow)
         else:
             self.finish_dictation(send_enter=False)
+
+    # -- live streaming -------------------------------------------------------
+    def _stream_language(self) -> str:
+        lang = (self.cfg.language or "").strip()
+        if lang.lower() == "en":
+            return "en-US"
+        if lang.lower().startswith("en-"):
+            return lang
+        return ""
+
+    def _stable_stream_text(self, text: str, final: bool) -> str:
+        text = quality.clean(text, strip_trailing_punctuation=False)
+        if final:
+            return text
+        cut = max(text.rfind(" "), text.rfind("\n"), text.rfind("\t"))
+        return text[:cut + 1] if cut >= 0 else ""
+
+    def _on_stream_text(self, text: str, final: bool) -> None:
+        stable = self._stable_stream_text(text, final)
+        if not stable:
+            return
+        with self._lock:
+            win = self._target_window
+            current = self._stream_segment_text
+        if not stable.startswith(current):
+            if not final:
+                return
+            suffix = ""
+        else:
+            suffix = stable[len(current):]
+        if suffix:
+            deliver(suffix, mode="type", window_id=win, type_delay_ms=self.cfg.type_delay_ms)
+        if final and (stable or current) and not stable.endswith((" ", "\n", "\t")):
+            deliver(" ", mode="type", window_id=win, type_delay_ms=self.cfg.type_delay_ms)
+        with self._lock:
+            self._stream_segment_text = "" if final else stable
+
+    def _on_stream_error(self, label: str, exc: Exception) -> None:
+        with self._lock:
+            self._streaming = None
+            self._active_workflow = None
+            self._stream_segment_text = ""
+        self._emit("error", label, str(exc))
+        self._notify("Streaming failed", str(exc), "critical")
+        log(f"ERROR ({label} streaming): {exc}")
 
     # -- worker ---------------------------------------------------------------
     def _process(self, audio_path, workflow: Workflow, window_id, send_enter: bool = False) -> None:
