@@ -9,7 +9,15 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-05
+
 ### Added
+- **Wyoming Wakeword Support**: Complete hands-free integration via Wyoming protocol (e.g., openWakeWord), with live configuration testing and model fetching in the UI.
+- **ATK Screen Reader Accessibility**: Fully mapped GTK labels, inputs, tooltips, and properties to the ATK bridge, enabling seamless navigation for blind users via screen readers like Orca.
+- **Drag-and-Drop Workflow Ordering**: Workflows in the main tray menu can now be reordered via native drag-and-drop.
+- **Voice Activity Detection (VAD) Auto-Stop**: Dictation now automatically stops after detecting 2.5 seconds of silence, removing the need to manually click Stop.
+- **Audio Feedback**: Added audible start/stop/cancel chimes mapping to system-native alert sounds.
+- **Benchmark Autocomplete**: The Benchmark UI automatically fills in the reference `.txt` transcript if it matches the selected audio file.
 - **Realtime STT streaming mode**: new `mode = "stream"` workflow support and a
   `riva_realtime` STT engine for Riva/NIM WebSocket transcription, including a
   Settings shortcut for Nemotron ASR Streaming on `http://127.0.0.1:8006/v1`.
