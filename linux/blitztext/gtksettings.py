@@ -5,6 +5,9 @@ Tabs:
   Engines  - STT and LLM engine presets with online/offline status + STT test
   Input    - input scheme, keys, quality gate
   General  - mic (with live level meter), output, language, notifications, autostart
+  Benchmark- compare STT engines against a reference clip
+  Log      - runtime log output
+  About    - version, source, changelog, and license
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
 
-from . import audio, autostart, benchmark, llm, logbuffer, stt  # noqa: E402
+from . import __version__, audio, autostart, benchmark, llm, logbuffer, stt  # noqa: E402
 from .config import Config, save  # noqa: E402
 from .llm import LLMEngine  # noqa: E402
 from .stt import STTEngine  # noqa: E402
@@ -190,6 +193,44 @@ def _page(nb: Gtk.Notebook, title: str) -> Gtk.Box:
     return box
 
 
+def _read_first(paths: list[Path], fallback: str = "Not available in this install.") -> str:
+    for path in paths:
+        try:
+            if path.exists():
+                return path.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            continue
+    return fallback
+
+
+def _app_paths() -> dict[str, list[Path]]:
+    pkg_dir = Path(__file__).resolve().parent
+    linux_dir = pkg_dir.parent
+    repo_dir = linux_dir.parent
+    return {
+        "changelog": [linux_dir / "CHANGELOG.md", Path("/opt/blitztext/CHANGELOG.md")],
+        "license": [repo_dir / "LICENSE", Path("/usr/share/doc/blitztext/copyright")],
+    }
+
+
+def _text_panel(text: str, *, monospace: bool = True, height: int = 180) -> Gtk.ScrolledWindow:
+    sw = Gtk.ScrolledWindow()
+    sw.set_min_content_height(height)
+    sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+    view = Gtk.TextView()
+    view.set_editable(False)
+    view.set_cursor_visible(False)
+    view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+    view.set_left_margin(8)
+    view.set_right_margin(8)
+    view.set_top_margin(8)
+    view.set_bottom_margin(8)
+    view.set_monospace(monospace)
+    view.get_buffer().set_text(text)
+    sw.add(view)
+    return sw
+
+
 class SettingsDialog:
     def __init__(self, parent: Gtk.Window, cfg: Config, daemon=None):
         self.cfg = cfg
@@ -212,6 +253,7 @@ class SettingsDialog:
         self._build_general(_page(nb, "General"))
         self._build_benchmark(_page(nb, "Benchmark"))
         self._build_log(_page(nb, "Log"))
+        self._build_about(_page(nb, "About"))
 
         self._bind_entry = None
         self._bind_pressed: list[str] = []
@@ -241,7 +283,7 @@ class SettingsDialog:
         self.wf_desc = _labeled(form, "Description", _entry(placeholder="Short description shown in the panel"))
         self.wf_keywords = _labeled(form, "Keywords (comma)", _entry(placeholder="nicer email, bessere email"))
         self.wf_hotkey = self._key_field(form, "Hotkey (optional)", "", placeholder="click Set, or e.g. <ctrl>+<alt>+e", width=130)
-        self.wf_mode = _labeled(form, "Mode", _combo(["transcribe", "rewrite"]))
+        self.wf_mode = _labeled(form, "Mode", _combo(["transcribe", "rewrite", "stream"]))
         self.wf_model = _labeled(form, "LLM model (opt.)", _entry(placeholder="blank = use the active LLM engine's model"))
         self.wf_temp = _labeled(form, "Temperature (opt.)", _entry(placeholder="blank = engine default (e.g. 0.3)"))
 
@@ -262,7 +304,7 @@ class SettingsDialog:
         self.wf_desc.set_text(wf.description)
         self.wf_keywords.set_text(", ".join(wf.keywords))
         self.wf_hotkey.set_text(wf.hotkey)
-        self.wf_mode.set_active(["transcribe", "rewrite"].index(wf.mode) if wf.mode in ("transcribe", "rewrite") else 0)
+        self.wf_mode.set_active(["transcribe", "rewrite", "stream"].index(wf.mode) if wf.mode in ("transcribe", "rewrite", "stream") else 0)
         self.wf_model.set_text(wf.model or "")
         self.wf_temp.set_text("" if wf.temperature is None else str(wf.temperature))
         self.wf_prompt.get_buffer().set_text(wf.prompt)
@@ -332,17 +374,18 @@ class SettingsDialog:
         self.stt_dot = Gtk.Label(); self.stt_dot.set_markup(_dot(GREY))
         bar.pack_start(self.stt_dot, False, False, 0)
         bar.pack_start(self.stt_combo, True, True, 0)
-        for label, cb in (("+ Add", self._stt_add), ("Delete", self._stt_delete),
-                          ("Test", self._stt_test), ("Refresh", lambda _b: self._refresh_status())):
+        for label, cb in (("+ Add", self._stt_add), ("+ Stream", self._stt_add_stream),
+                          ("Delete", self._stt_delete), ("Test", self._stt_test),
+                          ("Refresh", lambda _b: self._refresh_status())):
             b = Gtk.Button(label=label); b.connect("clicked", cb); bar.pack_start(b, False, False, 0)
         box.pack_start(bar, False, False, 2)
 
         form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL); box.pack_start(form, False, False, 2)
         self.stt_name = _labeled(form, "Name", _entry(placeholder="e.g. faster-whisper GPU"))
-        self.stt_type = _labeled(form, "Type", _combo(["local", "openai"]))
-        self.stt_url = _url_field(form, "URL", "http://localhost:8010/v1   (blank for local)",
+        self.stt_type = _labeled(form, "Type", _combo(["local", "openai", "riva_realtime"]))
+        self.stt_url = _url_field(form, "URL", "http://localhost:8010/v1  ·  realtime: http://localhost:8006/v1",
                                   lambda: self._populate_models(self.stt_model, self.stt_url.get_text().strip(), self.stt_key.get_text().strip()))
-        self.stt_model = _labeled(form, "Model", _model_combo("pick after entering URL  ·  tiny/base/small… for local"))
+        self.stt_model = _labeled(form, "Model", _model_combo("blank = server default  ·  tiny/base/small… for local"))
         self.stt_key = _labeled(form, "API key env", _entry(placeholder="env var name, e.g. GROQ_API_KEY   (optional)"))
         self.stt_url.connect("changed", lambda _e: self._schedule_models("stt"))
         self.stt_key.connect("changed", lambda _e: self._schedule_models("stt"))
@@ -395,13 +438,15 @@ class SettingsDialog:
             return
         e = self.cfg.stt_engines[idx]
         self.stt_name.set_text(e.name)
-        self.stt_type.set_active(["local", "openai"].index(e.type) if e.type in ("local", "openai") else 0)
+        self.stt_type.set_active(["local", "openai", "riva_realtime"].index(e.type) if e.type in ("local", "openai", "riva_realtime") else 0)
         self.stt_url.set_text(e.url); self.stt_key.set_text(e.api_key_env)
         if e.type == "local":
             _fill_combo(self.stt_model, ["tiny", "base", "small", "medium", "large-v3"], e.model or self.cfg.model)
-        else:
+        elif e.type == "openai":
             _fill_combo(self.stt_model, [], e.model)
             self._populate_models(self.stt_model, e.url, e.api_key_env)
+        else:
+            _fill_combo(self.stt_model, [], e.model)
         self._stt_idx = idx
 
     def _stt_commit(self) -> None:
@@ -431,6 +476,13 @@ class SettingsDialog:
         self.stt_combo.set_active(len(self.cfg.stt_engines) - 1)
         self._stt_load(len(self.cfg.stt_engines) - 1)
 
+    def _stt_add_stream(self, _b):
+        self._stt_commit()
+        e = STTEngine("Nemotron ASR Streaming", "riva_realtime", "http://127.0.0.1:8006/v1", "")
+        self.cfg.stt_engines.append(e); self.stt_combo.append_text(e.name)
+        self.stt_combo.set_active(len(self.cfg.stt_engines) - 1)
+        self._stt_load(len(self.cfg.stt_engines) - 1)
+
     def _stt_delete(self, _b):
         if len(self.cfg.stt_engines) <= 1:
             return
@@ -441,6 +493,9 @@ class SettingsDialog:
     def _stt_test(self, _b):
         self._stt_commit()
         e = self.cfg.stt_engines[self._stt_idx]
+        if e.is_streaming:
+            self.stt_result.set_markup("<i>Streaming engines are live-only. Use a preset with mode = stream.</i>")
+            return
         self.stt_result.set_markup("<i>Recording 4s — speak now…</i>")
         threading.Thread(target=self._run_stt_test, args=(e,), daemon=True).start()
 
@@ -528,10 +583,13 @@ class SettingsDialog:
         self.llm_combo.set_active(0); self._llm_load(0)
 
     def _stt_type_changed(self, _c) -> None:
-        if self.stt_type.get_active_text() == "local":
+        typ = self.stt_type.get_active_text()
+        if typ == "local":
             _fill_combo(self.stt_model, ["tiny", "base", "small", "medium", "large-v3"], _combo_text(self.stt_model))
-        else:
+        elif typ == "openai":
             self._schedule_models("stt")
+        else:
+            _fill_combo(self.stt_model, [], _combo_text(self.stt_model))
 
     # -- model dropdowns (fetched from {url}/models) ---
     def _populate_models(self, combo, url: str, key_env: str) -> None:
@@ -553,7 +611,7 @@ class SettingsDialog:
 
         def fire():
             setattr(self, attr, 0)
-            if which == "stt" and self.stt_type.get_active_text() != "local":
+            if which == "stt" and self.stt_type.get_active_text() == "openai":
                 self._populate_models(self.stt_model, self.stt_url.get_text().strip(),
                                       self.stt_key.get_text().strip())
             elif which == "llm":
@@ -685,12 +743,12 @@ class SettingsDialog:
         run.set_halign(Gtk.Align.START)
         page.pack_start(run, False, False, 6)
 
-        self.bench_store = Gtk.ListStore(str, str, str, str, str)
+        self.bench_store = Gtk.ListStore(str, str, str, str, str, str)
         tree = Gtk.TreeView(model=self.bench_store)
-        for title, i, expand in [("Engine", 0, False), ("Model", 1, False),
-                                 ("Time (s)", 2, False), ("Accuracy", 3, False), ("Output", 4, True)]:
+        for title, i, expand in [("Engine", 0, False), ("Model", 1, False), ("Device", 2, False),
+                                 ("Time (s)", 3, False), ("Accuracy", 4, False), ("Output", 5, True)]:
             r = Gtk.CellRendererText()
-            if i == 4:
+            if i == 5:
                 r.set_property("ellipsize", Pango.EllipsizeMode.END)
             col = Gtk.TreeViewColumn(title, r, text=i); col.set_resizable(True)
             col.set_expand(expand)
@@ -724,7 +782,7 @@ class SettingsDialog:
     def _bench_add_row(self, row) -> bool:
         acc = f"{row.accuracy:.1f}%" if row.ok else "—"
         out = row.text if row.ok else f"⚠ {row.error}"
-        self.bench_store.append([row.engine, row.model, f"{row.seconds:.2f}", acc, out])
+        self.bench_store.append([row.engine, row.model, row.device, f"{row.seconds:.2f}", acc, out])
         return False
 
     def _bench_done(self, rows) -> bool:
@@ -736,6 +794,44 @@ class SettingsDialog:
             f"<b>Fastest:</b> {GLib.markup_escape_text(fastest.engine)} ({fastest.seconds:.2f}s)"
             f"     ·     <b>Most accurate:</b> {GLib.markup_escape_text(acc.engine)} ({acc.accuracy:.1f}%)")
         return False
+
+    # ===== About ============================================================
+    def _build_about(self, page: Gtk.Box) -> None:
+        paths = _app_paths()
+        changelog = _read_first(paths["changelog"])
+        license_text = _read_first(paths["license"])
+
+        title = Gtk.Label(label="Blitztext", xalign=0.0)
+        title.set_markup("<b>Blitztext</b>")
+        page.pack_start(title, False, False, 0)
+
+        version = Gtk.Label(label=f"Version {__version__}", xalign=0.0)
+        version.set_selectable(True)
+        page.pack_start(version, False, False, 2)
+
+        source = Gtk.LinkButton.new_with_label(
+            "https://github.com/mARTin-B78/blitztext-app",
+            "Source: github.com/mARTin-B78/blitztext-app",
+        )
+        source.set_halign(Gtk.Align.START)
+        page.pack_start(source, False, False, 4)
+
+        license_label = Gtk.Label(label="License: MIT", xalign=0.0)
+        license_label.set_selectable(True)
+        page.pack_start(license_label, False, False, 2)
+
+        nb = Gtk.Notebook()
+        nb.set_margin_top(8)
+        page.pack_start(nb, True, True, 0)
+
+        changelog_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        changelog_box.pack_start(_text_panel(changelog, height=300), True, True, 0)
+        nb.append_page(changelog_box, Gtk.Label(label="Changelog"))
+
+        license_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        license_box.pack_start(_text_panel(license_text, height=300), True, True, 0)
+        nb.append_page(license_box, Gtk.Label(label="License"))
+
 
     # ===== Log ==============================================================
     def _build_log(self, page: Gtk.Box) -> None:
