@@ -107,6 +107,32 @@ class Daemon:
     def is_recording(self) -> bool:
         return self._recording is not None or self._streaming is not None
 
+    def _vad_start(self) -> None:
+        self._vad_stop()
+        import time
+        from . import audio
+        from gi.repository import GLib
+        
+        self._vad_started_at = time.time()
+        self._vad_last_speech = time.time()
+        
+        def on_level(level):
+            now = time.time()
+            if level > 0.05:
+                self._vad_last_speech = now
+            elif now - self._vad_started_at > 2.0 and now - self._vad_last_speech > 2.5:
+                if getattr(self, "is_recording", False):
+                    GLib.idle_add(lambda: self.finish_dictation(send_enter=False))
+                    self._vad_stop()
+
+        self._vad_meter = audio.LevelMeter(self.cfg.mic, on_level=on_level)
+        self._vad_meter.start()
+
+    def _vad_stop(self) -> None:
+        if getattr(self, '_vad_meter', None) is not None:
+            self._vad_meter.stop()
+            self._vad_meter = None
+
     # -- recording control ----------------------------------------------------
     def start_dictation(self, workflow: Workflow | None = None) -> None:
         wf = workflow or self._route_workflow
@@ -135,6 +161,7 @@ class Daemon:
                 self._streaming = streamer
             else:
                 self._recording = Recording(self.recorder_name, self.cfg.mic)
+                self._vad_start()
 
         if streamer is not None:
             self._emit("streaming", wf.name, "Live transcript…")
@@ -154,6 +181,7 @@ class Daemon:
         self._notify(f"● {wf.name}", "Recording…")
 
     def finish_dictation(self, send_enter: bool = False) -> None:
+        self._vad_stop()
         with self._lock:
             if self._streaming is not None:
                 streamer, wf, win = self._streaming, self._active_workflow, self._target_window
@@ -183,6 +211,7 @@ class Daemon:
         ).start()
 
     def cancel_dictation(self) -> None:
+        self._vad_stop()
         with self._lock:
             if self._streaming is not None:
                 streamer = self._streaming
