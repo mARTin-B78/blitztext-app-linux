@@ -19,6 +19,7 @@ class Transcriber:
         beam_size: int = 5,
     ):
         self.beam_size = beam_size
+        self.device = "cpu"  # resolved actual device, set by _load
         self._model = self._load(model, device, compute_type)
 
     @staticmethod
@@ -45,6 +46,7 @@ class Transcriber:
                 log(f"Loading Whisper '{model}' on {dev} ({ct})… (first run may download the model)")
                 m = WhisperModel(model, device=dev, compute_type=ct)
                 log(f"Whisper '{model}' ready on {dev} ({ct})")
+                self.device = dev
                 return m
             except Exception as exc:  # noqa: BLE001 - CUDA libs may be absent
                 last_err = exc
