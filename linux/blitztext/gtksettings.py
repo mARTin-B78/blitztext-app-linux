@@ -912,6 +912,19 @@ class SettingsDialog:
             c.device = self.stt_device.get_active_text() or "auto"
             c.compute_type = self.stt_compute.get_active_text() or "auto"
             autostart.set_enabled(self.gen_boot.get_active())
+            
+            if c.wakeword_enabled:
+                import socket
+                from urllib.parse import urlparse
+                parsed = urlparse(c.wakeword_uri)
+                host = parsed.hostname or "127.0.0.1"
+                port = parsed.port or 10400
+                try:
+                    with socket.create_connection((host, port), timeout=1.5):
+                        pass
+                except OSError as e:
+                    self._error(f"Cannot connect to Wakeword server at {c.wakeword_uri}:\n{e}\n\nPlease check your server or disable wakeword.")
+                    return False
         except ValueError as exc:
             self._error(f"Check numeric fields: {exc}")
             return False
