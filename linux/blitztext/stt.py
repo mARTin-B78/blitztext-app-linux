@@ -57,6 +57,33 @@ def status(engine: STTEngine, timeout: float = 2.0) -> bool:
     return reachable(engine.url, timeout)
 
 
+def list_models(base_url: str, api_key_env: str = "", timeout: float = 5.0) -> list[str]:
+    """Fetch model ids from an OpenAI-compatible (or Ollama-style) /models endpoint."""
+    import os
+
+    if not base_url:
+        return []
+    url = base_url.rstrip("/") + "/models"
+    headers = {}
+    key = os.environ.get(api_key_env) if api_key_env else None
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, json.JSONDecodeError, OSError):
+        return []
+
+    items = data.get("data") if isinstance(data, dict) else None
+    if isinstance(items, list):  # OpenAI shape: {"data":[{"id":...}]}
+        return [m["id"] for m in items if isinstance(m, dict) and m.get("id")]
+    items = data.get("models") if isinstance(data, dict) else None
+    if isinstance(items, list):  # Ollama shape: {"models":[{"name"/"model":...}]}
+        return [m.get("name") or m.get("model") for m in items if (m.get("name") or m.get("model"))]
+    return []
+
+
 def _host_port(url: str) -> tuple[str | None, int]:
     try:
         u = urlparse(url if "://" in url else "http://" + url)
