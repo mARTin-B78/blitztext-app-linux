@@ -45,8 +45,11 @@ def _labeled(parent: Gtk.Box, label: str, widget: Gtk.Widget, width: int = 130) 
     return widget
 
 
-def _entry(text="") -> Gtk.Entry:
-    e = Gtk.Entry(); e.set_text(str(text)); e.set_hexpand(True); return e
+def _entry(text="", placeholder="") -> Gtk.Entry:
+    e = Gtk.Entry(); e.set_text(str(text)); e.set_hexpand(True)
+    if placeholder:
+        e.set_placeholder_text(placeholder)
+    return e
 
 
 def _combo(options, active=None) -> Gtk.ComboBoxText:
@@ -108,13 +111,13 @@ class SettingsDialog:
 
         form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         page.pack_start(form, True, True, 6)
-        self.wf_name = _labeled(form, "Name", _entry())
-        self.wf_desc = _labeled(form, "Description", _entry())
-        self.wf_keywords = _labeled(form, "Keywords (comma)", _entry())
-        self.wf_hotkey = _labeled(form, "Hotkey (optional)", _entry())
+        self.wf_name = _labeled(form, "Name", _entry(placeholder="Preset name"))
+        self.wf_desc = _labeled(form, "Description", _entry(placeholder="Short description shown in the panel"))
+        self.wf_keywords = _labeled(form, "Keywords (comma)", _entry(placeholder="nicer email, bessere email"))
+        self.wf_hotkey = _labeled(form, "Hotkey (optional)", _entry(placeholder="<ctrl>+<alt>+e   (blank = none)"))
         self.wf_mode = _labeled(form, "Mode", _combo(["transcribe", "rewrite"]))
-        self.wf_model = _labeled(form, "LLM model (opt.)", _entry())
-        self.wf_temp = _labeled(form, "Temperature (opt.)", _entry())
+        self.wf_model = _labeled(form, "LLM model (opt.)", _entry(placeholder="blank = use the active LLM engine's model"))
+        self.wf_temp = _labeled(form, "Temperature (opt.)", _entry(placeholder="blank = engine default (e.g. 0.3)"))
 
         form.pack_start(Gtk.Label(label="Prompt sent to the LLM (rewrite mode):", xalign=0.0), False, False, 6)
         frame = Gtk.Frame(); frame.set_shadow_type(Gtk.ShadowType.IN)
@@ -210,9 +213,9 @@ class SettingsDialog:
 
         form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL); box.pack_start(form, False, False, 2)
         self.stt_type = _labeled(form, "Type", _combo(["local", "openai"]))
-        self.stt_url = _labeled(form, "URL", _entry())
-        self.stt_model = _labeled(form, "Model", _entry())
-        self.stt_key = _labeled(form, "API key env", _entry())
+        self.stt_url = _labeled(form, "URL", _entry(placeholder="http://localhost:8010/v1   (blank for local)"))
+        self.stt_model = _labeled(form, "Model", _entry(placeholder="e.g. Systran/faster-whisper-base  ·  'small' for local"))
+        self.stt_key = _labeled(form, "API key env", _entry(placeholder="env var name, e.g. GROQ_API_KEY   (optional)"))
         self.stt_result = Gtk.Label(xalign=0.0); self.stt_result.set_line_wrap(True)
         box.pack_start(self.stt_result, False, False, 2)
         self._stt_load(self.stt_combo.get_active())
@@ -237,10 +240,10 @@ class SettingsDialog:
         box.pack_start(bar, False, False, 2)
 
         form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL); box.pack_start(form, False, False, 2)
-        self.llm_url = _labeled(form, "Base URL", _entry())
-        self.llm_model = _labeled(form, "Model", _entry())
-        self.llm_key = _labeled(form, "API key env", _entry())
-        self.llm_temp = _labeled(form, "Temperature", _entry())
+        self.llm_url = _labeled(form, "Base URL", _entry(placeholder="http://localhost:28080/v1  ·  https://api.openai.com/v1"))
+        self.llm_model = _labeled(form, "Model", _entry(placeholder="e.g. gpt-4o-mini, Qwen3.5-4B"))
+        self.llm_key = _labeled(form, "API key env", _entry(placeholder="env var name, e.g. OPENAI_API_KEY   (blank for local)"))
+        self.llm_temp = _labeled(form, "Temperature", _entry(placeholder="0.3"))
         self._llm_load(self.llm_combo.get_active())
         return box
 
@@ -390,7 +393,7 @@ class SettingsDialog:
         self.gen_mic.connect("changed", lambda _c: self._restart_meter())
 
         self.gen_output = _labeled(page, "Output", _combo(["type", "paste"], self.cfg.output))
-        self.gen_lang = _labeled(page, "Language hint", _entry(self.cfg.language))
+        self.gen_lang = _labeled(page, "Language hint", _entry(self.cfg.language, placeholder="de, en, …   (blank = autodetect)"))
         self.gen_notify = Gtk.Switch(); self.gen_notify.set_active(self.cfg.notify); self.gen_notify.set_halign(Gtk.Align.START)
         _labeled(page, "Notifications", self.gen_notify)
         self.gen_boot = Gtk.Switch(); self.gen_boot.set_active(autostart.is_enabled()); self.gen_boot.set_halign(Gtk.Align.START)
