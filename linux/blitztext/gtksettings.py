@@ -94,45 +94,92 @@ def _combo(options, active=None) -> Gtk.ComboBoxText:
     return c
 
 
-def _model_combo(placeholder="") -> Gtk.ComboBoxText:
-    """Editable combo with a type-to-search completion (dropdown + searchbar)."""
-    c = Gtk.ComboBoxText.new_with_entry()
-    c.set_hexpand(True)
-    entry = c.get_child()
+class ModelPicker(Gtk.Box):
+    """An editable model field + a ▾ button opening a popover with a search bar
+    on top and a scrollable, filtered list of models."""
+
+    def __init__(self, placeholder: str = ""):
+        super().__init__(spacing=4)
+        self.entry = Gtk.Entry(); self.entry.set_hexpand(True)
+        if placeholder:
+            self.entry.set_placeholder_text(placeholder)
+        self.pack_start(self.entry, True, True, 0)
+        self.btn = Gtk.Button.new_from_icon_name("pan-down-symbolic", Gtk.IconSize.BUTTON)
+        self.btn.set_tooltip_text("Browse models")
+        self.pack_start(self.btn, False, False, 0)
+
+        self.pop = Gtk.Popover(); self.pop.set_relative_to(self.btn)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        for m in ("top", "bottom", "start", "end"):
+            getattr(box, f"set_margin_{m}")(6)
+        self.search = Gtk.SearchEntry(); self.search.set_placeholder_text("Search models…")
+        box.pack_start(self.search, False, False, 0)
+        sw = Gtk.ScrolledWindow()
+        sw.set_min_content_height(300); sw.set_min_content_width(380)
+        sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.listbox = Gtk.ListBox()
+        self.listbox.set_filter_func(self._filter)
+        sw.add(self.listbox); box.pack_start(sw, True, True, 0)
+        self.pop.add(box)
+
+        self.btn.connect("clicked", self._open)
+        self.search.connect("search-changed", lambda _s: self.listbox.invalidate_filter())
+        self.listbox.connect("row-activated", self._activated)
+
+    def _filter(self, row) -> bool:
+        return self.search.get_text().lower() in row.get_child().get_text().lower()
+
+    def _open(self, _b) -> None:
+        self.pop.show_all(); self.search.set_text(""); self.search.grab_focus()
+
+    def _activated(self, _lb, row) -> None:
+        self.entry.set_text(row.get_child().get_text())
+        self.pop.popdown()
+
+    def set_models(self, models) -> None:
+        for child in self.listbox.get_children():
+            self.listbox.remove(child)
+        for m in models:
+            row = Gtk.ListBoxRow()
+            lbl = Gtk.Label(label=m, xalign=0.0)
+            lbl.set_margin_top(4); lbl.set_margin_bottom(4); lbl.set_margin_start(8); lbl.set_margin_end(8)
+            row.add(lbl); self.listbox.add(row)
+        self.listbox.show_all()
+
+    def get_text(self) -> str:
+        return self.entry.get_text().strip()
+
+    def set_text(self, value: str) -> None:
+        self.entry.set_text(value or "")
+
+
+def _model_combo(placeholder="") -> ModelPicker:
+    return ModelPicker(placeholder)
+
+
+def _combo_text(c: ModelPicker) -> str:
+    return c.get_text()
+
+
+def _fill_combo(combo: ModelPicker, options, current: str) -> None:
+    combo.set_models(list(options))
+    combo.set_text(current or "")
+
+
+def _url_field(parent: Gtk.Box, label: str, placeholder: str, on_reload) -> Gtk.Entry:
+    row = Gtk.Box(spacing=10); row.set_margin_top(3); row.set_margin_bottom(3)
+    lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(130, -1)
+    row.pack_start(lbl, False, False, 0)
+    e = Gtk.Entry(); e.set_hexpand(True)
     if placeholder:
-        entry.set_placeholder_text(placeholder)
-
-    store = Gtk.ListStore(str)
-    comp = Gtk.EntryCompletion()
-    comp.set_model(store)
-    comp.set_text_column(0)
-    comp.set_popup_completion(True)
-    comp.set_minimum_key_length(1)
-
-    def _match(completion, key, it, *_a):
-        row = completion.get_model()[it][0]
-        return key.lower() in row.lower()  # substring, anywhere
-
-    comp.set_match_func(_match)
-    entry.set_completion(comp)
-    c._models_store = store
-    return c
-
-
-def _combo_text(c: Gtk.ComboBoxText) -> str:
-    return (c.get_active_text() or "").strip()
-
-
-def _fill_combo(combo: Gtk.ComboBoxText, options, current: str) -> None:
-    combo.remove_all()
-    store = getattr(combo, "_models_store", None)
-    if store is not None:
-        store.clear()
-    for o in options:
-        combo.append_text(o)
-        if store is not None:
-            store.append([o])
-    combo.get_child().set_text(current or "")
+        e.set_placeholder_text(placeholder)
+    row.pack_start(e, True, True, 0)
+    btn = Gtk.Button.new_from_icon_name("view-refresh-symbolic", Gtk.IconSize.BUTTON)
+    btn.set_tooltip_text("Load models from this URL")
+    btn.connect("clicked", lambda _b: on_reload())
+    row.pack_start(btn, False, False, 0)
+    parent.pack_start(row, False, False, 0)
+    return e
 
 
 def _page(nb: Gtk.Notebook, title: str) -> Gtk.Box:
@@ -289,7 +336,8 @@ class SettingsDialog:
 
         form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL); box.pack_start(form, False, False, 2)
         self.stt_type = _labeled(form, "Type", _combo(["local", "openai"]))
-        self.stt_url = _labeled(form, "URL", _entry(placeholder="http://localhost:8010/v1   (blank for local)"))
+        self.stt_url = _url_field(form, "URL", "http://localhost:8010/v1   (blank for local)",
+                                  lambda: self._populate_models(self.stt_model, self.stt_url.get_text().strip(), self.stt_key.get_text().strip()))
         self.stt_model = _labeled(form, "Model", _model_combo("pick after entering URL  ·  tiny/base/small… for local"))
         self.stt_key = _labeled(form, "API key env", _entry(placeholder="env var name, e.g. GROQ_API_KEY   (optional)"))
         self.stt_url.connect("changed", lambda _e: self._schedule_models("stt"))
@@ -319,7 +367,8 @@ class SettingsDialog:
         box.pack_start(bar, False, False, 2)
 
         form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL); box.pack_start(form, False, False, 2)
-        self.llm_url = _labeled(form, "Base URL", _entry(placeholder="http://localhost:28080/v1  ·  https://api.openai.com/v1"))
+        self.llm_url = _url_field(form, "Base URL", "http://localhost:28080/v1  ·  https://api.openai.com/v1",
+                                  lambda: self._populate_models(self.llm_model, self.llm_url.get_text().strip(), self.llm_key.get_text().strip()))
         self.llm_model = _labeled(form, "Model", _model_combo("pick after entering URL"))
         self.llm_key = _labeled(form, "API key env", _entry(placeholder="env var name, e.g. OPENAI_API_KEY   (blank for local)"))
         self.llm_temp = _labeled(form, "Temperature", _entry(placeholder="0.3"))
