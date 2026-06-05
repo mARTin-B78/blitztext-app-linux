@@ -30,6 +30,8 @@ class Transcriber:
     def _load(self, model: str, device: str, compute_type: str):
         from faster_whisper import WhisperModel
 
+        from .logbuffer import log
+
         attempts: list[str]
         if device == "auto":
             attempts = ["cuda", "cpu"]
@@ -40,13 +42,14 @@ class Transcriber:
         for dev in attempts:
             try:
                 ct = self._resolve_compute_type(dev, compute_type)
+                log(f"Loading Whisper '{model}' on {dev} ({ct})… (first run may download the model)")
                 m = WhisperModel(model, device=dev, compute_type=ct)
-                print(f"[blitztext] Whisper '{model}' loaded on {dev} ({ct})", file=sys.stderr)
+                log(f"Whisper '{model}' ready on {dev} ({ct})")
                 return m
             except Exception as exc:  # noqa: BLE001 - CUDA libs may be absent
                 last_err = exc
                 if dev != attempts[-1]:
-                    print(f"[blitztext] {dev} unavailable ({exc}); trying next device", file=sys.stderr)
+                    log(f"{dev} unavailable ({exc}); trying next device")
         raise RuntimeError(f"Failed to load Whisper model '{model}': {last_err}")
 
     def transcribe(self, audio_path: Path, language: str = "", hotwords: str = "") -> str:

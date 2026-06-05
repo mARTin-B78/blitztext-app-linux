@@ -14,6 +14,7 @@ from typing import Callable
 from . import llm, quality, stt
 from .config import Config, Workflow
 from .llm import LLMError
+from .logbuffer import log
 from .notify import notify
 from .paste import active_window_id, deliver
 from .recorder import Recording, detect_recorder
@@ -56,6 +57,7 @@ class Daemon:
     # -- model load (slow; call off the UI thread) ----------------------------
     def prepare(self) -> None:
         engine = self.cfg.active_stt
+        log(f"STT engine: {engine.name} ({'local' if engine.is_local else engine.url})")
         if engine.is_local:
             model = engine.model or self.cfg.model
             self._emit("loading", None, f"Loading Whisper '{model}'…")
@@ -70,7 +72,9 @@ class Daemon:
             # Remote STT engine — no local model to load.
             self.transcriber = None
             self._emit("loading", None, f"Using {engine.name}")
+            log(f"Using remote STT '{engine.name}' — no local model to load")
         self._prepared = True
+        log("Ready.")
         self._emit("idle", None, "Ready")
 
     @property
@@ -208,11 +212,12 @@ class Daemon:
                 from .paste import press_enter
                 press_enter(window_id)
             self._emit("done", label, text)
+            log(f"✓ {label}: {text[:120]}")
             self._notify(f"✓ {label}", text[:80] + ("…" if len(text) > 80 else ""))
         except Exception as exc:  # noqa: BLE001 - surface any failure
             self._emit("error", label, str(exc))
             self._notify("Error", str(exc), "critical")
-            print(f"[blitztext] error: {exc}", file=sys.stderr)
+            log(f"ERROR ({label}): {exc}")
         finally:
             audio_path.unlink(missing_ok=True)
             with self._lock:
@@ -270,12 +275,10 @@ class Daemon:
     def run(self) -> None:
         self.prepare()
         if self.cfg.input_mode == "modifiers":
-            scheme = "Ctrl+Win start · Ctrl stop+paste · Alt stop+paste+Enter · Esc cancel"
-            print(f"[blitztext] ready. Recorder: {self.recorder_name}. Input: {scheme}", file=sys.stderr)
+            log(f"Recorder: {self.recorder_name}. Input: Ctrl+Win start · Ctrl stop+paste · Alt stop+paste+Enter · Esc cancel")
         else:
-            lines = [f"  {self.cfg.routing_hotkey}  →  Voice routing"] if self.cfg.routing_enabled else []
-            lines += [f"  {wf.hotkey}  →  {wf.name}" for wf in self.cfg.workflows if wf.hotkey]
-            print(f"[blitztext] ready. Recorder: {self.recorder_name}. Hotkeys:\n" + "\n".join(lines), file=sys.stderr)
+            keys = ", ".join([f"{self.cfg.routing_hotkey}→Voice"] if self.cfg.routing_enabled else [])
+            log(f"Recorder: {self.recorder_name}. Hotkeys: {keys}")
         self._notify("Blitztext ready", "Focus a text field and start dictating.")
 
         listener = self.start_input()

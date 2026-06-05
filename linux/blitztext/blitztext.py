@@ -29,6 +29,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     cmd = args.cmd or "tray"
 
+    from .logbuffer import install_logging
+    install_logging()
+
     if cmd == "config-path":
         print(ensure_default(CONFIG_PATH))
         return 0
