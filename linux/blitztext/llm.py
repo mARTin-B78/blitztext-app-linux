@@ -24,6 +24,7 @@ class LLMEngine:
     model: str = "gpt-4o-mini"
     api_key_env: str = "OPENAI_API_KEY"
     temperature: float = 0.3
+    type: str = "cloud"                       # "local" | "cloud" (label/category)
 
     @property
     def api_key(self) -> str | None:
