@@ -1,0 +1,141 @@
+"""Wakeword detection using Wyoming protocol (openwakeword).
+
+Runs a background thread that captures audio and streams it to a Wyoming 
+server (e.g. rhasspy/wyoming-openwakeword). When a detection event occurs, 
+it triggers the main daemon.
+
+Respects /tmp/wake_muted to allow easy desktop integration via scripts.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import socket
+import subprocess
+import threading
+import time
+from urllib.parse import urlparse
+
+from . import logbuffer
+
+_MUTE_FILE = "/tmp/wake_muted"
+
+class WakewordListener:
+    def __init__(self, uri: str, model: str, mic: str, on_detect):
+        self.uri = uri
+        self.model = model
+        self.mic = mic
+        self.on_detect = on_detect
+        
+        self._stop_event = threading.Event()
+        self._thread = None
+        self._cooldown_until = 0.0
+
+    def start(self):
+        if self._thread is not None:
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="WakewordListener")
+        self._thread.start()
+
+    def stop(self):
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=2.0)
+            self._thread = None
+
+    def _run(self):
+        while not self._stop_event.is_set():
+            try:
+                self._stream()
+            except Exception as e:
+                logbuffer.log(f"[wakeword] Connection error: {e}")
+                time.sleep(3)  # Retry backoff
+
+    def _stream(self):
+        parsed = urlparse(self.uri)
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or 10400
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(5.0)
+            sock.connect((host, port))
+            logbuffer.log(f"[wakeword] Connected to {self.uri}")
+            
+            # Request detection for the specific model
+            detect_msg = {"type": "detect", "data": {"names": [self.model]}}
+            sock.sendall((json.dumps(detect_msg) + "\n").encode("utf-8"))
+
+            audio_start = {"type": "audio-start", "data": {"rate": 16000, "width": 2, "channels": 1}}
+            sock.sendall((json.dumps(audio_start) + "\n").encode("utf-8"))
+
+            # Start recording subprocess (16kHz, 16-bit, mono)
+            cmd = ["pw-record", "--rate=16000", "--channels=1", "--format=s16", "-"]
+            if self.mic:
+                cmd.extend(["--target", self.mic])
+            
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            
+            try:
+                sock.settimeout(1.0)
+                while not self._stop_event.is_set() and proc.poll() is None:
+                    # Read chunk
+                    chunk = proc.stdout.read(3200) # 100ms of 16kHz 16-bit mono
+                    if not chunk:
+                        break
+                    
+                    # Send chunk
+                    header = {"type": "audio-chunk", "data": {"rate": 16000, "width": 2, "channels": 1}, "payload_length": len(chunk)}
+                    sock.sendall((json.dumps(header) + "\n").encode("utf-8"))
+                    sock.sendall(chunk)
+
+                    # Check for responses (detections)
+                    try:
+                        while True:
+                            # Read line
+                            line = b""
+                            while not line.endswith(b"\n"):
+                                byte = sock.recv(1)
+                                if not byte:
+                                    break
+                                line += byte
+                            
+                            if not line:
+                                break
+
+                            msg = json.loads(line.decode("utf-8"))
+                            
+                            if msg.get("type") == "detection":
+                                self._handle_detection()
+                                
+                            payload_len = msg.get("payload_length", 0)
+                            if payload_len > 0:
+                                # Consume payload
+                                remaining = payload_len
+                                while remaining > 0:
+                                    received = sock.recv(min(remaining, 4096))
+                                    if not received:
+                                        break
+                                    remaining -= len(received)
+
+                    except socket.timeout:
+                        pass # No messages received, continue streaming
+            finally:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+
+    def _handle_detection(self):
+        if time.time() < self._cooldown_until:
+            return
+            
+        if os.path.exists(_MUTE_FILE):
+            logbuffer.log("[wakeword] Detected, but muted via /tmp/wake_muted")
+            return
+            
+        logbuffer.log(f"[wakeword] Detected '{self.model}'!")
+        self._cooldown_until = time.time() + 3.0  # 3s cooldown
+        self.on_detect()

@@ -45,6 +45,24 @@ class Daemon:
 
         self.recorder_name = detect_recorder(cfg.recorder)
         self.transcriber: Transcriber | None = None
+        self._wakeword_listener = None
+
+    def _init_wakeword(self):
+        if self.cfg.wakeword_enabled:
+            from .wakeword import WakewordListener
+            self._wakeword_listener = WakewordListener(
+                uri=self.cfg.wakeword_uri,
+                model=self.cfg.wakeword_model,
+                mic=self.cfg.mic,
+                on_detect=self._on_wakeword,
+            )
+            self._wakeword_listener.start()
+
+    def _on_wakeword(self):
+        if not self.is_recording:
+            # Wakeword only starts dictation. You still stop it via keyboard, 
+            # or we could make it toggle. A toggle is easiest.
+            self.toggle(self._route_workflow)
 
     # -- feedback -------------------------------------------------------------
     def _notify(self, title: str, body: str = "", urgency: str = "normal") -> None:
@@ -77,6 +95,7 @@ class Daemon:
             self._emit("loading", None, f"Using {engine.name}")
             log(f"Using remote STT '{engine.name}' — no local model to load")
         self._prepared = True
+        self._init_wakeword()
         log("Ready.")
         self._emit("idle", None, "Ready")
 
@@ -376,6 +395,8 @@ class Daemon:
             scheme.stop_listener()
             self._scheme = None
         self.stop_hotkeys()
+        if self._wakeword_listener:
+            self._wakeword_listener.stop()
 
     def stop_hotkeys(self) -> None:
         if self._listener is not None:

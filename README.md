@@ -70,7 +70,7 @@ Stream:    hotkey → mic PCM chunks → Riva/NIM WebSocket → live words typed
 
 ## Requirements
 
-- **Linux desktop with an X11 session** (Wayland needs `ydotool`/`wtype` — not yet supported)
+- **Linux desktop with an X11 or Wayland session** (Wayland uses `wtype` or `ydotool`)
 - **Python 3.11+** (for source installs)
 - **Host tools:**
 
@@ -355,7 +355,7 @@ systemctl --user enable --now blitztext
 
 ## Current Limitations
 
-- **X11 only.** Text delivery uses `xdotool`. Wayland support (`wtype`/`ydotool`) is planned but not implemented.
+- **Wayland support** requires `wtype` or `ydotool`. Wayland security prevents global window focus manipulation, so text is delivered to whatever window is active when delivery occurs.
 - **No automated tests yet.** Contributions welcome (routing, quality gate, config parsing are all highly testable).
 - **Realtime streaming** requires a compatible Riva/NIM server.
 - **Local STT speed** depends on your hardware, Whisper model size, and CTranslate2 build (CPU `int8` by default).
@@ -372,7 +372,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 - Add Linux screenshots
 - Improve error messages and first-run setup
 - Document known-good STT/LLM engine configurations
-- Add Wayland support via `wtype` or `ydotool`
+- Document known-good Wayland configurations for specific compositors
 
 **Quick development loop:**
 

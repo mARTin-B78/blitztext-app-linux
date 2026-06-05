@@ -73,6 +73,10 @@ class Config:
     # llm engines (presets) for the rewrite step
     llm_engines: list[LLMEngine] = field(default_factory=list)
     llm_active: str = ""
+    # wakeword
+    wakeword_enabled: bool = False
+    wakeword_uri: str = "tcp://127.0.0.1:10400"
+    wakeword_model: str = "okay_computer"
     # workflows
     workflows: list[Workflow] = field(default_factory=list)
 
@@ -127,6 +131,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
     rt = data.get("routing", {})
     inp = data.get("input", {})
     q = data.get("quality", {})
+    ww = data.get("wakeword", {})
 
     cfg = Config(
         recorder=g.get("recorder", "auto"),
@@ -158,6 +163,9 @@ def load(path: Path = CONFIG_PATH) -> Config:
         silence_rms=float(q.get("silence_rms", 150.0)),
         reject_hallucinations=bool(q.get("reject_hallucinations", True)),
         strip_trailing_punctuation=bool(q.get("strip_trailing_punctuation", False)),
+        wakeword_enabled=bool(ww.get("enabled", False)),
+        wakeword_uri=ww.get("uri", "tcp://127.0.0.1:10400"),
+        wakeword_model=ww.get("model", "okay_computer"),
     )
 
     for entry in data.get("workflow", []):
@@ -256,6 +264,11 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "silence_rms": cfg.silence_rms,
             "reject_hallucinations": cfg.reject_hallucinations,
             "strip_trailing_punctuation": cfg.strip_trailing_punctuation,
+        },
+        "wakeword": {
+            "enabled": cfg.wakeword_enabled,
+            "uri": cfg.wakeword_uri,
+            "model": cfg.wakeword_model,
         },
         "stt": {"active": cfg.stt_active},
         "stt_engine": [
@@ -361,6 +374,13 @@ enabled = true
 hotkey = "<ctrl>+<alt>+<space>"
 default = "Transcribe"   # preset used when no keyword is recognised
 threshold = 0.82         # 0..1 fuzzy-match strictness (higher = stricter)
+
+[wakeword]
+# Hands-free dictation using an external wyoming-openwakeword server.
+# Respects the /tmp/wake_muted file to disable listening.
+enabled = false
+uri = "tcp://127.0.0.1:10400"
+model = "okay_computer"
 
 # ----------------------------------------------------------------------------
 # Speech-to-text engines (presets). The active one is used for transcription.
