@@ -90,9 +90,17 @@ Stream:    hotkey → mic PCM chunks → Riva/NIM WebSocket → live words typed
 
 ## Installation & Setup
 
-### Option A — Debian Package (recommended for Ubuntu/Debian)
+### Option A — One-line installer (recommended)
 
-Build a `.deb` and install it. No pip, no network needed at install time:
+Install on any Ubuntu/Debian machine with a single command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mARTin-B78/blitztext-app-linux/main/install-linux.sh | bash
+```
+
+This clones the repo, builds a `.deb`, installs it with `apt` (pulling in all dependencies), and cleans up. After it finishes, **Blitztext** appears in your app grid.
+
+### Option B — Build the Debian package yourself
 
 ```bash
 git clone https://github.com/mARTin-B78/blitztext-app-linux.git
@@ -103,7 +111,7 @@ sudo apt install ./dist/blitztext_*.deb
 
 This installs Blitztext to `/opt/blitztext`, adds a **Blitztext** entry to your application menu, installs the app icon, and pulls in system dependencies automatically. Remove with `sudo apt remove blitztext`.
 
-### Option B — Run from Source (venv)
+### Option C — Run from Source (venv)
 
 ```bash
 git clone https://github.com/mARTin-B78/blitztext-app-linux.git
