@@ -69,10 +69,23 @@ def _format_combo(tokens: list[str]) -> str:
     return "+".join(parts)
 
 
-def _labeled(parent: Gtk.Box, label: str, widget: Gtk.Widget, width: int = 130) -> Gtk.Widget:
+def _labeled(parent: Gtk.Box, label: str, widget: Gtk.Widget, width: int = 130, tooltip: str = "") -> Gtk.Widget:
     row = Gtk.Box(spacing=10)
     row.set_margin_top(3); row.set_margin_bottom(3)
     lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(width, -1)
+    
+    # ATK Accessibility linking
+    if hasattr(lbl, "set_mnemonic_widget"):
+        lbl.set_mnemonic_widget(widget)
+    atk = widget.get_accessible()
+    if atk and label:
+        atk.set_name(label.replace("_", ""))
+    if tooltip:
+        widget.set_tooltip_text(tooltip)
+        lbl.set_tooltip_text(tooltip)
+        if atk:
+            atk.set_description(tooltip)
+            
     row.pack_start(lbl, False, False, 0)
     row.pack_start(widget, True, True, 0)
     parent.pack_start(row, False, False, 0)
@@ -176,9 +189,17 @@ def _url_field(parent: Gtk.Box, label: str, placeholder: str, on_reload) -> Gtk.
     e = Gtk.Entry(); e.set_hexpand(True)
     if placeholder:
         e.set_placeholder_text(placeholder)
+        
+    lbl.set_mnemonic_widget(e)
+    atk = e.get_accessible()
+    if atk and label:
+        atk.set_name(label)
+        
     row.pack_start(e, True, True, 0)
     btn = Gtk.Button.new_from_icon_name("view-refresh-symbolic", Gtk.IconSize.BUTTON)
     btn.set_tooltip_text("Load models from this URL")
+    if btn.get_accessible():
+        btn.get_accessible().set_name("Refresh models")
     btn.connect("clicked", lambda _b: on_reload())
     row.pack_start(btn, False, False, 0)
     parent.pack_start(row, False, False, 0)
@@ -683,12 +704,12 @@ class SettingsDialog:
         self.in_cancel = self._key_field(page, "Cancel", self.cfg.key_cancel)
         page.pack_start(Gtk.Separator(), False, False, 8)
         page.pack_start(Gtk.Label(label="Quality gate", xalign=0.0), False, False, 2)
-        self.q_min = _labeled(page, "Min seconds", _entry(self.cfg.min_speech_seconds))
-        self.q_rms = _labeled(page, "Silence RMS", _entry(self.cfg.silence_rms))
+        self.q_min = _labeled(page, "Min seconds", _entry(self.cfg.min_speech_seconds), tooltip="Minimum audio length. Shorter clips are ignored.")
+        self.q_rms = _labeled(page, "Silence RMS", _entry(self.cfg.silence_rms), tooltip="Microphone volume threshold to ignore background noise.")
         self.q_halluc = Gtk.Switch(); self.q_halluc.set_active(self.cfg.reject_hallucinations); self.q_halluc.set_halign(Gtk.Align.START)
-        _labeled(page, "Reject hallucinations", self.q_halluc)
+        _labeled(page, "Reject hallucinations", self.q_halluc, tooltip="Automatically drop STT ghost outputs like 'Thank you.' or 'Bye.'")
         self.q_strip = Gtk.Switch(); self.q_strip.set_active(self.cfg.strip_trailing_punctuation); self.q_strip.set_halign(Gtk.Align.START)
-        _labeled(page, "Strip trailing punctuation", self.q_strip)
+        _labeled(page, "Strip trailing punctuation", self.q_strip, tooltip="Remove ending periods from pasted text, useful for code inserts.")
         page.pack_start(Gtk.Separator(), False, False, 8)
         page.pack_start(Gtk.Label(label="Hands-free (Wakeword)", xalign=0.0), False, False, 2)
         self.ww_enabled = Gtk.Switch(); self.ww_enabled.set_active(self.cfg.wakeword_enabled); self.ww_enabled.set_halign(Gtk.Align.START)

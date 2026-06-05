@@ -180,6 +180,12 @@ class App:
         box.pack_end(pill, False, False, 0)
 
         btn.add(box)
+        btn.set_tooltip_text(f"{wf.name}: {wf.description}" if wf.description else wf.name)
+        atk = btn.get_accessible()
+        if atk:
+            atk.set_name(wf.name)
+            if wf.description:
+                atk.set_description(wf.description)
         btn.connect("clicked", lambda _b, w=wf: self.on_row_click(w))
         self._rows[wf.name] = {"btn": btn, "pill": pill}
         return btn
