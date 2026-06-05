@@ -130,14 +130,13 @@ class App:
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         outer.get_style_context().add_class("bg")
-        listbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        listbox.set_margin_top(10)
-        listbox.set_margin_bottom(6)
-        listbox.set_margin_start(10)
-        listbox.set_margin_end(10)
-        for i, wf in enumerate(self.cfg.workflows):
-            listbox.pack_start(self._make_row(i, wf), False, False, 0)
-        outer.pack_start(listbox, True, True, 0)
+        self.listbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self.listbox.set_margin_top(10)
+        self.listbox.set_margin_bottom(6)
+        self.listbox.set_margin_start(10)
+        self.listbox.set_margin_end(10)
+        self._refresh_listbox()
+        outer.pack_start(self.listbox, True, True, 0)
 
         foot = Gtk.Box(spacing=8)
         foot.set_margin_start(14)
@@ -184,6 +183,37 @@ class App:
         btn.connect("clicked", lambda _b, w=wf: self.on_row_click(w))
         self._rows[wf.name] = {"btn": btn, "pill": pill}
         return btn
+
+    def _refresh_listbox(self) -> None:
+        for child in self.listbox.get_children():
+            self.listbox.remove(child)
+        self._rows.clear()
+        for i, wf in enumerate(self.cfg.workflows):
+            btn = self._make_row(i, wf)
+            btn.drag_source_set(Gdk.ModifierType.BUTTON1_MASK, [], Gdk.DragAction.MOVE)
+            btn.drag_source_add_text_targets()
+            btn.drag_dest_set(Gtk.DestDefaults.ALL, [], Gdk.DragAction.MOVE)
+            btn.drag_dest_add_text_targets()
+            btn.connect("drag-data-get", self._on_drag_data_get, i)
+            btn.connect("drag-data-received", self._on_drag_data_received, i)
+            self.listbox.pack_start(btn, False, False, 0)
+        self.listbox.show_all()
+
+    def _on_drag_data_get(self, widget, drag_context, data, info, time, idx):
+        data.set_text(str(idx), -1)
+
+    def _on_drag_data_received(self, widget, drag_context, x, y, data, info, time, target_idx):
+        text = data.get_text()
+        if not text or not text.isdigit():
+            return
+        source_idx = int(text)
+        if source_idx == target_idx or source_idx < 0 or source_idx >= len(self.cfg.workflows):
+            return
+        wfs = self.cfg.workflows
+        wf = wfs.pop(source_idx)
+        wfs.insert(target_idx, wf)
+        save(self.cfg)
+        self._refresh_listbox()
 
     # -- startup --------------------------------------------------------------
     def _startup(self) -> None:
