@@ -21,7 +21,7 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
-from . import audio, autostart, llm, stt  # noqa: E402
+from . import audio, autostart, llm, logbuffer, stt  # noqa: E402
 from .config import Config, save  # noqa: E402
 from .llm import LLMEngine  # noqa: E402
 from .stt import STTEngine  # noqa: E402
@@ -209,13 +209,14 @@ class SettingsDialog:
         self._build_engines(_page(nb, "Engines"))
         self._build_input(_page(nb, "Input"))
         self._build_general(_page(nb, "General"))
+        self._build_log(_page(nb, "Log"))
 
         self._bind_entry = None
         self._bind_pressed: list[str] = []
         self.dlg.connect("key-press-event", self._on_bind_press)
         self.dlg.connect("key-release-event", self._on_bind_release)
         self.dlg.connect("response", self._on_response)
-        self.dlg.connect("destroy", lambda *_: self._stop_meter())
+        self.dlg.connect("destroy", lambda *_: self._cleanup())
 
     # ===== Presets ==========================================================
     def _build_presets(self, page: Gtk.Box) -> None:
@@ -632,6 +633,52 @@ class SettingsDialog:
         if self._meter is not None:
             self._meter.stop(); self._meter = None
 
+    # ===== Log ==============================================================
+    def _build_log(self, page: Gtk.Box) -> None:
+        sw = Gtk.ScrolledWindow(); sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        self.log_view = Gtk.TextView()
+        self.log_view.set_editable(False); self.log_view.set_cursor_visible(False)
+        self.log_view.set_monospace(True); self.log_view.set_left_margin(6); self.log_view.set_top_margin(6)
+        sw.add(self.log_view)
+        page.pack_start(sw, True, True, 0)
+
+        bar = Gtk.Box(spacing=8); bar.set_margin_top(6)
+        self.log_autoscroll = Gtk.CheckButton(label="Auto-scroll"); self.log_autoscroll.set_active(True)
+        bar.pack_start(self.log_autoscroll, False, False, 0)
+        clear = Gtk.Button(label="Clear"); clear.connect("clicked", lambda _b: (logbuffer.clear(), self._log_refresh()))
+        copy = Gtk.Button(label="Copy"); copy.connect("clicked", lambda _b: self._log_copy())
+        bar.pack_end(clear, False, False, 0); bar.pack_end(copy, False, False, 0)
+        page.pack_start(bar, False, False, 0)
+
+        self._log_last = None
+        self._log_refresh()
+        self._log_timer = GLib.timeout_add(1000, self._log_tick)
+
+    def _log_tick(self) -> bool:
+        self._log_refresh()
+        return True
+
+    def _log_refresh(self) -> None:
+        text = "\n".join(logbuffer.lines())
+        if text == getattr(self, "_log_last", None):
+            return
+        self._log_last = text
+        buf = self.log_view.get_buffer()
+        buf.set_text(text)
+        if self.log_autoscroll.get_active():
+            self.log_view.scroll_to_iter(buf.get_end_iter(), 0.0, False, 0, 0)
+
+    def _log_copy(self) -> None:
+        cb = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        cb.set_text("\n".join(logbuffer.lines()), -1)
+
+    def _cleanup(self) -> None:
+        self._stop_meter()
+        t = getattr(self, "_log_timer", 0)
+        if t:
+            GLib.source_remove(t)
+            self._log_timer = 0
+
     # ===== save / collect ====================================================
     def _collect(self) -> bool:
         try:
@@ -681,10 +728,10 @@ class SettingsDialog:
         if resp == RESP_SAVE_RESTART:
             if self._collect():
                 save(self.cfg)
-                self._stop_meter()
+                self._cleanup()
                 os.execv(sys.executable, [sys.executable, "-m", "blitztext", "tray"])
             return
-        self._stop_meter()
+        self._cleanup()
         dlg.destroy()
 
     @staticmethod
