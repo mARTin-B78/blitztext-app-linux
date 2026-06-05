@@ -133,6 +133,12 @@ class Daemon:
             self._vad_meter.stop()
             self._vad_meter = None
 
+    def _play_sound(self, sound_name: str) -> None:
+        import os, subprocess
+        path = f"/usr/share/sounds/freedesktop/stereo/{sound_name}.oga"
+        if os.path.exists(path) and shutil.which("pw-play"):
+            subprocess.Popen(["pw-play", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
     # -- recording control ----------------------------------------------------
     def start_dictation(self, workflow: Workflow | None = None) -> None:
         wf = workflow or self._route_workflow
@@ -179,6 +185,7 @@ class Daemon:
 
         self._emit("recording", wf.name, "Recording…")
         self._notify(f"● {wf.name}", "Recording…")
+        self._play_sound("device-added")
 
     def finish_dictation(self, send_enter: bool = False) -> None:
         self._vad_stop()
@@ -206,6 +213,7 @@ class Daemon:
             return
 
         audio_path = rec.stop()
+        self._play_sound("complete")
         threading.Thread(
             target=self._process, args=(audio_path, wf, win, send_enter), daemon=True
         ).start()
@@ -230,10 +238,12 @@ class Daemon:
             streamer.stop()
             self._emit("idle", None, "Cancelled")
             self._notify("Cancelled", "Streaming stopped.", "low")
+            self._play_sound("device-removed")
             return
         rec.discard()
         self._emit("idle", None, "Cancelled")
         self._notify("Cancelled", "Recording discarded.", "low")
+        self._play_sound("device-removed")
 
     def toggle(self, workflow: Workflow) -> None:
         """Start recording, or stop + process (used by GUI clicks and combos)."""
