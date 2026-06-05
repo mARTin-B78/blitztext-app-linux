@@ -249,7 +249,8 @@ class App:
             for nm, r in self._rows.items():
                 cls(nm, None, "dim", "recording")
                 r["pill"].get_style_context().remove_class("rec")
-                r["pill"].set_text(pretty_hotkey(next(w.hotkey for w in self.cfg.workflows if w.name == nm)))
+                wf_match = next((w for w in self.cfg.workflows if w.name == nm), None)
+                r["pill"].set_text(pretty_hotkey(wf_match.hotkey) if wf_match else "")
         return False  # one-shot idle
 
     # -- panel / settings / lifecycle -----------------------------------------
