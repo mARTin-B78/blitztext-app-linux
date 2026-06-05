@@ -23,7 +23,7 @@ from urllib.parse import urlparse
 @dataclass
 class STTEngine:
     name: str
-    type: str = "local"        # "local" | "openai"
+    type: str = "local"        # "local" | "openai" | "riva_realtime"
     url: str = ""              # base URL incl. /v1 for remote, e.g. http://localhost:8010/v1
     model: str = ""            # remote model id, or local whisper size override
     api_key_env: str = ""      # env var holding a bearer key (optional)
@@ -31,6 +31,10 @@ class STTEngine:
     @property
     def is_local(self) -> bool:
         return self.type == "local"
+
+    @property
+    def is_streaming(self) -> bool:
+        return self.type == "riva_realtime"
 
 
 class STTError(RuntimeError):
@@ -107,6 +111,8 @@ def transcribe(
         if local_transcriber is None:
             raise STTError("Local engine selected but the model isn't loaded.")
         return local_transcriber.transcribe(audio_path, language=language, hotwords=hotwords)
+    if engine.is_streaming:
+        raise STTError("Streaming STT engines are live-only. Use a workflow with mode = \"stream\".")
     return _transcribe_remote(engine, audio_path, language=language, prompt=hotwords, timeout=timeout)
 
 

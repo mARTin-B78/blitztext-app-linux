@@ -1,22 +1,22 @@
 # Landing Page Brief
 
-Domain: `blitztext.app`
+Domain: `blitztext.de`
 
-Goal: a very small landing page for an experimental open-source macOS preview.
+Goal: a small, honest landing page for an experimental open-source Linux dictation preview.
 
 ## Hero
 
 Headline:
 
-> Blitztext macOS Preview
+> Blitztext App Linux
 
 Subline:
 
-> Speak your thoughts. Turn them into text, cleaner writing, or calmer messages.
+> Speak into any focused Linux text field. Get text, cleaner writing, or live streaming transcripts.
 
 Body:
 
-> An experimental open-source macOS menubar app. Not finished, not hosted, not plug-and-play. Built to learn from, fork, and improve.
+> An experimental open-source Linux/X11 dictation app inspired by the original macOS Blitztext workflow. Not finished, not hosted, not plug-and-play. Built to learn from, fork, and improve.
 
 Primary CTA:
 
@@ -28,55 +28,61 @@ Secondary CTA:
 
 Small line:
 
-> Bring your own OpenAI API key. Optional local transcription. No hosted Blitztext backend.
+> Local faster-whisper, optional Riva/NIM realtime STT, optional OpenAI-compatible rewriting. No hosted Blitztext backend.
 
 ## Sections
 
 1. What it does
-   - Dictate
-   - Improve
-   - Calm down
+   - Dictate into the focused app
+   - Improve or rewrite rough speech
+   - Calm down messages
    - Add emojis
+   - Stream live STT through Riva/NIM
 
 2. How it works
-   - Build the app locally
-   - Paste your own OpenAI API key
+   - Install the Linux app or run from source
+   - Configure a local or remote STT engine
    - Press a hotkey and speak
-   - Get text back on the clipboard
+   - Blitztext types into the focused X11 window
 
 3. Open-source preview
-   - macOS-only
+   - Linux/X11 first
    - MIT License
+   - inspired by `cmagnussen/blitztext-app`
    - experimental
    - no warranty
-   - optional local transcription with user-installed WhisperKit models
+   - no hosted backend
 
 4. Privacy, plainly
-   - online workflows send audio and text to OpenAI
-   - secure local mode keeps transcription on device
+   - local batch STT can stay on device
+   - realtime STT goes to the Riva/NIM endpoint you configure
+   - rewriting goes to the OpenAI-compatible endpoint you configure
    - no public Blitztext backend
-   - rewriting still uses OpenAI
    - do your own review before sensitive use
 
 5. Roadmap
-   - easier setup
-   - signed releases
-   - local transcription experiments
-   - clearer setup and security docs
-   - community issues
+   - clearer setup
+   - current Linux screenshots
+   - Wayland support exploration
+   - better streaming diagnostics
+   - basic tests and release checks
 
 ## Do Not Promise
 
-- offline use
 - production readiness
 - hosted service
-- free usage without API costs
-- no data leaves the device
+- free usage without API or infrastructure costs
+- no data leaves the device by default
 - guaranteed support
-- other platforms
-- bundled local models
-- local rewriting
+- macOS support in the Linux app
+- bundled STT models
+- local rewriting unless the user configures a local LLM endpoint
 
 ## Visual Direction
 
-Use a real macOS screenshot or short demo GIF. Keep the page calm, sparse, and honest. Avoid fake metrics, oversized SaaS claims, and corporate origin story.
+Use real Linux screenshots or a short demo GIF: GTK control panel, Settings > Engines, Benchmark, and About. Keep the page calm, sparse, and honest. Avoid fake metrics, oversized SaaS claims, and corporate origin story.
+
+## Legal Links
+
+- Impressum: https://martin-bierschenk.de/impressum/
+- Datenschutz / Privacy: https://martin-bierschenk.de/datenschutz/

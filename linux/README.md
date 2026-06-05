@@ -8,8 +8,13 @@ This runs **on the host** (not in a container), so it can type into *any*
 application — the Linux equivalent of the macOS app's Accessibility-based
 auto-paste. (A sandboxed Docker/browser version can't do that; an earlier
 experiment along those lines was moved out to
-`~/Docker/correspondence/blitztext`.) Transcription is **local** via
-[faster-whisper]; only the optional rewrite step calls out to an LLM.
+`~/Docker/correspondence/blitztext`.) Batch transcription is **local** via
+[faster-whisper]; live streaming can use a local Riva/NIM realtime server. Only
+the optional rewrite step calls out to an LLM.
+
+## Inspiration
+
+Blitztext App Linux is inspired by [cmagnussen/blitztext-app](https://github.com/cmagnussen/blitztext-app), the original macOS menu-bar workflow for turning speech into text and cleaner writing. This Linux version keeps the workflow but uses Linux-native pieces: GTK, AppIndicator, global hotkeys, `faster-whisper`, optional Riva/NIM realtime STT, and `xdotool`.
 
 ## How it works
 
@@ -20,10 +25,13 @@ hotkey ──▶ record mic (pw-record/arecord) ──▶ faster-whisper (local)
                           │                          └── mode "rewrite": LLM (OpenAI-compatible)
                           ▼
                  xdotool types it into the focused window
+
+mode "stream" ──▶ mic PCM chunks ──▶ Riva/NIM realtime WebSocket ──▶ live xdotool typing
 ```
 
-Each hotkey **toggles**: press to start recording, press again to stop — then it
-transcribes, optionally rewrites, and types the result where your cursor is.
+Each normal hotkey **toggles**: press to start recording, press again to stop —
+then it transcribes, optionally rewrites, and types the result where your cursor
+is. Streaming workflows type stable words live while you speak.
 
 ## Requirements
 
@@ -34,6 +42,8 @@ transcribes, optionally rewrites, and types the result where your cursor is.
   sudo apt install xdotool libnotify-bin pipewire-bin
   ```
 - Python 3.11+.
+- Optional realtime STT streaming: a Riva/NIM realtime server such as Nemotron
+  ASR Streaming, reachable through `/v1/realtime`.
 
 ## Install
 
@@ -60,8 +70,8 @@ cd linux
 ./install.sh
 ```
 
-This creates `.venv`, installs `faster-whisper` + `pynput`, and writes the
-default config to `~/.config/blitztext/config.toml`.
+This creates `.venv`, installs the Python dependencies from `requirements.txt`,
+and writes the default config to `~/.config/blitztext/config.toml`.
 
 > For the **tray** from source, the venv must be built on a Python that can see
 > the system `python3-gi` — `install.sh` uses `python3 -m venv
@@ -70,7 +80,7 @@ default config to `~/.config/blitztext/config.toml`.
 
 ## Run
 
-Three front-ends, same engine (local Whisper + global hotkeys + xdotool typing):
+Three front-ends, same engine layer (STT engines + global hotkeys + xdotool typing):
 
 ```bash
 # optional: only needed for the "rewrite" workflows
@@ -80,6 +90,29 @@ export OPENAI_API_KEY=sk-...
 .venv/bin/python -m blitztext gui    # control-panel window
 .venv/bin/python -m blitztext run    # headless, hotkeys only
 ```
+
+### Realtime STT streaming
+
+For Nemotron ASR Streaming, add a realtime engine in **Settings > Engines** with
+`+ Stream`, save/restart, then create or edit a workflow with `mode = "stream"`.
+The default realtime URL is:
+
+```toml
+[[stt_engine]]
+name = "Nemotron ASR Streaming"
+type = "riva_realtime"
+url = "http://127.0.0.1:8006/v1"
+model = ""
+
+[[workflow]]
+name = "STT Streaming"
+hotkey = "<ctrl>+<alt>+s"
+mode = "stream"
+```
+
+The current Nemotron ASR Streaming model exposed by the tested NIM is English
+`en-US`, so use `language = "en"` or `language = "en-US"` in `[general]` for
+that engine.
 
 ### System tray (recommended)
 
@@ -165,3 +198,18 @@ python -m blitztext config-path        # print config location
 ```
 
 [faster-whisper]: https://github.com/SYSTRAN/faster-whisper
+
+## License
+
+Code is released under the MIT License. See [../LICENSE](../LICENSE).
+
+Project names, logos, and app icons are not automatically granted as trademarks or brand assets. See [../TRADEMARKS.md](../TRADEMARKS.md).
+
+## Legal / Impressum & Datenschutz
+
+This is an experimental, non-commercial open-source project, provided as-is under the MIT License without warranty or support. Nothing is sold here and no installation or operation is performed on your behalf.
+
+The companion website (blitztext.de) is operated by Blackboat Internet GmbH:
+
+- Impressum: https://martin-bierschenk.de/impressum/
+- Datenschutz / Privacy: https://martin-bierschenk.de/datenschutz/

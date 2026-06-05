@@ -29,5 +29,5 @@ Protect `main`:
 
 - Keep Issues enabled for bugs and focused requests.
 - Enable Discussions only if you want a lower-friction place for questions.
-- Set repository topics after the project is public.
+- Set repository topics after the project is public: `linux`, `dictation`, `speech-to-text`, `gtk`, `x11`, `faster-whisper`, `riva`, `nim`, `openai-compatible`.
 - Review the GitHub community profile before sharing the repo widely.

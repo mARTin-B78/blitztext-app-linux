@@ -215,9 +215,9 @@ class App:
 
     def _apply_status(self, state: str, workflow: str | None, message: str) -> bool:
         colors = {"loading": "#ff9f0a", "idle": "#34c759", "recording": "#ff3b30",
-                  "busy": "#ff9f0a", "done": "#34c759", "error": "#ff3b30"}
+                  "streaming": "#ff3b30", "busy": "#ff9f0a", "done": "#34c759", "error": "#ff3b30"}
         labels = {"loading": "Loading…", "idle": "Ready", "recording": "Recording",
-                  "busy": "Working…", "done": "Ready", "error": message[:40] or "Error"}
+                  "streaming": "Live", "busy": "Working…", "done": "Ready", "error": message[:40] or "Error"}
         self._set_dot(colors.get(state, "#7b818b"))
         self.status_lbl.set_text(labels.get(state, message))
 
@@ -231,12 +231,12 @@ class App:
             if add:
                 ctx.add_class(add)
 
-        if state == "recording":
+        if state in ("recording", "streaming"):
             self._active = workflow
             for nm, r in self._rows.items():
                 if nm == workflow:
                     cls(nm, "recording", "dim")
-                    r["pill"].set_text("● Stop")
+                    r["pill"].set_text("● Live" if state == "streaming" else "● Stop")
                     r["pill"].get_style_context().add_class("rec")
                 else:
                     cls(nm, "dim", "recording")
