@@ -693,8 +693,19 @@ class SettingsDialog:
         page.pack_start(Gtk.Label(label="Hands-free (Wakeword)", xalign=0.0), False, False, 2)
         self.ww_enabled = Gtk.Switch(); self.ww_enabled.set_active(self.cfg.wakeword_enabled); self.ww_enabled.set_halign(Gtk.Align.START)
         _labeled(page, "Enable wakeword", self.ww_enabled)
-        self.ww_uri = _labeled(page, "Wyoming URI", _entry(self.cfg.wakeword_uri, placeholder="tcp://127.0.0.1:10400"))
-        self.ww_model = _labeled(page, "Model name", _entry(self.cfg.wakeword_model, placeholder="okay_computer"))
+        self.ww_uri = _url_field(page, "Wyoming URI", "tcp://127.0.0.1:10400", self._ww_load)
+        self.ww_uri.set_text(self.cfg.wakeword_uri)
+        self.ww_model = _labeled(page, "Model name", _model_combo("Search models…"))
+        _fill_combo(self.ww_model, [], self.cfg.wakeword_model)
+        
+        self.ww_mic_level = Gtk.LevelBar(); self.ww_mic_level.set_min_value(0); self.ww_mic_level.set_max_value(1)
+        _labeled(page, "Input level", self.ww_mic_level)
+        
+        self.ww_test_btn = Gtk.Button(label="Test Wakeword"); self.ww_test_btn.set_halign(Gtk.Align.START)
+        self.ww_test_btn.connect("clicked", self._ww_test)
+        self.ww_test_lbl = Gtk.Label(label=""); self.ww_test_lbl.set_xalign(0.0)
+        box = Gtk.Box(spacing=10); box.pack_start(self.ww_test_btn, False, False, 0); box.pack_start(self.ww_test_lbl, False, False, 0)
+        _labeled(page, "", box)
 
     # ===== General ==========================================================
     def _build_general(self, page: Gtk.Box) -> None:
@@ -721,7 +732,11 @@ class SettingsDialog:
 
     def _start_meter(self) -> None:
         self._stop_meter()
-        self._meter = audio.LevelMeter(self._selected_mic_name(), on_level=lambda v: GLib.idle_add(self.mic_level.set_value, v))
+        def on_level(v):
+            GLib.idle_add(self.mic_level.set_value, v)
+            if hasattr(self, "ww_mic_level"):
+                GLib.idle_add(self.ww_mic_level.set_value, v)
+        self._meter = audio.LevelMeter(self._selected_mic_name(), on_level=on_level)
         self._meter.start()
 
     def _restart_meter(self) -> None:
@@ -730,6 +745,78 @@ class SettingsDialog:
     def _stop_meter(self) -> None:
         if self._meter is not None:
             self._meter.stop(); self._meter = None
+
+    def _ww_load(self) -> None:
+        def work():
+            import socket, json
+            from urllib.parse import urlparse
+            uri = self.ww_uri.get_text().strip()
+            parsed = urlparse(uri)
+            host = parsed.hostname or "127.0.0.1"
+            port = parsed.port or 10400
+            try:
+                with socket.create_connection((host, port), timeout=2.0) as s:
+                    s.sendall(json.dumps({"type": "describe"}).encode() + b"\n")
+                    line = b""
+                    while not line.endswith(b"\n"):
+                        b = s.recv(1)
+                        if not b: break
+                        line += b
+                    info = json.loads(line.decode("utf-8"))
+                    payload_len = info.get("data_length", info.get("payload_length", 0))
+                    payload = b""
+                    while len(payload) < payload_len:
+                        chunk = s.recv(payload_len - len(payload))
+                        if not chunk: break
+                        payload += chunk
+                    data = json.loads(payload.decode("utf-8"))
+                    models = []
+                    for w in data.get("wake", []):
+                        for m in w.get("models", []):
+                            models.append(m.get("name"))
+                    def apply():
+                        _fill_combo(self.ww_model, models, models[0] if models else "")
+                        self._info("Loaded models successfully.")
+                    GLib.idle_add(apply)
+            except Exception as e:
+                GLib.idle_add(lambda: self._error(f"Failed to load models:\n{e}"))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _ww_test(self, _b) -> None:
+        self.ww_test_btn.set_sensitive(False)
+        self.ww_test_lbl.set_text("Listening for 10s...")
+        
+        def work():
+            from .wakeword import WakewordListener
+            import time
+            detected = False
+            def on_detect():
+                nonlocal detected
+                detected = True
+            
+            listener = WakewordListener(
+                uri=self.ww_uri.get_text().strip(),
+                model=_combo_text(self.ww_model),
+                mic=self._selected_mic_name(),
+                on_detect=on_detect
+            )
+            listener.start()
+            
+            start_t = time.time()
+            while time.time() - start_t < 10 and not detected:
+                time.sleep(0.1)
+                
+            listener.stop()
+            
+            def finish():
+                self.ww_test_btn.set_sensitive(True)
+                if detected:
+                    self.ww_test_lbl.set_markup("<span foreground='green'><b>Detected!</b></span>")
+                else:
+                    self.ww_test_lbl.set_markup("<span foreground='red'>Timed out.</span>")
+            GLib.idle_add(finish)
+            
+        threading.Thread(target=work, daemon=True).start()
 
     # ===== Benchmark ========================================================
     def _build_benchmark(self, page: Gtk.Box) -> None:
@@ -904,7 +991,7 @@ class SettingsDialog:
             c.strip_trailing_punctuation = self.q_strip.get_active()
             c.wakeword_enabled = self.ww_enabled.get_active()
             c.wakeword_uri = self.ww_uri.get_text().strip()
-            c.wakeword_model = self.ww_model.get_text().strip()
+            c.wakeword_model = _combo_text(self.ww_model)
             c.mic = self._selected_mic_name()
             c.output = self.gen_output.get_active_text() or "type"
             c.language = self.gen_lang.get_text().strip()
