@@ -63,6 +63,47 @@ def _combo(options, active=None) -> Gtk.ComboBoxText:
     return c
 
 
+def _model_combo(placeholder="") -> Gtk.ComboBoxText:
+    """Editable combo with a type-to-search completion (dropdown + searchbar)."""
+    c = Gtk.ComboBoxText.new_with_entry()
+    c.set_hexpand(True)
+    entry = c.get_child()
+    if placeholder:
+        entry.set_placeholder_text(placeholder)
+
+    store = Gtk.ListStore(str)
+    comp = Gtk.EntryCompletion()
+    comp.set_model(store)
+    comp.set_text_column(0)
+    comp.set_popup_completion(True)
+    comp.set_minimum_key_length(1)
+
+    def _match(completion, key, it, *_a):
+        row = completion.get_model()[it][0]
+        return key.lower() in row.lower()  # substring, anywhere
+
+    comp.set_match_func(_match)
+    entry.set_completion(comp)
+    c._models_store = store
+    return c
+
+
+def _combo_text(c: Gtk.ComboBoxText) -> str:
+    return (c.get_active_text() or "").strip()
+
+
+def _fill_combo(combo: Gtk.ComboBoxText, options, current: str) -> None:
+    combo.remove_all()
+    store = getattr(combo, "_models_store", None)
+    if store is not None:
+        store.clear()
+    for o in options:
+        combo.append_text(o)
+        if store is not None:
+            store.append([o])
+    combo.get_child().set_text(current or "")
+
+
 def _page(nb: Gtk.Notebook, title: str) -> Gtk.Box:
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
     for m in ("top", "bottom", "start", "end"):
@@ -214,8 +255,11 @@ class SettingsDialog:
         form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL); box.pack_start(form, False, False, 2)
         self.stt_type = _labeled(form, "Type", _combo(["local", "openai"]))
         self.stt_url = _labeled(form, "URL", _entry(placeholder="http://localhost:8010/v1   (blank for local)"))
-        self.stt_model = _labeled(form, "Model", _entry(placeholder="e.g. Systran/faster-whisper-base  ·  'small' for local"))
+        self.stt_model = _labeled(form, "Model", _model_combo("pick after entering URL  ·  tiny/base/small… for local"))
         self.stt_key = _labeled(form, "API key env", _entry(placeholder="env var name, e.g. GROQ_API_KEY   (optional)"))
+        self.stt_url.connect("changed", lambda _e: self._schedule_models("stt"))
+        self.stt_key.connect("changed", lambda _e: self._schedule_models("stt"))
+        self.stt_type.connect("changed", self._stt_type_changed)
         self.stt_result = Gtk.Label(xalign=0.0); self.stt_result.set_line_wrap(True)
         box.pack_start(self.stt_result, False, False, 2)
         self._stt_load(self.stt_combo.get_active())
@@ -241,9 +285,11 @@ class SettingsDialog:
 
         form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL); box.pack_start(form, False, False, 2)
         self.llm_url = _labeled(form, "Base URL", _entry(placeholder="http://localhost:28080/v1  ·  https://api.openai.com/v1"))
-        self.llm_model = _labeled(form, "Model", _entry(placeholder="e.g. gpt-4o-mini, Qwen3.5-4B"))
+        self.llm_model = _labeled(form, "Model", _model_combo("pick after entering URL"))
         self.llm_key = _labeled(form, "API key env", _entry(placeholder="env var name, e.g. OPENAI_API_KEY   (blank for local)"))
         self.llm_temp = _labeled(form, "Temperature", _entry(placeholder="0.3"))
+        self.llm_url.connect("changed", lambda _e: self._schedule_models("llm"))
+        self.llm_key.connect("changed", lambda _e: self._schedule_models("llm"))
         self._llm_load(self.llm_combo.get_active())
         return box
 
@@ -253,7 +299,12 @@ class SettingsDialog:
             return
         e = self.cfg.stt_engines[idx]
         self.stt_type.set_active(["local", "openai"].index(e.type) if e.type in ("local", "openai") else 0)
-        self.stt_url.set_text(e.url); self.stt_model.set_text(e.model); self.stt_key.set_text(e.api_key_env)
+        self.stt_url.set_text(e.url); self.stt_key.set_text(e.api_key_env)
+        if e.type == "local":
+            _fill_combo(self.stt_model, ["tiny", "base", "small", "medium", "large-v3"], e.model)
+        else:
+            _fill_combo(self.stt_model, [], e.model)
+            self._populate_models(self.stt_model, e.url, e.api_key_env)
         self._stt_idx = idx
 
     def _stt_commit(self) -> None:
@@ -263,7 +314,7 @@ class SettingsDialog:
         e = self.cfg.stt_engines[idx]
         e.type = self.stt_type.get_active_text() or "local"
         e.url = self.stt_url.get_text().strip().rstrip("/")
-        e.model = self.stt_model.get_text().strip()
+        e.model = _combo_text(self.stt_model)
         e.api_key_env = self.stt_key.get_text().strip()
 
     def _stt_changed(self, combo):
@@ -314,8 +365,10 @@ class SettingsDialog:
         if not (0 <= idx < len(self.cfg.llm_engines)):
             return
         e = self.cfg.llm_engines[idx]
-        self.llm_url.set_text(e.url); self.llm_model.set_text(e.model)
+        self.llm_url.set_text(e.url)
         self.llm_key.set_text(e.api_key_env); self.llm_temp.set_text(str(e.temperature))
+        _fill_combo(self.llm_model, [], e.model)
+        self._populate_models(self.llm_model, e.url, e.api_key_env)
         self._llm_idx = idx
 
     def _llm_commit(self) -> None:
@@ -324,7 +377,7 @@ class SettingsDialog:
             return
         e = self.cfg.llm_engines[idx]
         e.url = self.llm_url.get_text().strip().rstrip("/")
-        e.model = self.llm_model.get_text().strip()
+        e.model = _combo_text(self.llm_model)
         e.api_key_env = self.llm_key.get_text().strip()
         if _isfloat(self.llm_temp.get_text().strip()):
             e.temperature = float(self.llm_temp.get_text().strip())
@@ -348,6 +401,41 @@ class SettingsDialog:
         del self.cfg.llm_engines[self._llm_idx]
         self.llm_combo.remove(self._llm_idx); self._llm_idx = -1
         self.llm_combo.set_active(0); self._llm_load(0)
+
+    def _stt_type_changed(self, _c) -> None:
+        if self.stt_type.get_active_text() == "local":
+            _fill_combo(self.stt_model, ["tiny", "base", "small", "medium", "large-v3"], _combo_text(self.stt_model))
+        else:
+            self._schedule_models("stt")
+
+    # -- model dropdowns (fetched from {url}/models) ---
+    def _populate_models(self, combo, url: str, key_env: str) -> None:
+        def work():
+            models = stt.list_models(url, key_env) if url else []
+
+            def apply():
+                cur = _combo_text(combo)
+                _fill_combo(combo, models, cur)
+                return False
+            GLib.idle_add(apply)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _schedule_models(self, which: str) -> None:
+        attr = f"_mt_{which}"
+        old = getattr(self, attr, 0)
+        if old:
+            GLib.source_remove(old)
+
+        def fire():
+            setattr(self, attr, 0)
+            if which == "stt" and self.stt_type.get_active_text() != "local":
+                self._populate_models(self.stt_model, self.stt_url.get_text().strip(),
+                                      self.stt_key.get_text().strip())
+            elif which == "llm":
+                self._populate_models(self.llm_model, self.llm_url.get_text().strip(),
+                                      self.llm_key.get_text().strip())
+            return False
+        setattr(self, attr, GLib.timeout_add(700, fire))
 
     # -- status dots (threaded) ---
     def _refresh_status(self) -> None:
