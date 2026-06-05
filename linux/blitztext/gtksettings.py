@@ -19,9 +19,9 @@ import gi
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
-from gi.repository import Gdk, GLib, Gtk  # noqa: E402
+from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
 
-from . import audio, autostart, llm, logbuffer, stt  # noqa: E402
+from . import audio, autostart, benchmark, llm, logbuffer, stt  # noqa: E402
 from .config import Config, save  # noqa: E402
 from .llm import LLMEngine  # noqa: E402
 from .stt import STTEngine  # noqa: E402
@@ -195,6 +195,7 @@ class SettingsDialog:
         self.cfg = cfg
         self.daemon = daemon
         self._meter = None
+        self._tr_cache: dict = {}
         self._wf_idx = self._stt_idx = self._llm_idx = 0
 
         self.dlg = Gtk.Dialog(title="Blitztext — Settings", transient_for=parent, modal=True)
@@ -209,6 +210,7 @@ class SettingsDialog:
         self._build_engines(_page(nb, "Engines"))
         self._build_input(_page(nb, "Input"))
         self._build_general(_page(nb, "General"))
+        self._build_benchmark(_page(nb, "Benchmark"))
         self._build_log(_page(nb, "Log"))
 
         self._bind_entry = None
@@ -442,13 +444,30 @@ class SettingsDialog:
         self.stt_result.set_markup("<i>Recording 4s — speak now…</i>")
         threading.Thread(target=self._run_stt_test, args=(e,), daemon=True).start()
 
+    def _transcriber_for(self, engine):
+        """A local Transcriber for the engine, loading on demand (cached)."""
+        if not engine.is_local:
+            return None
+        model = engine.model or self.cfg.model
+        active = self.cfg.active_stt
+        if (self.daemon and self.daemon.transcriber and active.is_local
+                and (active.model or self.cfg.model) == model):
+            return self.daemon.transcriber
+        key = (model, self.cfg.device, self.cfg.compute_type)
+        if key not in self._tr_cache:
+            from .transcribe import Transcriber
+            logbuffer.log(f"Loading local model '{model}' ({self.cfg.device}) for test/benchmark…")
+            self._tr_cache[key] = Transcriber(model, self.cfg.device, self.cfg.compute_type, self.cfg.beam_size)
+        return self._tr_cache[key]
+
     def _run_stt_test(self, engine):
         from .recorder import Recording, detect_recorder
         try:
             rec = Recording(detect_recorder(self.cfg.recorder), self.cfg.mic)
             time.sleep(4.0)
             wav = rec.stop()
-            tr = self.daemon.transcriber if (self.daemon and engine.is_local) else None
+            GLib.idle_add(self.stt_result.set_markup, "<i>Transcribing…</i>")
+            tr = self._transcriber_for(engine)
             res = stt.benchmark(engine, wav, language=self.cfg.language, local_transcriber=tr)
             wav.unlink(missing_ok=True)
             if res.ok:
@@ -647,6 +666,76 @@ class SettingsDialog:
     def _stop_meter(self) -> None:
         if self._meter is not None:
             self._meter.stop(); self._meter = None
+
+    # ===== Benchmark ========================================================
+    def _build_benchmark(self, page: Gtk.Box) -> None:
+        page.pack_start(Gtk.Label(
+            label="Benchmark all your STT engines against a reference clip "
+                  "(add presets for each model you want compared).",
+            xalign=0.0, wrap=True), False, False, 0)
+
+        wavf = Gtk.FileChooserButton(title="WAV file", action=Gtk.FileChooserAction.OPEN)
+        fa = Gtk.FileFilter(); fa.set_name("Audio (.wav)"); fa.add_pattern("*.wav"); wavf.add_filter(fa)
+        self.bench_wav = _labeled(page, "Audio (.wav)", wavf)
+        reff = Gtk.FileChooserButton(title="Reference transcript", action=Gtk.FileChooserAction.OPEN)
+        ft = Gtk.FileFilter(); ft.set_name("Text (.txt)"); ft.add_pattern("*.txt"); reff.add_filter(ft)
+        self.bench_ref = _labeled(page, "Reference (.txt)", reff)
+
+        run = Gtk.Button(label="Run benchmark"); run.connect("clicked", self._run_bench)
+        run.set_halign(Gtk.Align.START)
+        page.pack_start(run, False, False, 6)
+
+        self.bench_store = Gtk.ListStore(str, str, str, str, str)
+        tree = Gtk.TreeView(model=self.bench_store)
+        for title, i, expand in [("Engine", 0, False), ("Model", 1, False),
+                                 ("Time (s)", 2, False), ("Accuracy", 3, False), ("Output", 4, True)]:
+            r = Gtk.CellRendererText()
+            if i == 4:
+                r.set_property("ellipsize", Pango.EllipsizeMode.END)
+            col = Gtk.TreeViewColumn(title, r, text=i); col.set_resizable(True)
+            col.set_expand(expand)
+            tree.append_column(col)
+        sw = Gtk.ScrolledWindow(); sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        sw.add(tree); page.pack_start(sw, True, True, 4)
+
+        self.bench_summary = Gtk.Label(xalign=0.0); self.bench_summary.set_line_wrap(True)
+        page.pack_start(self.bench_summary, False, False, 4)
+
+    def _run_bench(self, _b) -> None:
+        wav = self.bench_wav.get_filename()
+        refp = self.bench_ref.get_filename()
+        if not wav or not refp:
+            self._error("Pick a .wav file and a matching reference .txt file.")
+            return
+        reference = Path(refp).read_text(errors="replace")
+        self.bench_store.clear()
+        self.bench_summary.set_markup("<i>Running… (local models load on first use)</i>")
+        self._stt_commit()
+        engines = list(self.cfg.stt_engines)
+
+        def work():
+            def prog(row):
+                GLib.idle_add(self._bench_add_row, row)
+            rows = benchmark.run(engines, Path(wav), reference, language=self.cfg.language,
+                                 get_local_transcriber=self._transcriber_for, progress=prog)
+            GLib.idle_add(self._bench_done, rows)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _bench_add_row(self, row) -> bool:
+        acc = f"{row.accuracy:.1f}%" if row.ok else "—"
+        out = row.text if row.ok else f"⚠ {row.error}"
+        self.bench_store.append([row.engine, row.model, f"{row.seconds:.2f}", acc, out])
+        return False
+
+    def _bench_done(self, rows) -> bool:
+        fastest, acc = benchmark.best(rows)
+        if not fastest:
+            self.bench_summary.set_markup('<span foreground="#ff3b30">All engines failed — check the Log tab.</span>')
+            return False
+        self.bench_summary.set_markup(
+            f"<b>Fastest:</b> {GLib.markup_escape_text(fastest.engine)} ({fastest.seconds:.2f}s)"
+            f"     ·     <b>Most accurate:</b> {GLib.markup_escape_text(acc.engine)} ({acc.accuracy:.1f}%)")
+        return False
 
     # ===== Log ==============================================================
     def _build_log(self, page: Gtk.Box) -> None:
