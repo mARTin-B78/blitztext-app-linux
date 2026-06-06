@@ -48,12 +48,16 @@ class Daemon:
         self._wakeword_listener = None
         # When a session is started hands-free by the wakeword, its desktop
         # notifications are suppressed (kept quiet in the background).
-        self._wake_pending = False
         self._session_silent = False
 
     def _init_wakeword(self):
         if self.cfg.wakeword_enabled:
-            from .wakeword import WakewordListener
+            from .wakeword import WakewordListener, is_muted
+            if is_muted():
+                # A stale flag silently disables detection — make it visible so
+                # "the wakeword does nothing" has an obvious explanation/fix.
+                log("[wakeword] Starting PAUSED — /tmp/wake_muted is present; "
+                    "resume via the tray 'Pause wakeword' toggle.")
             self._wakeword_listener = WakewordListener(
                 uri=self.cfg.wakeword_uri,
                 model=self.cfg.wakeword_model,
@@ -63,10 +67,13 @@ class Daemon:
             self._wakeword_listener.start()
 
     def _on_wakeword(self):
-        if not self.is_recording:
-            # Hands-free trigger: keep this session's notifications quiet.
-            self._wake_pending = True
-            self.toggle(self._route_workflow)
+        # Hands-free trigger: start a quiet (notification-suppressed) session.
+        # We call start_dictation directly rather than toggle() so that a busy
+        # or not-yet-ready state is ignored silently instead of popping a
+        # "Busy"/"Please wait" notification — repeated false detections while a
+        # clip is still transcribing were the source of the away-from-keyboard
+        # notification storm.
+        self.start_dictation(self._route_workflow, silent=True)
 
     # -- feedback -------------------------------------------------------------
     def _notify(self, title: str, body: str = "", urgency: str = "normal") -> None:
@@ -158,14 +165,13 @@ class Daemon:
             sound.play(custom, fallback="complete")
 
     # -- recording control ----------------------------------------------------
-    def start_dictation(self, workflow: Workflow | None = None) -> None:
+    def start_dictation(self, workflow: Workflow | None = None, silent: bool = False) -> None:
         wf = workflow or self._route_workflow
         streamer: RivaRealtimeStreamer | None = None
         with self._lock:
             if not self.ready or self._busy or self.is_recording:
                 return
-            self._session_silent = self._wake_pending
-            self._wake_pending = False
+            self._session_silent = silent
             self._target_window = active_window_id()
             self._active_workflow = wf
             if wf.mode == "stream":
@@ -384,7 +390,8 @@ class Daemon:
                     )
                 except LLMError as exc:
                     self._emit("error", label, str(exc))
-                    self._notify("Rewrite failed", str(exc), "critical")
+                    self._dnotify("Rewrite failed", str(exc), "critical")
+                    log(f"ERROR ({label} rewrite): {exc}")
                     return
 
             if not text:
@@ -405,7 +412,7 @@ class Daemon:
             self._dnotify(f"✓ {label}", text[:80] + ("…" if len(text) > 80 else ""))
         except Exception as exc:  # noqa: BLE001 - surface any failure
             self._emit("error", label, str(exc))
-            self._notify("Error", str(exc), "critical")
+            self._dnotify("Error", str(exc), "critical")
             log(f"ERROR ({label}): {exc}")
         finally:
             audio_path.unlink(missing_ok=True)

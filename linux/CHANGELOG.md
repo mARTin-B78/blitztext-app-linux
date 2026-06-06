@@ -18,7 +18,15 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 ### Fixed
 - **Wakeword stuck muted**: a leftover `/tmp/wake_muted` flag silently disabled
   detection with no in-app way to clear it. The state is now exposed and
-  reversible from the tray, so a stale flag no longer kills hands-free use.
+  reversible from the tray, so a stale flag no longer kills hands-free use. The
+  daemon also logs a clear `Starting PAUSED` warning when it boots muted.
+- **Away-from-keyboard "Busy" storm**: a wakeword hit arriving while the previous
+  clip was still transcribing went through `toggle()` and popped a "Busy"
+  notification. Wakeword triggers now go straight to `start_dictation()`, so a
+  busy/not-ready state is ignored silently instead.
+- **Quiet hands-free errors**: transcription/rewrite failures during a
+  wakeword-triggered session no longer raise critical desktop notifications —
+  they are logged instead, keeping background sessions silent.
 - **Notification storm / lock-screen pile-up**: desktop notifications are now
   sent as transient with a short expiry and reuse a single bubble, so they no
   longer stack in the notification log or persist on the lock screen.
