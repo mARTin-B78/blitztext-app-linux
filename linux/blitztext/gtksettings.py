@@ -728,6 +728,48 @@ class SettingsDialog:
         box = Gtk.Box(spacing=10); box.pack_start(self.ww_test_btn, False, False, 0); box.pack_start(self.ww_test_lbl, False, False, 0)
         _labeled(page, "", box)
 
+        page.pack_start(Gtk.Separator(), False, False, 8)
+        page.pack_start(Gtk.Label(label="Audio cues", xalign=0.0), False, False, 2)
+        self.snd_before = self._sound_field(
+            page, "Play before", self.cfg.sound_before,
+            "Sound played when recording starts — your confirmation that Blitztext is listening.")
+        self.snd_after = self._sound_field(
+            page, "Play after", self.cfg.sound_after,
+            "Sound played when recording stops (on paste, paste+Enter, or auto-stop on silence).")
+
+    def _sound_field(self, page: Gtk.Box, label: str, value: str, tooltip: str = "") -> Gtk.FileChooserButton:
+        row = Gtk.Box(spacing=10); row.set_margin_top(3); row.set_margin_bottom(3)
+        lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(150, -1)
+        if tooltip:
+            lbl.set_tooltip_text(tooltip)
+        row.pack_start(lbl, False, False, 0)
+        chooser = Gtk.FileChooserButton(title=label, action=Gtk.FileChooserAction.OPEN)
+        af = Gtk.FileFilter(); af.set_name("Audio")
+        for pat in ("*.wav", "*.oga", "*.ogg", "*.flac"):
+            af.add_pattern(pat)
+        chooser.add_filter(af)
+        if value:
+            chooser.set_filename(value)
+        chooser.set_hexpand(True)
+        if tooltip:
+            chooser.set_tooltip_text(tooltip + " Leave empty to use the built-in system sound.")
+        row.pack_start(chooser, True, True, 0)
+        play = Gtk.Button.new_from_icon_name("media-playback-start-symbolic", Gtk.IconSize.BUTTON)
+        play.set_tooltip_text("Play this sound now")
+        play.connect("clicked", lambda _b, c=chooser: self._play_sound_file(c.get_filename()))
+        row.pack_start(play, False, False, 0)
+        clr = Gtk.Button.new_from_icon_name("edit-clear-symbolic", Gtk.IconSize.BUTTON)
+        clr.set_tooltip_text("Clear — use the built-in system sound")
+        clr.connect("clicked", lambda _b, c=chooser: c.unselect_all())
+        row.pack_start(clr, False, False, 0)
+        page.pack_start(row, False, False, 0)
+        return chooser
+
+    def _play_sound_file(self, path) -> None:
+        from . import sound
+        if path:
+            sound.play(path)
+
     # ===== General ==========================================================
     def _build_general(self, page: Gtk.Box) -> None:
         self._mics = audio.list_mics()
@@ -1021,6 +1063,8 @@ class SettingsDialog:
             c.silence_rms = float(self.q_rms.get_text())
             c.reject_hallucinations = self.q_halluc.get_active()
             c.strip_trailing_punctuation = self.q_strip.get_active()
+            c.sound_before = self.snd_before.get_filename() or ""
+            c.sound_after = self.snd_after.get_filename() or ""
             c.wakeword_enabled = self.ww_enabled.get_active()
             c.wakeword_uri = self.ww_uri.get_text().strip()
             c.wakeword_model = _combo_text(self.ww_model)
