@@ -7,9 +7,37 @@ the chosen input and report a 0..1 level to a callback.
 
 from __future__ import annotations
 
+import contextlib
+import os
 import shutil
 import subprocess
+import sys
 import threading
+
+
+@contextlib.contextmanager
+def _quiet_c_stderr():
+    """Silence chatter written directly to fd 2 by C libraries.
+
+    PortAudio/ALSA print harmless thread-teardown noise
+    ("pthread_join ... failed", "PaUnixThread_Terminate ... failed") straight to
+    the underlying stderr file descriptor, which Python-level redirection can't
+    catch. We briefly point fd 2 at /dev/null around the offending call.
+    """
+    try:
+        stderr_fd = sys.stderr.fileno()
+    except (AttributeError, ValueError, OSError):
+        yield  # No real stderr fd (already captured/redirected) — nothing to do.
+        return
+    saved_fd = os.dup(stderr_fd)
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(devnull_fd, stderr_fd)
+        yield
+    finally:
+        os.dup2(saved_fd, stderr_fd)
+        os.close(devnull_fd)
+        os.close(saved_fd)
 
 
 def list_mics() -> list[tuple[str, str]]:
@@ -59,11 +87,12 @@ class LevelMeter:
                 self.on_level(min(1.0, level * 12.0))
 
         try:
-            self._stream = sd.InputStream(
-                samplerate=16000, channels=1, dtype="float32",
-                blocksize=1600, device=self._resolve_device(), callback=_cb,
-            )
-            self._stream.start()
+            with _quiet_c_stderr():
+                self._stream = sd.InputStream(
+                    samplerate=16000, channels=1, dtype="float32",
+                    blocksize=1600, device=self._resolve_device(), callback=_cb,
+                )
+                self._stream.start()
             return True
         except Exception:  # noqa: BLE001 - device may be busy/unavailable
             self._stream = None
@@ -88,7 +117,9 @@ class LevelMeter:
         with self._lock:
             if self._stream is not None:
                 try:
-                    self._stream.stop()
-                    self._stream.close()
+                    # PortAudio/ALSA spews thread-teardown noise to fd 2 here.
+                    with _quiet_c_stderr():
+                        self._stream.stop()
+                        self._stream.close()
                 finally:
                     self._stream = None

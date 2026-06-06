@@ -773,7 +773,11 @@ class SettingsDialog:
             "Played when your command is captured (silence or stop) — confirms your input was taken.")
 
         page.pack_start(Gtk.Separator(), False, False, 8)
-        page.pack_start(Gtk.Label(label="Audio cues (manual dictation)", xalign=0.0), False, False, 2)
+        page.pack_start(Gtk.Label(label="Audio cues", xalign=0.0), False, False, 2)
+        self.snd_enabled = Gtk.Switch(); self.snd_enabled.set_active(self.cfg.sounds_enabled); self.snd_enabled.set_halign(Gtk.Align.START)
+        _labeled(page, "Play audio cues", self.snd_enabled,
+                 tooltip="Master switch for every start/stop chime, including the hands-free "
+                         "wakeword cues above. Turn off for completely silent operation.")
         self.snd_before = self._sound_field(
             page, "Play before", self.cfg.sound_before,
             "Sound played when recording starts — your confirmation that Blitztext is listening.")
@@ -1120,6 +1124,7 @@ class SettingsDialog:
             c.silence_rms = float(self.q_rms.get_text())
             c.reject_hallucinations = self.q_halluc.get_active()
             c.strip_trailing_punctuation = self.q_strip.get_active()
+            c.sounds_enabled = self.snd_enabled.get_active()
             c.sound_before = self.snd_before.get_filename() or ""
             c.sound_after = self.snd_after.get_filename() or ""
             c.wakeword_enabled = self.ww_enabled.get_active()

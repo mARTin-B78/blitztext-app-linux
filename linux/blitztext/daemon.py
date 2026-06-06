@@ -150,12 +150,17 @@ class Daemon:
             self._vad_meter = None
 
     def _play_sound(self, sound_name: str) -> None:
+        if not self.cfg.sounds_enabled:
+            return
         from . import sound
         sound.play(fallback=sound_name)
 
     def _play_cue(self, cue: str) -> None:
         """Play an audio cue. Hands-free (wakeword) sessions prefer the wakeword
-        sounds, then the general [sounds] cues, then a built-in system sound."""
+        sounds, then the general [sounds] cues, then a built-in system sound.
+        The whole feature is gated by the [sounds] master switch."""
+        if not self.cfg.sounds_enabled:
+            return
         from . import sound
         if cue == "before":
             custom = (self.cfg.wakeword_sound_detected if self._session_silent else "") or self.cfg.sound_before

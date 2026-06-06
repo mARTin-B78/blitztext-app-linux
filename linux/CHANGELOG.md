@@ -14,8 +14,15 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
   system-tray menu when the wakeword is enabled. It pauses/resumes hands-free
   detection by toggling the `/tmp/wake_muted` flag (external scripts may toggle
   the same file).
+- **"Play audio cues" master switch** (Settings → Input → Audio cues, or
+  `[sounds] enabled` in the config): one toggle to silence every start/stop
+  chime, including the hands-free wakeword cues. Defaults to on.
 
 ### Fixed
+- **PortAudio/ALSA teardown noise**: the level meter no longer leaks
+  `pthread_join ... failed` / `PaUnixThread_Terminate ... failed` lines to the
+  terminal when a clip ends — that C-library chatter (written straight to fd 2)
+  is now suppressed around the stream open/close.
 - **Wakeword stuck muted**: a leftover `/tmp/wake_muted` flag silently disabled
   detection with no in-app way to clear it. The state is now exposed and
   reversible from the tray, so a stale flag no longer kills hands-free use. The

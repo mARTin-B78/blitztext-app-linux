@@ -43,6 +43,23 @@ def test_on_wakeword_starts_a_silent_session(monkeypatch):
     assert started.get("wf") is d._route_workflow
 
 
+def test_audio_cues_master_switch(monkeypatch):
+    import blitztext.sound as sound_mod
+    plays = []
+    monkeypatch.setattr(sound_mod, "play", lambda *a, **k: plays.append((a, k)))
+    d = _make_daemon(monkeypatch)
+
+    d.cfg.sounds_enabled = False
+    d._play_cue("before")
+    d._play_sound("device-removed")
+    assert plays == [], "no cue should play when audio cues are disabled"
+
+    d.cfg.sounds_enabled = True
+    d._play_cue("before")
+    d._play_sound("device-removed")
+    assert len(plays) == 2, "cues should play when enabled"
+
+
 def test_wakeword_while_busy_does_not_notify(monkeypatch):
     """The away-from-keyboard "Busy" storm: a detection arriving while the
     previous clip is still being processed must be ignored silently."""

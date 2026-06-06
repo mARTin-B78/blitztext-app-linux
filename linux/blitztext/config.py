@@ -52,6 +52,7 @@ class Config:
     reject_hallucinations: bool = True
     strip_trailing_punctuation: bool = False
     # audio cues (paths to WAV files; "" = built-in system sound)
+    sounds_enabled: bool = True   # master switch for all start/stop/wakeword cues
     sound_before: str = ""
     sound_after: str = ""
     # whisper
@@ -169,6 +170,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
         silence_rms=float(q.get("silence_rms", 150.0)),
         reject_hallucinations=bool(q.get("reject_hallucinations", True)),
         strip_trailing_punctuation=bool(q.get("strip_trailing_punctuation", False)),
+        sounds_enabled=bool(snd.get("enabled", True)),
         sound_before=snd.get("before", ""),
         sound_after=snd.get("after", ""),
         wakeword_enabled=bool(ww.get("enabled", False)),
@@ -276,6 +278,7 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "strip_trailing_punctuation": cfg.strip_trailing_punctuation,
         },
         "sounds": {
+            "enabled": cfg.sounds_enabled,
             "before": cfg.sound_before,
             "after": cfg.sound_after,
         },
@@ -364,9 +367,12 @@ reject_hallucinations = true
 strip_trailing_punctuation = false
 
 [sounds]
-# Optional WAV files played as audio cues. Leave empty for the built-in system
+# enabled = master switch for ALL audio cues (start/stop chimes and the
+# hands-free wakeword cues below). Set false for completely silent operation.
+# Optional WAV files played as audio cues: leave empty for the built-in system
 # sound. "before" plays when recording starts; "after" plays on any stop
 # (stop+paste, stop+paste+Enter, or auto-stop on silence).
+enabled = true
 before = ""
 after = ""
 
