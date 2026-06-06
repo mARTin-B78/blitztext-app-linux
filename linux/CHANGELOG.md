@@ -9,6 +9,22 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+### Added
+- **Pause wakeword (tray)**: a reversible "Pause wakeword" toggle appears in the
+  system-tray menu when the wakeword is enabled. It pauses/resumes hands-free
+  detection by toggling the `/tmp/wake_muted` flag (external scripts may toggle
+  the same file).
+
+### Fixed
+- **Wakeword stuck muted**: a leftover `/tmp/wake_muted` flag silently disabled
+  detection with no in-app way to clear it. The state is now exposed and
+  reversible from the tray, so a stale flag no longer kills hands-free use.
+- **Notification storm / lock-screen pile-up**: desktop notifications are now
+  sent as transient with a short expiry and reuse a single bubble, so they no
+  longer stack in the notification log or persist on the lock screen.
+- **Quiet hands-free sessions**: per-dictation notifications are suppressed for
+  wakeword-triggered sessions (audio cues are used instead).
+
 ## [1.2.0] - 2026-06-05
 
 ### Added

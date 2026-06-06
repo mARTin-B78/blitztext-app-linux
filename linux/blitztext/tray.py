@@ -87,6 +87,20 @@ class Tray:
             menu.append(item)
 
         menu.append(Gtk.SeparatorMenuItem())
+
+        # Hands-free wakeword: a reversible pause toggle. Without this, a stale
+        # /tmp/wake_muted flag would silently disable detection with no way back.
+        if getattr(self.app.cfg, "wakeword_enabled", False):
+            from . import wakeword
+
+            self.mute_item = Gtk.CheckMenuItem(label="Pause wakeword")
+            self.mute_item.set_active(wakeword.is_muted())
+            self.mute_item.connect(
+                "toggled", lambda i: wakeword.set_muted(i.get_active())
+            )
+            menu.append(self.mute_item)
+            menu.append(Gtk.SeparatorMenuItem())
+
         for label, cb in (
             ("Show panel", self.app.show_panel),
             ("Settings…", self.app.open_settings),

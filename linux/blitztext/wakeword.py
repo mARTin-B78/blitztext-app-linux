@@ -19,7 +19,24 @@ from urllib.parse import urlparse
 
 from . import logbuffer
 
-_MUTE_FILE = "/tmp/wake_muted"
+MUTE_FILE = "/tmp/wake_muted"
+
+
+def is_muted() -> bool:
+    """True if wakeword detections are currently paused via the mute flag."""
+    return os.path.exists(MUTE_FILE)
+
+
+def set_muted(muted: bool) -> None:
+    """Pause (create flag) or resume (remove flag) wakeword detection."""
+    try:
+        if muted:
+            open(MUTE_FILE, "a").close()
+        elif os.path.exists(MUTE_FILE):
+            os.remove(MUTE_FILE)
+    except OSError as e:  # noqa: BLE001 - mute is best-effort, never crash
+        logbuffer.log(f"[wakeword] Could not update mute flag: {e}")
+
 
 class WakewordListener:
     def __init__(self, uri: str, model: str, mic: str, on_detect):
@@ -142,8 +159,8 @@ class WakewordListener:
         if time.time() < self._cooldown_until:
             return
             
-        if os.path.exists(_MUTE_FILE):
-            logbuffer.log("[wakeword] Detected, but muted via /tmp/wake_muted")
+        if is_muted():
+            logbuffer.log("[wakeword] Detected, but paused (resume via tray)")
             return
             
         logbuffer.log(f"[wakeword] Detected '{self.model}'!")
