@@ -147,12 +147,15 @@ class Daemon:
         sound.play(fallback=sound_name)
 
     def _play_cue(self, cue: str) -> None:
-        """Play the user's WAV for 'before'/'after', else a built-in system sound."""
+        """Play an audio cue. Hands-free (wakeword) sessions prefer the wakeword
+        sounds, then the general [sounds] cues, then a built-in system sound."""
         from . import sound
         if cue == "before":
-            sound.play(self.cfg.sound_before, fallback="device-added")
+            custom = (self.cfg.wakeword_sound_detected if self._session_silent else "") or self.cfg.sound_before
+            sound.play(custom, fallback="device-added")
         else:
-            sound.play(self.cfg.sound_after, fallback="complete")
+            custom = (self.cfg.wakeword_sound_done if self._session_silent else "") or self.cfg.sound_after
+            sound.play(custom, fallback="complete")
 
     # -- recording control ----------------------------------------------------
     def start_dictation(self, workflow: Workflow | None = None) -> None:

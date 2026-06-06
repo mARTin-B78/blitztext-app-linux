@@ -765,8 +765,15 @@ class SettingsDialog:
         box = Gtk.Box(spacing=10); box.pack_start(self.ww_test_btn, False, False, 0); box.pack_start(self.ww_test_lbl, False, False, 0)
         _labeled(page, "", box)
 
+        self.ww_snd_detected = self._sound_field(
+            page, "Sound: detected", self.cfg.wakeword_sound_detected,
+            "Played right after the wakeword is recognised — your cue that Blitztext is listening, speak now.")
+        self.ww_snd_done = self._sound_field(
+            page, "Sound: captured", self.cfg.wakeword_sound_done,
+            "Played when your command is captured (silence or stop) — confirms your input was taken.")
+
         page.pack_start(Gtk.Separator(), False, False, 8)
-        page.pack_start(Gtk.Label(label="Audio cues", xalign=0.0), False, False, 2)
+        page.pack_start(Gtk.Label(label="Audio cues (manual dictation)", xalign=0.0), False, False, 2)
         self.snd_before = self._sound_field(
             page, "Play before", self.cfg.sound_before,
             "Sound played when recording starts — your confirmation that Blitztext is listening.")
@@ -1118,6 +1125,8 @@ class SettingsDialog:
             c.wakeword_enabled = self.ww_enabled.get_active()
             c.wakeword_uri = self.ww_uri.get_text().strip()
             c.wakeword_model = _combo_text(self.ww_model)
+            c.wakeword_sound_detected = self.ww_snd_detected.get_filename() or ""
+            c.wakeword_sound_done = self.ww_snd_done.get_filename() or ""
             c.mic = self._selected_mic_name()
             c.output = self.gen_output.get_active_text() or "type"
             c.language = self.gen_lang.get_text().strip()
