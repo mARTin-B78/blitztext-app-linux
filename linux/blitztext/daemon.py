@@ -319,7 +319,7 @@ class Daemon:
                                  min_seconds=self.cfg.min_speech_seconds,
                                  silence_rms=self.cfg.silence_rms):
                 self._emit("idle", label, "Too quiet")
-                self._notify("Nothing heard", "No speech detected.", "low")
+                log("Nothing heard — clip too quiet/short.")
                 return
 
             self._emit("busy", label, "Transcribing…")
@@ -337,7 +337,7 @@ class Daemon:
             text = quality.clean(text, strip_trailing_punctuation=self.cfg.strip_trailing_punctuation)
             if not text or (self.cfg.reject_hallucinations and quality.is_hallucination(text, duration)):
                 self._emit("idle", label, "No speech detected")
-                self._notify("Nothing heard", "No speech detected.", "low")
+                log("Nothing heard — no speech detected.")
                 return
 
             # Voice routing: pick the preset from a spoken keyword, strip it.
@@ -355,7 +355,7 @@ class Daemon:
             if target and target.mode == "rewrite" and target.prompt:
                 if not text:
                     self._emit("idle", label, "Only a keyword heard")
-                    self._notify("Nothing to do", "Only the keyword was heard.", "low")
+                    log("Only the keyword was heard — nothing to type.")
                     return
                 self._emit("busy", label, "Rewriting…")
                 self._notify(f"⌛ {label}", "Rewriting…")

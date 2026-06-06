@@ -13,6 +13,23 @@ from pathlib import Path
 from . import __version__
 from .config import CONFIG_PATH, ensure_default, load
 
+# Held for the process lifetime to enforce a single running instance.
+_SINGLE_INSTANCE_SOCK = None
+
+
+def _acquire_single_instance() -> bool:
+    """Bind an abstract unix socket; False if another instance already holds it."""
+    global _SINGLE_INSTANCE_SOCK
+    import socket
+
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    try:
+        sock.bind("\0blitztext-single-instance")  # abstract namespace (auto-freed on exit)
+    except OSError:
+        return False
+    _SINGLE_INSTANCE_SOCK = sock
+    return True
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="blitztext", description="Native dictation for Linux.")
@@ -34,6 +51,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if cmd == "config-path":
         print(ensure_default(CONFIG_PATH))
+        return 0
+
+    # Only one live daemon/tray/gui at a time — prevents duplicate wakeword
+    # listeners and recorders (which caused notification storms).
+    if cmd in ("gui", "tray", "run") and not _acquire_single_instance():
+        print("[blitztext] already running — not starting a second instance.", file=sys.stderr)
         return 0
 
     if cmd in ("gui", "tray"):
