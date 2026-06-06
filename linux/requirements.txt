@@ -1,5 +1,5 @@
 faster-whisper>=1.0
 pynput>=1.7
 tomli-w>=1.0
-sounddevice>=0.4
+sounddevice>=0.5.5
 websockets>=12.0
