@@ -134,10 +134,16 @@ class Daemon:
             self._vad_meter = None
 
     def _play_sound(self, sound_name: str) -> None:
-        import os, subprocess, shutil
-        path = f"/usr/share/sounds/freedesktop/stereo/{sound_name}.oga"
-        if os.path.exists(path) and shutil.which("pw-play"):
-            subprocess.Popen(["pw-play", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        from . import sound
+        sound.play(fallback=sound_name)
+
+    def _play_cue(self, cue: str) -> None:
+        """Play the user's WAV for 'before'/'after', else a built-in system sound."""
+        from . import sound
+        if cue == "before":
+            sound.play(self.cfg.sound_before, fallback="device-added")
+        else:
+            sound.play(self.cfg.sound_after, fallback="complete")
 
     # -- recording control ----------------------------------------------------
     def start_dictation(self, workflow: Workflow | None = None) -> None:
@@ -185,7 +191,7 @@ class Daemon:
 
         self._emit("recording", wf.name, "Recording…")
         self._notify(f"● {wf.name}", "Recording…")
-        self._play_sound("device-added")
+        self._play_cue("before")
 
     def finish_dictation(self, send_enter: bool = False) -> None:
         self._vad_stop()
@@ -213,7 +219,7 @@ class Daemon:
             return
 
         audio_path = rec.stop()
-        self._play_sound("complete")
+        self._play_cue("after")
         threading.Thread(
             target=self._process, args=(audio_path, wf, win, send_enter), daemon=True
         ).start()

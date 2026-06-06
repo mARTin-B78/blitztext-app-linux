@@ -51,6 +51,9 @@ class Config:
     silence_rms: float = 150.0
     reject_hallucinations: bool = True
     strip_trailing_punctuation: bool = False
+    # audio cues (paths to WAV files; "" = built-in system sound)
+    sound_before: str = ""
+    sound_after: str = ""
     # whisper
     model: str = "small"
     device: str = "auto"          # auto | cuda | cpu
@@ -131,6 +134,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
     rt = data.get("routing", {})
     inp = data.get("input", {})
     q = data.get("quality", {})
+    snd = data.get("sounds", {})
     ww = data.get("wakeword", {})
 
     cfg = Config(
@@ -163,6 +167,8 @@ def load(path: Path = CONFIG_PATH) -> Config:
         silence_rms=float(q.get("silence_rms", 150.0)),
         reject_hallucinations=bool(q.get("reject_hallucinations", True)),
         strip_trailing_punctuation=bool(q.get("strip_trailing_punctuation", False)),
+        sound_before=snd.get("before", ""),
+        sound_after=snd.get("after", ""),
         wakeword_enabled=bool(ww.get("enabled", False)),
         wakeword_uri=ww.get("uri", "tcp://127.0.0.1:10400"),
         wakeword_model=ww.get("model", "okay_computer"),
@@ -265,6 +271,10 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "reject_hallucinations": cfg.reject_hallucinations,
             "strip_trailing_punctuation": cfg.strip_trailing_punctuation,
         },
+        "sounds": {
+            "before": cfg.sound_before,
+            "after": cfg.sound_after,
+        },
         "wakeword": {
             "enabled": cfg.wakeword_enabled,
             "uri": cfg.wakeword_uri,
@@ -346,6 +356,13 @@ min_speech_seconds = 0.4         # discard clips shorter than this
 silence_rms = 150.0              # discard clips quieter than this RMS (0..32767)
 reject_hallucinations = true
 strip_trailing_punctuation = false
+
+[sounds]
+# Optional WAV files played as audio cues. Leave empty for the built-in system
+# sound. "before" plays when recording starts; "after" plays on any stop
+# (stop+paste, stop+paste+Enter, or auto-stop on silence).
+before = ""
+after = ""
 
 [whisper]
 model = "small"          # tiny | base | small | medium | large-v3, or a local path
