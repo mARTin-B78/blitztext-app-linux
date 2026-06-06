@@ -12,6 +12,12 @@ experiment along those lines was moved out to
 [faster-whisper]; live streaming can use a local Riva/NIM realtime server. Only
 the optional rewrite step calls out to an LLM.
 
+<p align="center">
+  <img src="../Screenshots/panel.png" alt="Blitztext control panel" width="380">
+  &nbsp;&nbsp;
+  <img src="../Screenshots/tray-menu.png" alt="Blitztext system-tray menu" width="300">
+</p>
+
 ## Inspiration
 
 Blitztext App Linux is inspired by [cmagnussen/blitztext-app](https://github.com/cmagnussen/blitztext-app), the original macOS menu-bar workflow for turning speech into text and cleaner writing. This Linux version keeps the workflow but uses Linux-native pieces: GTK, AppIndicator, global hotkeys, `faster-whisper`, optional Riva/NIM realtime STT, and `xdotool`.
@@ -32,6 +38,23 @@ mode "stream" ──▶ mic PCM chunks ──▶ Riva/NIM realtime WebSocket ─
 Each normal hotkey **toggles**: press to start recording, press again to stop —
 then it transcribes, optionally rewrites, and types the result where your cursor
 is. Streaming workflows type stable words live while you speak.
+
+## Screenshots
+
+Everything is configured in the Settings window — presets, engines, input, and
+a benchmark, all with tooltips and screen-reader (ATK) support.
+
+| Presets | Engines | Input |
+|:---:|:---:|:---:|
+| [![Presets](../Screenshots/settings-presets.png)](../Screenshots/settings-presets.png) | [![Engines](../Screenshots/settings-engines.png)](../Screenshots/settings-engines.png) | [![Input](../Screenshots/settings-input.png)](../Screenshots/settings-input.png) |
+| **General** | **Benchmark** | **Log / About** |
+| [![General](../Screenshots/settings-general.png)](../Screenshots/settings-general.png) | [![Benchmark](../Screenshots/settings-benchmark.png)](../Screenshots/settings-benchmark.png) | [![Log](../Screenshots/settings-log.png)](../Screenshots/settings-log.png) |
+
+- **Presets** — dictation actions (transcribe / rewrite), each with spoken keywords, an optional hotkey, and its own prompt.
+- **Engines** — speech-to-text and language-model presets (local or remote) with online/offline status and a searchable model list.
+- **Input** — start/stop keys, quality gate, hands-free wakeword, and audio cues.
+- **Benchmark** — compare engines on a reference clip by speed and accuracy.
+- **About** — version, source, changelog, and licence ([screenshot](../Screenshots/settings-about.png)).
 
 ## Requirements
 
