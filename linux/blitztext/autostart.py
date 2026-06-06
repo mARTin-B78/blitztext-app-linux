@@ -16,7 +16,18 @@ _ENTRY = _AUTOSTART_DIR / "blitztext.desktop"
 
 
 def _exec_command() -> str:
-    """Prefer an installed `blitztext` launcher; else run this venv's module."""
+    """Launch the *currently running* copy on login.
+
+    If we're running from a source checkout (not the installed /opt copy or a
+    site-packages install), launch that exact source with PYTHONPATH so edits
+    stay live. Otherwise prefer the installed `blitztext` launcher.
+    """
+    import blitztext
+
+    pkg_parent = str(Path(blitztext.__file__).resolve().parent.parent)
+    from_source = not pkg_parent.startswith("/opt/") and "site-packages" not in pkg_parent
+    if from_source:
+        return f"env PYTHONPATH={pkg_parent} {sys.executable} -m blitztext tray"
     launcher = shutil.which("blitztext")
     if launcher:
         return f"{launcher} tray"
