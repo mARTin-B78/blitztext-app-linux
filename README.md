@@ -7,6 +7,12 @@ Blitztext is a native Linux dictation tool that captures your voice, transcribes
 > **Status:** Experimental open-source Linux/X11 desktop app (v1.1.0).
 > No hosted backend — bring your own models and endpoints.
 
+<p align="center">
+  <img src="Screenshots/panel.png" alt="Blitztext control panel" width="380">
+  &nbsp;&nbsp;
+  <img src="Screenshots/tray-menu.png" alt="Blitztext system-tray menu" width="300">
+</p>
+
 ---
 
 ## Inspiration & Credits
@@ -50,6 +56,26 @@ Stream:    hotkey → mic PCM chunks → Riva/NIM WebSocket → live words typed
 - **Quality gate.** Silent clips, too-short recordings, and Whisper hallucinations ("Thank you.", "Untertitel…") are caught and rejected before they reach your text field.
 - **Realtime streaming.** Connect a Riva/NIM realtime STT server and see stable words typed live as you speak.
 - **Built-in benchmarking.** Compare all your configured STT engines against a reference WAV + transcript to find the fastest and most accurate.
+
+---
+
+## Screenshots
+
+Everything is configured in the GTK Settings window — presets, engines, input,
+hands-free wakeword, and a built-in benchmark, all with tooltips and
+screen-reader (ATK) support. Click any thumbnail to view full size.
+
+| Presets | Engines | Input | General |
+|:---:|:---:|:---:|:---:|
+| [![Presets](Screenshots/settings-presets.png)](Screenshots/settings-presets.png) | [![Engines](Screenshots/settings-engines.png)](Screenshots/settings-engines.png) | [![Input](Screenshots/settings-input.png)](Screenshots/settings-input.png) | [![General](Screenshots/settings-general.png)](Screenshots/settings-general.png) |
+| **Benchmark** | **Log** | **About** | **Wakeword (hands-free)** |
+| [![Benchmark](Screenshots/settings-benchmark.png)](Screenshots/settings-benchmark.png) | [![Log](Screenshots/settings-log.png)](Screenshots/settings-log.png) | [![About](Screenshots/settings-about.png)](Screenshots/settings-about.png) | [![Wakeword](Screenshots/wakeword.png)](Screenshots/wakeword.png) |
+
+- **Presets** — dictation actions (transcribe / rewrite), each with spoken keywords, an optional hotkey, and its own prompt.
+- **Engines** — speech-to-text and language-model presets (local or remote) with online/offline status and a searchable model list.
+- **Input** — start/stop keys, quality gate, hands-free wakeword, and audio cues.
+- **Benchmark** — compare engines on a reference clip by speed and accuracy.
+- **About** — version, source, changelog, and licence.
 
 ---
 
@@ -369,7 +395,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 **Good first contributions:**
 - Add unit tests for `routing.py`, `quality.py`, `config.py`, `benchmark.py`
-- Add Linux screenshots
+- Add a short demo GIF or additional screenshots
 - Improve error messages and first-run setup
 - Document known-good STT/LLM engine configurations
 - Document known-good Wayland configurations for specific compositors

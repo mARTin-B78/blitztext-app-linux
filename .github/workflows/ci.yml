@@ -10,14 +10,14 @@ permissions:
   contents: read
 
 jobs:
-  build-macos:
-    name: Build macOS app
-    runs-on: macos-14
-    timeout-minutes: 30
+  test-linux:
+    name: Test Linux app
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Secret hygiene scan
         run: |
@@ -38,27 +38,6 @@ jobs:
             echo "Potential secret or private project reference found."
             exit 1
           fi
-
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.2.app || sudo xcode-select -s /Applications/Xcode.app
-
-      - name: Install XcodeGen
-        run: |
-          if ! command -v xcodegen >/dev/null 2>&1; then
-            brew install xcodegen
-          fi
-
-      - name: Build
-        run: ./build.sh --debug
-
-  test-linux:
-    name: Test Linux app
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
