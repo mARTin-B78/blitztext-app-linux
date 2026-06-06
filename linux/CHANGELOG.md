@@ -23,6 +23,32 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
   Settings shortcut for Nemotron ASR Streaming on `http://127.0.0.1:8006/v1`.
 - **Settings About tab** with the app version, source link, changelog, and
   license text.
+- **STT & LLM engine manager**: add, rename, and delete engine presets, each
+  with an online/offline status dot, a per-engine type (local/cloud), and a
+  **searchable model dropdown** populated from the server's `/models` (with a
+  reload button). Local Whisper device/precision now live with the STT engine.
+- **Benchmark tab**: run a reference clip through every STT engine and compare
+  **time**, **case-sensitive accuracy** (WER), and a **CPU/GPU/remote device**
+  column, with the fastest and most accurate highlighted.
+- **Custom audio cues**: pick your own WAV files to play when recording starts
+  and stops (covers stop+paste, stop+paste+Enter, and silence auto-stop), each
+  with play-test and clear-to-default buttons. Built-in system sounds otherwise.
+- **Settings Log tab**: a live activity log (model load/download, transcriptions,
+  errors) with Copy and Clear, so a long "Loading…" is no longer opaque.
+- **Per-tab info boxes** and expanded **tooltips** across Settings, written in
+  plain language and exposed to screen readers (ATK) — for non-technical and
+  blind users (barrierefrei).
+- **Click-to-bind hotkeys**: a *Set* button captures the next keypress (including
+  modifier-only chords like Ctrl+Win) into any hotkey field.
+
+### Changed
+- **GUI rebuilt in GTK 3** (replacing tkinter): a native GNOME panel unified with
+  the tray, with the Ubuntu font and a dropdown+editor pattern in Settings.
+- **Voice-keyword routing** and a **modifier hotkey scheme** (Ctrl+Win start,
+  Ctrl stop+paste, Alt stop+paste+Enter, Esc cancel) replace per-preset combos as
+  the default way to dictate.
+- **Quality gate** rejects silent/too-short clips and stock Whisper
+  hallucinations before they reach the screen.
 
 ## [1.1.0] - 2026-06-04
 
