@@ -92,6 +92,24 @@ def _labeled(parent: Gtk.Box, label: str, widget: Gtk.Widget, width: int = 130, 
     return widget
 
 
+def _infobox(parent: Gtk.Box, text: str) -> Gtk.Box:
+    """A plain-language help box at the top of a tab (read by screen readers)."""
+    box = Gtk.Box(spacing=8)
+    box.set_margin_top(2); box.set_margin_bottom(10)
+    icon = Gtk.Image.new_from_icon_name("dialog-information-symbolic", Gtk.IconSize.BUTTON)
+    icon.set_valign(Gtk.Align.START)
+    box.pack_start(icon, False, False, 0)
+    lbl = Gtk.Label(label=text, xalign=0.0)
+    lbl.set_line_wrap(True); lbl.set_xalign(0.0); lbl.set_max_width_chars(72)
+    box.pack_start(lbl, True, True, 0)
+    acc = box.get_accessible()
+    if acc:
+        acc.set_name("Information")
+        acc.set_description(text)
+    parent.pack_start(box, False, False, 0)
+    return box
+
+
 def _entry(text="", placeholder="") -> Gtk.Entry:
     e = Gtk.Entry(); e.set_text(str(text)); e.set_hexpand(True)
     if placeholder:
@@ -285,6 +303,10 @@ class SettingsDialog:
 
     # ===== Presets ==========================================================
     def _build_presets(self, page: Gtk.Box) -> None:
+        _infobox(page, "Presets are your dictation actions. Pick one to edit it, or add your "
+                       "own. A preset can simply type what you say, or rewrite it first "
+                       "(for example into a polished email). Trigger it by speaking its "
+                       "keyword, or with an optional keyboard shortcut.")
         self._wf_idx = 0
         bar = Gtk.Box(spacing=8)
         self.wf_combo = Gtk.ComboBoxText()
@@ -300,13 +322,19 @@ class SettingsDialog:
 
         form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         page.pack_start(form, True, True, 6)
-        self.wf_name = _labeled(form, "Name", _entry(placeholder="Preset name"))
-        self.wf_desc = _labeled(form, "Description", _entry(placeholder="Short description shown in the panel"))
-        self.wf_keywords = _labeled(form, "Keywords (comma)", _entry(placeholder="nicer email, bessere email"))
+        self.wf_name = _labeled(form, "Name", _entry(placeholder="Preset name"),
+                                tooltip="A short name for this action, shown in the main panel.")
+        self.wf_desc = _labeled(form, "Description", _entry(placeholder="Short description shown in the panel"),
+                                tooltip="One line explaining what this preset does.")
+        self.wf_keywords = _labeled(form, "Keywords (comma)", _entry(placeholder="nicer email, bessere email"),
+                                    tooltip="Spoken trigger words. Say one at the start or end of your speech to use this preset.")
         self.wf_hotkey = self._key_field(form, "Hotkey (optional)", "", placeholder="click Set, or e.g. <ctrl>+<alt>+e", width=130)
-        self.wf_mode = _labeled(form, "Mode", _combo(["transcribe", "rewrite", "stream"]))
-        self.wf_model = _labeled(form, "LLM model (opt.)", _entry(placeholder="blank = use the active LLM engine's model"))
-        self.wf_temp = _labeled(form, "Temperature (opt.)", _entry(placeholder="blank = engine default (e.g. 0.3)"))
+        self.wf_mode = _labeled(form, "Mode", _combo(["transcribe", "rewrite", "stream"]),
+                                tooltip="‘transcribe’ types your words as-is. ‘rewrite’ sends them to the language model first. ‘stream’ shows live text from a realtime engine.")
+        self.wf_model = _labeled(form, "LLM model (opt.)", _entry(placeholder="blank = use the active LLM engine's model"),
+                                 tooltip="Override the language model just for this preset. Leave blank to use the active LLM engine.")
+        self.wf_temp = _labeled(form, "Temperature (opt.)", _entry(placeholder="blank = engine default (e.g. 0.3)"),
+                                tooltip="Creativity of the rewrite, 0–1. Lower is more predictable. Blank uses the engine default.")
 
         form.pack_start(Gtk.Label(label="Prompt sent to the LLM (rewrite mode):", xalign=0.0), False, False, 6)
         frame = Gtk.Frame(); frame.set_shadow_type(Gtk.ShadowType.IN)
@@ -377,6 +405,10 @@ class SettingsDialog:
 
     # ===== Engines ==========================================================
     def _build_engines(self, page: Gtk.Box) -> None:
+        _infobox(page, "Engines do the work. The speech-to-text engine turns your voice into "
+                       "text; the language model rewrites it. Each can run locally on this "
+                       "computer or on a server you enter. A green dot means it is reachable, "
+                       "red means offline. Use Test to try the speech engine.")
         page.pack_start(self._stt_section(), False, False, 4)
         page.pack_start(Gtk.Separator(), False, False, 8)
         page.pack_start(self._llm_section(), False, False, 4)
@@ -695,7 +727,12 @@ class SettingsDialog:
 
     # ===== Input ============================================================
     def _build_input(self, page: Gtk.Box) -> None:
-        self.in_mode = _labeled(page, "Input mode", _combo(["modifiers", "hotkeys"], self.cfg.input_mode))
+        _infobox(page, "Choose how you start and stop dictating. With the default "
+                       "‘modifiers’ mode: hold Ctrl and the Windows key to talk, then press "
+                       "Ctrl to stop and paste. Below you can tune the noise filter, set up "
+                       "hands-free wakeword, and pick sounds that confirm start and stop.")
+        self.in_mode = _labeled(page, "Input mode", _combo(["modifiers", "hotkeys"], self.cfg.input_mode),
+                                tooltip="‘modifiers’: hold/press the keys below. ‘hotkeys’: each preset has its own shortcut combo.")
         self.in_ptt = Gtk.Switch(); self.in_ptt.set_active(self.cfg.push_to_talk); self.in_ptt.set_halign(Gtk.Align.START)
         _labeled(page, "Push-to-talk", self.in_ptt)
         self.in_start = self._key_field(page, "Start", self.cfg.key_start)
@@ -772,17 +809,25 @@ class SettingsDialog:
 
     # ===== General ==========================================================
     def _build_general(self, page: Gtk.Box) -> None:
+        _infobox(page, "General options: choose your microphone and watch its level bar move "
+                       "when you speak, set how the text is delivered, the spoken language, "
+                       "desktop notifications, and whether Blitztext starts automatically "
+                       "when you log in.")
         self._mics = audio.list_mics()
         names = [label for _, label in self._mics]
         cur = next((lbl for nm, lbl in self._mics if nm == self.cfg.mic), names[0])
-        self.gen_mic = _labeled(page, "Microphone", _combo(names, cur))
+        self.gen_mic = _labeled(page, "Microphone", _combo(names, cur),
+                                tooltip="Which microphone Blitztext records from.")
 
         self.mic_level = Gtk.LevelBar(); self.mic_level.set_min_value(0); self.mic_level.set_max_value(1)
-        _labeled(page, "Input level", self.mic_level)
+        _labeled(page, "Input level", self.mic_level,
+                 tooltip="Live microphone level. The bar should move when you speak.")
         self.gen_mic.connect("changed", lambda _c: self._restart_meter())
 
-        self.gen_output = _labeled(page, "Output", _combo(["type", "paste"], self.cfg.output))
-        self.gen_lang = _labeled(page, "Language hint", _entry(self.cfg.language, placeholder="de, en, …   (blank = autodetect)"))
+        self.gen_output = _labeled(page, "Output", _combo(["type", "paste"], self.cfg.output),
+                                   tooltip="‘type’ types the text key by key. ‘paste’ copies it and presses Ctrl+V (faster for long text).")
+        self.gen_lang = _labeled(page, "Language hint", _entry(self.cfg.language, placeholder="de, en, …   (blank = autodetect)"),
+                                 tooltip="Spoken language code (de, en, …). Leave blank to auto-detect.")
         self.gen_notify = Gtk.Switch(); self.gen_notify.set_active(self.cfg.notify); self.gen_notify.set_halign(Gtk.Align.START)
         _labeled(page, "Notifications", self.gen_notify)
         self.gen_boot = Gtk.Switch(); self.gen_boot.set_active(autostart.is_enabled()); self.gen_boot.set_halign(Gtk.Align.START)
@@ -883,10 +928,11 @@ class SettingsDialog:
 
     # ===== Benchmark ========================================================
     def _build_benchmark(self, page: Gtk.Box) -> None:
-        page.pack_start(Gtk.Label(
-            label="Benchmark all your STT engines against a reference clip "
-                  "(add presets for each model you want compared).",
-            xalign=0.0, wrap=True), False, False, 0)
+        _infobox(page, "Compare your speech-to-text engines. Pick a recording (.wav) and a "
+                       "text file (.txt) containing exactly what is said, then press Run "
+                       "benchmark. The table shows how fast each engine is and how accurate, "
+                       "and names the fastest and most accurate. Add an engine preset for "
+                       "each model you want in the comparison.")
 
         wavf = Gtk.FileChooserButton(title="WAV file", action=Gtk.FileChooserAction.OPEN)
         fa = Gtk.FileFilter(); fa.set_name("Audio (.wav)"); fa.add_pattern("*.wav"); wavf.add_filter(fa)
@@ -964,6 +1010,7 @@ class SettingsDialog:
 
     # ===== About ============================================================
     def _build_about(self, page: Gtk.Box) -> None:
+        _infobox(page, "About Blitztext: version, source code, recent changes, and licence.")
         paths = _app_paths()
         changelog = _read_first(paths["changelog"])
         license_text = _read_first(paths["license"])
@@ -1002,6 +1049,9 @@ class SettingsDialog:
 
     # ===== Log ==============================================================
     def _build_log(self, page: Gtk.Box) -> None:
+        _infobox(page, "A live activity log — useful to see what Blitztext is doing, for "
+                       "example while a speech model loads or downloads. Press Copy to put it "
+                       "on the clipboard when you want to report a problem.")
         sw = Gtk.ScrolledWindow(); sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         self.log_view = Gtk.TextView()
         self.log_view.set_editable(False); self.log_view.set_cursor_visible(False)
