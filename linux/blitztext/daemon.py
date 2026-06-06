@@ -46,6 +46,10 @@ class Daemon:
         self.recorder_name = detect_recorder(cfg.recorder)
         self.transcriber: Transcriber | None = None
         self._wakeword_listener = None
+        # When a session is started hands-free by the wakeword, its desktop
+        # notifications are suppressed (kept quiet in the background).
+        self._wake_pending = False
+        self._session_silent = False
 
     def _init_wakeword(self):
         if self.cfg.wakeword_enabled:
@@ -60,13 +64,18 @@ class Daemon:
 
     def _on_wakeword(self):
         if not self.is_recording:
-            # Wakeword only starts dictation. You still stop it via keyboard, 
-            # or we could make it toggle. A toggle is easiest.
+            # Hands-free trigger: keep this session's notifications quiet.
+            self._wake_pending = True
             self.toggle(self._route_workflow)
 
     # -- feedback -------------------------------------------------------------
     def _notify(self, title: str, body: str = "", urgency: str = "normal") -> None:
         notify(title, body, urgency=urgency, enabled=self.cfg.notify)
+
+    def _dnotify(self, title: str, body: str = "", urgency: str = "normal") -> None:
+        """Per-dictation notification — suppressed for hands-free (wakeword) sessions."""
+        if not self._session_silent:
+            self._notify(title, body, urgency=urgency)
 
     def _emit(self, state: str, workflow: str | None = None, message: str = "") -> None:
         if self.status_cb:
@@ -152,6 +161,8 @@ class Daemon:
         with self._lock:
             if not self.ready or self._busy or self.is_recording:
                 return
+            self._session_silent = self._wake_pending
+            self._wake_pending = False
             self._target_window = active_window_id()
             self._active_workflow = wf
             if wf.mode == "stream":
@@ -177,7 +188,7 @@ class Daemon:
 
         if streamer is not None:
             self._emit("streaming", wf.name, "Live transcript…")
-            self._notify(f"● {wf.name}", "Live transcript…")
+            self._dnotify(f"● {wf.name}", "Live transcript…")
             try:
                 streamer.start()
             except Exception as exc:  # noqa: BLE001
@@ -190,7 +201,7 @@ class Daemon:
             return
 
         self._emit("recording", wf.name, "Recording…")
-        self._notify(f"● {wf.name}", "Recording…")
+        self._dnotify(f"● {wf.name}", "Recording…")
         self._play_cue("before")
 
     def finish_dictation(self, send_enter: bool = False) -> None:
@@ -323,7 +334,7 @@ class Daemon:
                 return
 
             self._emit("busy", label, "Transcribing…")
-            self._notify(f"⌛ {label}", "Transcribing…")
+            self._dnotify(f"⌛ {label}", "Transcribing…")
             hotwords = ", ".join(self.cfg.all_keywords) if workflow.mode == "route" else ""
             text = stt.transcribe(
                 self.cfg.active_stt,
@@ -348,7 +359,7 @@ class Daemon:
                 label = target.name if target else "Transcribe"
                 via = f"“{res.keyword}”" if res.keyword else "default"
                 self._emit("busy", label, f"→ {label} ({via})")
-                self._notify(f"🎙 {label}", f"matched: {via}")
+                self._dnotify(f"🎙 {label}", f"matched: {via}")
             else:
                 target = workflow
 
@@ -358,7 +369,7 @@ class Daemon:
                     log("Only the keyword was heard — nothing to type.")
                     return
                 self._emit("busy", label, "Rewriting…")
-                self._notify(f"⌛ {label}", "Rewriting…")
+                self._dnotify(f"⌛ {label}", "Rewriting…")
                 try:
                     text = llm.chat(
                         self.cfg.active_llm,
@@ -388,7 +399,7 @@ class Daemon:
                 press_enter(window_id)
             self._emit("done", label, text)
             log(f"✓ {label}: {text[:120]}")
-            self._notify(f"✓ {label}", text[:80] + ("…" if len(text) > 80 else ""))
+            self._dnotify(f"✓ {label}", text[:80] + ("…" if len(text) > 80 else ""))
         except Exception as exc:  # noqa: BLE001 - surface any failure
             self._emit("error", label, str(exc))
             self._notify("Error", str(exc), "critical")
