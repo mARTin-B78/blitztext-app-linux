@@ -61,21 +61,48 @@ Stream:    hotkey → mic PCM chunks → Riva/NIM WebSocket → live words typed
 
 ## Screenshots
 
-Everything is configured in the GTK Settings window — presets, engines, input,
-hands-free wakeword, and a built-in benchmark, all with tooltips and
-screen-reader (ATK) support. Click any thumbnail to view full size.
+Everything is configured in the GTK **Settings** window — every tab has tooltips
+and screen-reader (ATK) support. Click any image to open it full size.
 
-| Presets | Engines | Input | General |
-|:---:|:---:|:---:|:---:|
-| [![Presets](Screenshots/settings-presets.png)](Screenshots/settings-presets.png) | [![Engines](Screenshots/settings-engines.png)](Screenshots/settings-engines.png) | [![Input](Screenshots/settings-input.png)](Screenshots/settings-input.png) | [![General](Screenshots/settings-general.png)](Screenshots/settings-general.png) |
-| **Benchmark** | **Log** | **About** | **Wakeword (hands-free)** |
-| [![Benchmark](Screenshots/settings-benchmark.png)](Screenshots/settings-benchmark.png) | [![Log](Screenshots/settings-log.png)](Screenshots/settings-log.png) | [![About](Screenshots/settings-about.png)](Screenshots/settings-about.png) | [![Wakeword](Screenshots/wakeword.png)](Screenshots/wakeword.png) |
+<p align="center">
+  <a href="Screenshots/settings-presets.png"><img src="Screenshots/settings-presets.png" alt="Presets settings tab" width="100%"></a><br>
+  <em><b>Presets</b> — your dictation actions. Each preset is either a plain transcription or an LLM rewrite, and carries its own spoken keyword(s) for voice routing, an optional global hotkey, and a custom rewrite prompt.</em>
+</p>
 
-- **Presets** — dictation actions (transcribe / rewrite), each with spoken keywords, an optional hotkey, and its own prompt.
-- **Engines** — speech-to-text and language-model presets (local or remote) with online/offline status and a searchable model list.
-- **Input** — start/stop keys, quality gate, hands-free wakeword, and audio cues.
-- **Benchmark** — compare engines on a reference clip by speed and accuracy.
-- **About** — version, source, changelog, and licence.
+<p align="center">
+  <a href="Screenshots/settings-engines.png"><img src="Screenshots/settings-engines.png" alt="Engines settings tab" width="100%"></a><br>
+  <em><b>Engines</b> — your speech-to-text and language-model back-ends, local or remote. Add and rename engines, watch live online/offline status, and pick models from a searchable list fetched straight from the endpoint.</em>
+</p>
+
+<p align="center">
+  <a href="Screenshots/settings-input.png"><img src="Screenshots/settings-input.png" alt="Input settings tab" width="100%"></a><br>
+  <em><b>Input</b> — how you start and stop dictation: the modifier-key scheme (Ctrl+Win / Ctrl / Alt / Esc) or custom hotkeys, plus the silence-based auto-stop (VAD), the quality gate, and audio cues.</em>
+</p>
+
+<p align="center">
+  <a href="Screenshots/wakeword.png"><img src="Screenshots/wakeword.png" alt="Wakeword (hands-free) settings" width="100%"></a><br>
+  <em><b>Wakeword (hands-free)</b> — point Blitztext at a Wyoming/openWakeWord server, choose a wake model, and test the connection live so a spoken keyword starts dictation with no keys at all.</em>
+</p>
+
+<p align="center">
+  <a href="Screenshots/settings-general.png"><img src="Screenshots/settings-general.png" alt="General settings tab" width="100%"></a><br>
+  <em><b>General</b> — core preferences: microphone with a live level meter, output mode (type vs. paste), language hint, type delay, and autostart on login.</em>
+</p>
+
+<p align="center">
+  <a href="Screenshots/settings-benchmark.png"><img src="Screenshots/settings-benchmark.png" alt="Benchmark settings tab" width="100%"></a><br>
+  <em><b>Benchmark</b> — compare every configured STT engine against a reference WAV + transcript to find the fastest and most accurate, with a Device column (CPU / GPU / remote).</em>
+</p>
+
+<p align="center">
+  <a href="Screenshots/settings-log.png"><img src="Screenshots/settings-log.png" alt="Log settings tab" width="100%"></a><br>
+  <em><b>Log</b> — the in-app log buffer: a live view of recording, transcription, routing, and wakeword events for quick troubleshooting.</em>
+</p>
+
+<p align="center">
+  <a href="Screenshots/settings-about.png"><img src="Screenshots/settings-about.png" alt="About settings tab" width="100%"></a><br>
+  <em><b>About</b> — version, source link, changelog, and licence.</em>
+</p>
 
 ---
 
