@@ -80,6 +80,8 @@ class Config:
     wakeword_enabled: bool = False
     wakeword_uri: str = "tcp://127.0.0.1:10400"
     wakeword_model: str = "okay_computer"
+    wakeword_sound_detected: str = ""   # WAV played when the wakeword fires (speak now)
+    wakeword_sound_done: str = ""        # WAV played when the command is captured
     # workflows
     workflows: list[Workflow] = field(default_factory=list)
 
@@ -172,6 +174,8 @@ def load(path: Path = CONFIG_PATH) -> Config:
         wakeword_enabled=bool(ww.get("enabled", False)),
         wakeword_uri=ww.get("uri", "tcp://127.0.0.1:10400"),
         wakeword_model=ww.get("model", "okay_computer"),
+        wakeword_sound_detected=ww.get("sound_detected", ""),
+        wakeword_sound_done=ww.get("sound_done", ""),
     )
 
     for entry in data.get("workflow", []):
@@ -279,6 +283,8 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "enabled": cfg.wakeword_enabled,
             "uri": cfg.wakeword_uri,
             "model": cfg.wakeword_model,
+            "sound_detected": cfg.wakeword_sound_detected,
+            "sound_done": cfg.wakeword_sound_done,
         },
         "stt": {"active": cfg.stt_active},
         "stt_engine": [
@@ -398,6 +404,11 @@ threshold = 0.82         # 0..1 fuzzy-match strictness (higher = stricter)
 enabled = false
 uri = "tcp://127.0.0.1:10400"
 model = "okay_computer"
+# Optional WAV cues for hands-free use (override the [sounds] cues when the
+# wakeword triggers): played when the wakeword fires (speak now) and when the
+# command is captured.
+sound_detected = ""
+sound_done = ""
 
 # ----------------------------------------------------------------------------
 # Speech-to-text engines (presets). The active one is used for transcription.
