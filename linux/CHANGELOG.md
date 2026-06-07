@@ -9,6 +9,13 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+### Fixed
+- **Voice-routing default went to a rewrite**: when no `[routing] default` preset
+  is set, the no-keyword fallback used the *first* preset — which, if that happened
+  to be an LLM rewrite (e.g. "Improve text"), sent every unrouted wakeword command
+  to the language model (and failed when the LLM was down). The fallback now
+  prefers a `transcribe` preset, so the default action is plain transcription.
+
 ## [1.3.0] - 2026-06-07
 
 ### Added

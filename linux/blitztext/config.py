@@ -110,7 +110,15 @@ class Config:
 
     @property
     def default_preset(self) -> "Workflow | None":
-        return self.preset_by_name(self.routing_default) or (self.workflows[0] if self.workflows else None)
+        named = self.preset_by_name(self.routing_default)
+        if named:
+            return named
+        if not self.workflows:
+            return None
+        # No explicit default configured: prefer a plain transcribe preset over
+        # whatever happens to be first, so the no-keyword fallback never silently
+        # routes to an LLM rewrite.
+        return next((w for w in self.workflows if w.mode == "transcribe"), self.workflows[0])
 
     @property
     def all_keywords(self) -> list[str]:

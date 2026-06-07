@@ -68,3 +68,26 @@ def test_properties():
     ]
     assert cfg.preset_by_name("WF2").name == "WF2"
     assert cfg.preset_by_name("NonExistent") is None
+
+
+def test_default_preset_prefers_transcribe_when_unset():
+    """With no routing default, fall back to a transcribe preset, not whatever
+    happens to be first (which could be an LLM rewrite)."""
+    cfg = Config()
+    cfg.routing_default = ""
+    cfg.workflows = [
+        Workflow(name="Improve text", hotkey="", mode="rewrite"),
+        Workflow(name="Transcribe", hotkey="", mode="transcribe"),
+    ]
+    dp = cfg.default_preset
+    assert dp is not None and dp.mode == "transcribe" and dp.name == "Transcribe"
+
+
+def test_default_preset_honours_explicit_name():
+    cfg = Config()
+    cfg.workflows = [
+        Workflow(name="Improve text", hotkey="", mode="rewrite"),
+        Workflow(name="Transcribe", hotkey="", mode="transcribe"),
+    ]
+    cfg.routing_default = "Improve text"
+    assert cfg.default_preset.name == "Improve text"
