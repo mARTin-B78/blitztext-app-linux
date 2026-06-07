@@ -132,11 +132,12 @@ class Daemon:
         self._vad_started_at = time.time()
         self._vad_last_speech = time.time()
         
+        silence = max(0.5, self.cfg.wakeword_silence_seconds)
         def on_level(level):
             now = time.time()
             if level > 0.05:
                 self._vad_last_speech = now
-            elif now - self._vad_started_at > 2.0 and now - self._vad_last_speech > 2.5:
+            elif now - self._vad_started_at > 2.0 and now - self._vad_last_speech > silence:
                 if getattr(self, "is_recording", False):
                     GLib.idle_add(lambda: self.finish_dictation(send_enter=False))
                     self._vad_stop()
@@ -156,18 +157,28 @@ class Daemon:
         sound.play(fallback=sound_name)
 
     def _play_cue(self, cue: str) -> None:
-        """Play an audio cue. Hands-free (wakeword) sessions prefer the wakeword
-        sounds, then the general [sounds] cues, then a built-in system sound.
-        The whole feature is gated by the [sounds] master switch."""
+        """Audio feedback for a dictation session.
+
+        Hands-free (wakeword) sessions play only their own dedicated cue, or
+        nothing when it is unset — they are independent of the manual 'Play audio
+        cues' switch, because the sound is the *only* feedback a hands-free
+        session gets (its notifications are suppressed). Manual sessions use the
+        [sounds] cues, gated by that switch, and fall back to a built-in system
+        sound when no file is configured."""
+        from . import sound
+        if self._session_silent:
+            # Hands-free: the chosen wakeword sound, or silence. No fallback, so
+            # clearing the field is how you turn the cue off.
+            path = self.cfg.wakeword_sound_detected if cue == "before" else self.cfg.wakeword_sound_done
+            if path:
+                sound.play(path)
+            return
         if not self.cfg.sounds_enabled:
             return
-        from . import sound
         if cue == "before":
-            custom = (self.cfg.wakeword_sound_detected if self._session_silent else "") or self.cfg.sound_before
-            sound.play(custom, fallback="device-added")
+            sound.play(self.cfg.sound_before, fallback="device-added")
         else:
-            custom = (self.cfg.wakeword_sound_done if self._session_silent else "") or self.cfg.sound_after
-            sound.play(custom, fallback="complete")
+            sound.play(self.cfg.sound_after, fallback="complete")
 
     # -- recording control ----------------------------------------------------
     def start_dictation(self, workflow: Workflow | None = None, silent: bool = False) -> None:

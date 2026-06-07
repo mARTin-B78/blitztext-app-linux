@@ -765,27 +765,43 @@ class SettingsDialog:
         box = Gtk.Box(spacing=10); box.pack_start(self.ww_test_btn, False, False, 0); box.pack_start(self.ww_test_lbl, False, False, 0)
         _labeled(page, "", box)
 
+        self.ww_silence = _labeled(page, "Silence to stop (s)", _entry(self.cfg.wakeword_silence_seconds),
+                                   tooltip="After the wakeword starts recording, end it this many seconds "
+                                           "after you stop speaking. Hands-free auto-stop — the wakeword "
+                                           "can't be released like a key. Default 2.0.")
+
         self.ww_snd_detected = self._sound_field(
             page, "Sound: detected", self.cfg.wakeword_sound_detected,
-            "Played right after the wakeword is recognised — your cue that Blitztext is listening, speak now.")
+            "HANDS-FREE ONLY. Plays the instant the wake word is recognised and recording starts "
+            "— your ‘speak now’ cue. (Keyboard/hotkey dictation ignores this and uses ‘Play before’.)",
+            empty_note="Leave empty for no sound. These wakeword cues are independent of the "
+                       "‘Play audio cues’ switch below.",
+            clear_tip="Clear — no sound")
         self.ww_snd_done = self._sound_field(
             page, "Sound: captured", self.cfg.wakeword_sound_done,
-            "Played when your command is captured (silence or stop) — confirms your input was taken.")
+            "HANDS-FREE ONLY. Plays when your spoken command is captured and recording stops "
+            "(on silence or stop). (Keyboard/hotkey dictation ignores this and uses ‘Play after’.)",
+            empty_note="Leave empty for no sound.",
+            clear_tip="Clear — no sound")
 
         page.pack_start(Gtk.Separator(), False, False, 8)
-        page.pack_start(Gtk.Label(label="Audio cues", xalign=0.0), False, False, 2)
+        page.pack_start(Gtk.Label(label="Audio cues (manual dictation)", xalign=0.0), False, False, 2)
         self.snd_enabled = Gtk.Switch(); self.snd_enabled.set_active(self.cfg.sounds_enabled); self.snd_enabled.set_halign(Gtk.Align.START)
         _labeled(page, "Play audio cues", self.snd_enabled,
-                 tooltip="Master switch for every start/stop chime, including the hands-free "
-                         "wakeword cues above. Turn off for completely silent operation.")
+                 tooltip="On/off for the MANUAL start/stop chimes below (keyboard/hotkey dictation). "
+                         "The hands-free wakeword sounds above are separate and always play when set.")
         self.snd_before = self._sound_field(
             page, "Play before", self.cfg.sound_before,
-            "Sound played when recording starts — your confirmation that Blitztext is listening.")
+            "MANUAL (keyboard/hotkey) dictation only. Plays when recording starts. "
+            "(Hands-free sessions use ‘Sound: detected’ instead.)")
         self.snd_after = self._sound_field(
             page, "Play after", self.cfg.sound_after,
-            "Sound played when recording stops (on paste, paste+Enter, or auto-stop on silence).")
+            "MANUAL (keyboard/hotkey) dictation only. Plays when recording stops "
+            "(paste, paste+Enter, or auto-stop on silence). (Hands-free uses ‘Sound: captured’ instead.)")
 
-    def _sound_field(self, page: Gtk.Box, label: str, value: str, tooltip: str = "") -> Gtk.FileChooserButton:
+    def _sound_field(self, page: Gtk.Box, label: str, value: str, tooltip: str = "",
+                     empty_note: str = "Leave empty to use the built-in system sound.",
+                     clear_tip: str = "Clear — use the built-in system sound") -> Gtk.FileChooserButton:
         row = Gtk.Box(spacing=10); row.set_margin_top(3); row.set_margin_bottom(3)
         lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(150, -1)
         if tooltip:
@@ -800,14 +816,14 @@ class SettingsDialog:
             chooser.set_filename(value)
         chooser.set_hexpand(True)
         if tooltip:
-            chooser.set_tooltip_text(tooltip + " Leave empty to use the built-in system sound.")
+            chooser.set_tooltip_text(f"{tooltip} {empty_note}")
         row.pack_start(chooser, True, True, 0)
         play = Gtk.Button.new_from_icon_name("media-playback-start-symbolic", Gtk.IconSize.BUTTON)
         play.set_tooltip_text("Play this sound now")
         play.connect("clicked", lambda _b, c=chooser: self._play_sound_file(c.get_filename()))
         row.pack_start(play, False, False, 0)
         clr = Gtk.Button.new_from_icon_name("edit-clear-symbolic", Gtk.IconSize.BUTTON)
-        clr.set_tooltip_text("Clear — use the built-in system sound")
+        clr.set_tooltip_text(clear_tip)
         clr.connect("clicked", lambda _b, c=chooser: c.unselect_all())
         row.pack_start(clr, False, False, 0)
         page.pack_start(row, False, False, 0)
@@ -1132,6 +1148,7 @@ class SettingsDialog:
             c.wakeword_model = _combo_text(self.ww_model)
             c.wakeword_sound_detected = self.ww_snd_detected.get_filename() or ""
             c.wakeword_sound_done = self.ww_snd_done.get_filename() or ""
+            c.wakeword_silence_seconds = float(self.ww_silence.get_text())
             c.mic = self._selected_mic_name()
             c.output = self.gen_output.get_active_text() or "type"
             c.language = self.gen_lang.get_text().strip()

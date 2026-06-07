@@ -83,6 +83,7 @@ class Config:
     wakeword_model: str = "okay_computer"
     wakeword_sound_detected: str = ""   # WAV played when the wakeword fires (speak now)
     wakeword_sound_done: str = ""        # WAV played when the command is captured
+    wakeword_silence_seconds: float = 2.0  # auto-stop after this much trailing silence
     # workflows
     workflows: list[Workflow] = field(default_factory=list)
 
@@ -178,6 +179,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
         wakeword_model=ww.get("model", "okay_computer"),
         wakeword_sound_detected=ww.get("sound_detected", ""),
         wakeword_sound_done=ww.get("sound_done", ""),
+        wakeword_silence_seconds=float(ww.get("silence_seconds", 2.0)),
     )
 
     for entry in data.get("workflow", []):
@@ -288,6 +290,7 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "model": cfg.wakeword_model,
             "sound_detected": cfg.wakeword_sound_detected,
             "sound_done": cfg.wakeword_sound_done,
+            "silence_seconds": cfg.wakeword_silence_seconds,
         },
         "stt": {"active": cfg.stt_active},
         "stt_engine": [
@@ -367,11 +370,11 @@ reject_hallucinations = true
 strip_trailing_punctuation = false
 
 [sounds]
-# enabled = master switch for ALL audio cues (start/stop chimes and the
-# hands-free wakeword cues below). Set false for completely silent operation.
-# Optional WAV files played as audio cues: leave empty for the built-in system
-# sound. "before" plays when recording starts; "after" plays on any stop
-# (stop+paste, stop+paste+Enter, or auto-stop on silence).
+# Audio cues for MANUAL (keyboard/hotkey) dictation. The hands-free wakeword
+# cues are separate and independent — see [wakeword] sound_detected/sound_done.
+# enabled = on/off for these manual cues. "before"/"after" are optional WAV
+# files; leave empty for the built-in system sound. "before" plays when
+# recording starts; "after" on any stop (paste, paste+Enter, or auto-stop).
 enabled = true
 before = ""
 after = ""
@@ -410,11 +413,14 @@ threshold = 0.82         # 0..1 fuzzy-match strictness (higher = stricter)
 enabled = false
 uri = "tcp://127.0.0.1:10400"
 model = "okay_computer"
-# Optional WAV cues for hands-free use (override the [sounds] cues when the
-# wakeword triggers): played when the wakeword fires (speak now) and when the
-# command is captured.
+# Audio cues for hands-free sessions, independent of [sounds] above: play the
+# given WAV when the wakeword fires (speak now) and when the command is captured.
+# Leave empty for NO sound — these are a hands-free session's only feedback,
+# since its desktop notifications are suppressed.
 sound_detected = ""
 sound_done = ""
+# Auto-stop the recording this many seconds after you stop speaking (silence).
+silence_seconds = 2.0
 
 # ----------------------------------------------------------------------------
 # Speech-to-text engines (presets). The active one is used for transcription.

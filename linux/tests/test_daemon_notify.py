@@ -43,21 +43,46 @@ def test_on_wakeword_starts_a_silent_session(monkeypatch):
     assert started.get("wf") is d._route_workflow
 
 
-def test_audio_cues_master_switch(monkeypatch):
+def test_manual_cues_gated_by_master_switch(monkeypatch):
     import blitztext.sound as sound_mod
     plays = []
     monkeypatch.setattr(sound_mod, "play", lambda *a, **k: plays.append((a, k)))
     d = _make_daemon(monkeypatch)
+    d._session_silent = False  # manual (keyboard) session
 
     d.cfg.sounds_enabled = False
     d._play_cue("before")
     d._play_sound("device-removed")
-    assert plays == [], "no cue should play when audio cues are disabled"
+    assert plays == [], "manual cues should be silent when 'Play audio cues' is off"
 
     d.cfg.sounds_enabled = True
     d._play_cue("before")
     d._play_sound("device-removed")
-    assert len(plays) == 2, "cues should play when enabled"
+    assert len(plays) == 2, "manual cues should play when enabled"
+
+
+def test_wakeword_cues_independent_of_master_switch(monkeypatch):
+    """Regression: the manual 'Play audio cues' switch must NOT silence the
+    hands-free wakeword sounds (the bug where enabled=false killed the beeps)."""
+    import blitztext.sound as sound_mod
+    plays = []
+    monkeypatch.setattr(sound_mod, "play", lambda *a, **k: plays.append((a, k)))
+    d = _make_daemon(monkeypatch)
+    d._session_silent = True                 # hands-free session
+    d.cfg.sounds_enabled = False             # manual cues off
+    d.cfg.wakeword_sound_detected = "/snd/beep_start.wav"
+    d.cfg.wakeword_sound_done = "/snd/beep_stop.wav"
+
+    d._play_cue("before")
+    d._play_cue("after")
+    assert [p[0][0] for p in plays] == ["/snd/beep_start.wav", "/snd/beep_stop.wav"], \
+        "wakeword cues must play regardless of the manual master switch"
+
+    # Empty wakeword sound = silent (no system-sound fallback).
+    plays.clear()
+    d.cfg.wakeword_sound_detected = ""
+    d._play_cue("before")
+    assert plays == [], "an unset wakeword cue should be silent, not fall back to a system sound"
 
 
 def test_wakeword_while_busy_does_not_notify(monkeypatch):

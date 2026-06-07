@@ -13,6 +13,8 @@ Blitztext is a native Linux dictation tool that captures your voice, transcribes
   <img src="Screenshots/tray-menu.png" alt="Blitztext system-tray menu" width="300">
 </p>
 
+📖 **[User manual](MANUAL.md)** — every setting in every tab, explained.
+
 ---
 
 ## Inspiration & Credits
