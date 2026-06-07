@@ -85,6 +85,29 @@ def test_wakeword_cues_independent_of_master_switch(monkeypatch):
     assert plays == [], "an unset wakeword cue should be silent, not fall back to a system sound"
 
 
+def test_matched_preset_announced_even_hands_free(monkeypatch):
+    """You should see which preset/keyword you triggered, even via the wakeword.
+    The routing announcement is gated by notify_routing, NOT by _session_silent."""
+    shown = []
+
+    def fake_notify(*a, enabled=True, **k):
+        if enabled:
+            shown.append(a)
+
+    monkeypatch.setattr(daemon_mod, "notify", fake_notify)
+    d = _make_daemon(monkeypatch)
+    d._session_silent = True            # hands-free session
+
+    d.cfg.notify_routing = True
+    d._rnotify("⚡ Nicer email", "matched: “nicer email”")
+    assert shown, "the matched preset must be announced even for hands-free sessions"
+
+    shown.clear()
+    d.cfg.notify_routing = False
+    d._rnotify("⚡ Nicer email", "matched: “nicer email”")
+    assert shown == [], "no announcement when 'Announce matched preset' is off"
+
+
 def test_wakeword_while_busy_does_not_notify(monkeypatch):
     """The away-from-keyboard "Busy" storm: a detection arriving while the
     previous clip is still being processed must be ignored silently."""

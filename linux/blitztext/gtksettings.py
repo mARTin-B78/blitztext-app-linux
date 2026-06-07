@@ -324,6 +324,9 @@ class SettingsDialog:
         page.pack_start(form, True, True, 6)
         self.wf_name = _labeled(form, "Name", _entry(placeholder="Preset name"),
                                 tooltip="A short name for this action, shown in the main panel.")
+        self.wf_icon = _labeled(form, "Icon (emoji)", _entry(placeholder="⚡  (shown in the ‘matched preset’ notification)"),
+                                tooltip="An emoji shown next to this preset when a voice command matches it — "
+                                        "give each preset a distinct one so you can tell at a glance which fired.")
         self.wf_desc = _labeled(form, "Description", _entry(placeholder="Short description shown in the panel"),
                                 tooltip="One line explaining what this preset does.")
         self.wf_keywords = _labeled(form, "Keywords (comma)", _entry(placeholder="nicer email, bessere email"),
@@ -350,6 +353,7 @@ class SettingsDialog:
             return
         wf = self.cfg.workflows[idx]
         self.wf_name.set_text(wf.name)
+        self.wf_icon.set_text(wf.icon or "")
         self.wf_desc.set_text(wf.description)
         self.wf_keywords.set_text(", ".join(wf.keywords))
         self.wf_hotkey.set_text(wf.hotkey)
@@ -365,6 +369,7 @@ class SettingsDialog:
             return
         wf = self.cfg.workflows[idx]
         wf.name = self.wf_name.get_text().strip() or wf.name
+        wf.icon = self.wf_icon.get_text().strip() or "⚡"
         wf.description = self.wf_desc.get_text().strip()
         wf.keywords = [k.strip() for k in self.wf_keywords.get_text().split(",") if k.strip()]
         wf.hotkey = self.wf_hotkey.get_text().strip()
@@ -857,6 +862,11 @@ class SettingsDialog:
                                  tooltip="Spoken language code (de, en, …). Leave blank to auto-detect.")
         self.gen_notify = Gtk.Switch(); self.gen_notify.set_active(self.cfg.notify); self.gen_notify.set_halign(Gtk.Align.START)
         _labeled(page, "Notifications", self.gen_notify)
+        self.gen_notify_routing = Gtk.Switch(); self.gen_notify_routing.set_active(self.cfg.notify_routing); self.gen_notify_routing.set_halign(Gtk.Align.START)
+        _labeled(page, "Announce matched preset", self.gen_notify_routing,
+                 tooltip="Pop a notification showing which preset (and spoken keyword) a voice command "
+                         "matched. Shown even for hands-free wakeword sessions, so you can always see "
+                         "what you triggered. Each preset's emoji icon appears in the notification.")
         self.gen_boot = Gtk.Switch(); self.gen_boot.set_active(autostart.is_enabled()); self.gen_boot.set_halign(Gtk.Align.START)
         _labeled(page, "Launch on login", self.gen_boot)
         self._start_meter()
@@ -1153,6 +1163,7 @@ class SettingsDialog:
             c.output = self.gen_output.get_active_text() or "type"
             c.language = self.gen_lang.get_text().strip()
             c.notify = self.gen_notify.get_active()
+            c.notify_routing = self.gen_notify_routing.get_active()
             c.device = self.stt_device.get_active_text() or "auto"
             c.compute_type = self.stt_compute.get_active_text() or "auto"
             autostart.set_enabled(self.gen_boot.get_active())

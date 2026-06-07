@@ -9,6 +9,16 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+### Added
+- **"Announce matched preset" notification** (Settings → General, or
+  `[general] notify_routing`, default on): after a voice command, a notification
+  shows which preset and spoken keyword matched — **shown even for hands-free
+  wakeword sessions**, so you can see what you triggered. It only fires on a real
+  match, so it never spams when nothing is said.
+- **Per-preset emoji icon** (Presets → "Icon (emoji)"): give each preset a
+  distinct emoji, shown in the matched-preset notification so you can tell at a
+  glance which fired.
+
 ### Fixed
 - **Voice-routing default went to a rewrite**: when no `[routing] default` preset
   is set, the no-keyword fallback used the *first* preset — which, if that happened

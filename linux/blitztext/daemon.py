@@ -84,6 +84,12 @@ class Daemon:
         if not self._session_silent:
             self._notify(title, body, urgency=urgency)
 
+    def _rnotify(self, title: str, body: str = "", urgency: str = "normal") -> None:
+        """Routing feedback — which preset/keyword a voice command matched. Shown
+        even for hands-free sessions (it has its own toggle) so you can always see
+        what you triggered. Only fires on a real match, so it never spams silence."""
+        notify(title, body, urgency=urgency, enabled=self.cfg.notify_routing)
+
     def _emit(self, state: str, workflow: str | None = None, message: str = "") -> None:
         if self.status_cb:
             try:
@@ -382,9 +388,11 @@ class Daemon:
                 target = self.cfg.preset_by_name(res.preset_name) or self.cfg.default_preset
                 text = res.text
                 label = target.name if target else "Transcribe"
-                via = f"“{res.keyword}”" if res.keyword else "default"
+                icon = (getattr(target, "icon", "") or "🎙") if target else "🎙"
+                via = f"“{res.keyword}”" if res.keyword else "no keyword → default"
                 self._emit("busy", label, f"→ {label} ({via})")
-                self._dnotify(f"🎙 {label}", f"matched: {via}")
+                self._rnotify(f"{icon} {label}", f"matched: {via}")
+                log(f"→ routed to {label} (matched: {via})")
             else:
                 target = workflow
 

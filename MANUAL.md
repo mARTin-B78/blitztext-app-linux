@@ -33,6 +33,7 @@ Use the dropdown at the top to pick a preset to edit, **+ Add** to create one, o
 | Setting | TOML key | Description |
 |---|---|---|
 | **Name** | `name` | Short name for the action, shown in the main panel. |
+| **Icon (emoji)** | `icon` | Emoji shown next to this preset in the "matched preset" notification — give each a distinct one to tell them apart at a glance. Default `⚡`. |
 | **Description** | `description` | One line explaining what the preset does (shown in the panel). |
 | **Keywords (comma)** | `keywords` | Spoken trigger words, comma-separated. Say one at the **start or end** of your speech to select this preset (fuzzy-matched, e.g. `nicer email, bessere email`). |
 | **Hotkey (optional)** | `hotkey` | A direct keyboard shortcut for this preset. Click **Set** and press the combo, or type it (e.g. `<ctrl>+<alt>+e`). Leave blank for keyword-only. |
@@ -175,6 +176,7 @@ Microphone, text delivery, language, notifications, and autostart.
 | **Output** | `output` | `type` types the text key-by-key · `paste` copies it and presses Ctrl+V (faster for long text). |
 | **Language hint** | `language` | Spoken-language code (`de`, `en`, …). Blank = auto-detect. |
 | **Notifications** | `notify` | Show desktop notifications for recording/transcription status and errors (manual sessions). |
+| **Announce matched preset** | `notify_routing` | After a voice command, pop a notification showing which preset (and spoken keyword) matched — shown **even for hands-free** sessions, with the preset's emoji. Only fires on a real match. |
 | **Launch on login** | *(autostart file)* | Start Blitztext automatically when you log in (writes a desktop autostart entry, not `config.toml`). |
 
 ---
