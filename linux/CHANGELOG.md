@@ -9,6 +9,17 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-06-07
+
+### Added
+- **Spoken cancel keyword**: say a word like **"abbrechen"** (or "cancel") at the
+  start or end of a clip and the whole dictation is **discarded** — it is never
+  routed, rewritten, or typed anywhere. Mainly rescues an accidentally triggered
+  (e.g. wakeword) recording. Configure under Settings → Mic/Cues → "Cancel words",
+  or `[routing] cancel_keywords` (default `["abbrechen", "cancel"]`; empty list
+  disables it). Matched the same edge-anchored, ASR-tolerant way as routing
+  keywords, so the word buried mid-sentence won't trip it.
+
 ## [1.6.0] - 2026-06-07
 
 ### Fixed

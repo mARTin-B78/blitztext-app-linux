@@ -75,6 +75,10 @@ class Config:
     routing_hotkey: str = "<ctrl>+<alt>+<space>"
     routing_default: str = ""        # preset name used when no keyword matches; "" = first
     routing_threshold: float = 0.82
+    # Spoken abort: if one of these words is heard at the start/end of a clip, the
+    # dictation is discarded — never transcribed onward, routed, rewritten, or
+    # typed. Empty list = disabled. Mainly for accidental wakeword triggers.
+    cancel_keywords: list[str] = field(default_factory=lambda: ["abbrechen", "cancel"])
     # speech-to-text engines (presets)
     stt_engines: list[STTEngine] = field(default_factory=list)
     stt_active: str = ""
@@ -178,6 +182,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
         routing_hotkey=rt.get("hotkey", "<ctrl>+<alt>+<space>"),
         routing_default=rt.get("default", ""),
         routing_threshold=float(rt.get("threshold", 0.82)),
+        cancel_keywords=list(rt.get("cancel_keywords", ["abbrechen", "cancel"])),
         input_mode=inp.get("mode", "modifiers"),
         push_to_talk=bool(inp.get("push_to_talk", False)),
         key_start=inp.get("start", "<ctrl>+<cmd>"),
@@ -292,6 +297,7 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "hotkey": cfg.routing_hotkey,
             "default": cfg.routing_default,
             "threshold": cfg.routing_threshold,
+            "cancel_keywords": cfg.cancel_keywords,
         },
         "quality": {
             "min_speech_seconds": cfg.min_speech_seconds,
@@ -429,6 +435,10 @@ enabled = true
 hotkey = "<ctrl>+<alt>+<space>"
 default = "Transcribe"   # preset used when no keyword is recognised
 threshold = 0.82         # 0..1 fuzzy-match strictness (higher = stricter)
+# Say one of these at the start or end of a clip to DISCARD it — nothing is
+# routed, rewritten, or typed. Handy when a wakeword fires by accident. Pick
+# words you won't naturally end a real dictation with. Empty list = off.
+cancel_keywords = ["abbrechen", "cancel"]
 
 [wakeword]
 # Hands-free dictation using an external wyoming-openwakeword server.

@@ -110,6 +110,26 @@ def route(
     return RouteResult(name, cleaned, keyword, position, score)
 
 
+def is_cancel(transcript: str, cancel_keywords, *, threshold: float = DEFAULT_THRESHOLD) -> str | None:
+    """Return the cancel keyword that matches an edge of the transcript, else None.
+
+    Lets a spoken word like "abbrechen" abort an (often accidentally triggered)
+    dictation before it is routed, rewritten, or delivered. Matched the same
+    edge-anchored, ASR-tolerant way as routing keywords, so the word appearing
+    deep inside a sentence won't trigger it — only at the start or end.
+    """
+    if not cancel_keywords:
+        return None
+    tokens = normalize(transcript)
+    if not tokens:
+        return None
+    for kw in cancel_keywords:
+        kw_tokens = normalize(kw)
+        if kw_tokens and _match_window(tokens, kw_tokens, threshold) is not None:
+            return kw
+    return None
+
+
 def _strip_span(transcript: str, span_words: int, position: str) -> str:
     """Remove the matched keyword from the given edge of the original transcript.
 

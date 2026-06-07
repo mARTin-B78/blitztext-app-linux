@@ -813,6 +813,13 @@ class SettingsDialog:
                                            "after you stop speaking. Hands-free auto-stop — the wakeword "
                                            "can't be released like a key. Default 2.0.")
 
+        self.cancel_keywords = _labeled(
+            page, "Cancel words (comma)",
+            _entry(", ".join(self.cfg.cancel_keywords), placeholder="abbrechen, cancel"),
+            tooltip="Say one of these at the start or end of a clip to DISCARD it — "
+                    "nothing is transcribed onward, routed, rewritten, or typed. "
+                    "Rescues an accidentally triggered dictation. Empty = off.")
+
         self.ww_snd_detected = self._sound_field(
             page, "Sound: detected", self.cfg.wakeword_sound_detected,
             "HANDS-FREE ONLY. Plays the instant the wake word is recognised and recording starts "
@@ -1205,6 +1212,7 @@ class SettingsDialog:
             c.wakeword_sound_detected = self.ww_snd_detected.get_filename() or ""
             c.wakeword_sound_done = self.ww_snd_done.get_filename() or ""
             c.wakeword_silence_seconds = float(self.ww_silence.get_text())
+            c.cancel_keywords = [k.strip() for k in self.cancel_keywords.get_text().split(",") if k.strip()]
             c.mic = self._selected_mic_name()
             c.output = self.gen_output.get_active_text() or "type"
             c.language = self.gen_lang.get_text().strip()

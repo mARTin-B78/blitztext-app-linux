@@ -39,6 +39,12 @@ Each normal hotkey **toggles**: press to start recording, press again to stop �
 then it transcribes, optionally rewrites, and types the result where your cursor
 is. Streaming workflows type stable words live while you speak.
 
+**Cancel by voice:** say *"abbrechen"* (or *"cancel"*) at the start or end of a
+clip and the whole dictation is discarded — never routed, rewritten, or typed.
+It's the rescue for an accidentally triggered (e.g. wakeword) recording. Set the
+words under `[routing] cancel_keywords` (default `["abbrechen", "cancel"]`; an
+empty list turns it off).
+
 While you dictate, an optional **on-screen overlay** (Settings → General →
 "Visual overlay", default on) shows a translucent bubble at the cursor with a
 pulsing microphone, a live waveform of your mic level, and the recognised text —

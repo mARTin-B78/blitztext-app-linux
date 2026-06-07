@@ -4,7 +4,7 @@
 
 Blitztext is a native Linux dictation tool that captures your voice, transcribes it locally with [faster-whisper](https://github.com/SYSTRAN/faster-whisper), optionally rewrites the text through an LLM, and types the result directly into whatever application has focus. Think macOS Dictation, but open-source, extensible, and designed for power users who want full control over their speech-to-text pipeline.
 
-> **Status:** Experimental open-source Linux/X11 desktop app (v1.5.1).
+> **Status:** Experimental open-source Linux/X11 desktop app (v1.7.0).
 > No hosted backend — bring your own models and endpoints.
 
 <p align="center">
@@ -55,9 +55,10 @@ Stream:    hotkey → mic PCM chunks → Riva/NIM WebSocket → live words typed
 - **Fully local STT.** Batch transcription via `faster-whisper` never leaves your machine. No cloud account needed for basic dictation.
 - **Pluggable engines.** Configure multiple STT and LLM backends as named presets — local `faster-whisper`, remote OpenAI-compatible batch endpoints, Riva/NIM realtime WebSocket servers, and any OpenAI-compatible chat API (OpenAI, vLLM, llama-swap, Ollama, LM Studio, Groq, OpenRouter).
 - **Voice-keyword routing.** One hotkey, multiple workflows. Say "nicer email" at the start or end of your speech and the email-rewrite preset activates automatically (fuzzy-matched, ASR-tolerant).
+- **Spoken cancel.** Say "abbrechen" (or "cancel") at the start or end of a clip and the whole dictation is discarded — never routed, rewritten, or typed. The rescue for an accidentally triggered (e.g. wakeword) recording. Configurable in Settings; empty list disables it.
 - **Quality gate.** Silent clips, too-short recordings, and Whisper hallucinations ("Thank you.", "Untertitel…") are caught and rejected before they reach your text field.
 - **Realtime streaming.** Connect a Riva/NIM realtime STT server and see stable words typed live as you speak.
-- **On-screen overlay at the cursor.** The moment you start dictating — by hotkey *or* wakeword — a translucent bubble pops up at the cursor with a pulsing microphone, a live waveform of your mic level, and the recognised text (live with a streaming engine, or as a brief confirmation otherwise). Its tail points at the text caret (via accessibility) and finally gives hands-free wakeword sessions visible feedback. Click-through, never steals focus; toggle in Settings → General.
+- **On-screen overlay at the cursor.** The moment you start dictating — by hotkey *or* wakeword — a translucent bubble pops up at the cursor with a pulsing microphone, a live waveform of your mic level, and the recognised text. When a voice keyword routes to a preset it shows that preset's icon, name, and the matched keyword on a banner (instead of a desktop notification), and streams the LLM rewrite into the bubble token-by-token so you watch it write. Its tail points at the text caret (via accessibility) and finally gives hands-free wakeword sessions visible feedback. Click-through, never steals focus; toggle in Settings → General.
 - **Built-in benchmarking.** Compare all your configured STT engines against a reference WAV + transcript to find the fastest and most accurate.
 
 ---
@@ -241,6 +242,10 @@ Now try with voice routing:
 1. Press `Ctrl+Alt+Space` → say **"nicer email** hey john can you send me the report"
 2. Press `Ctrl` — Blitztext detects the keyword, runs the "Nicer email" rewrite, and types a polished email.
 
+### 4b. Cancel by voice
+
+Started a recording by accident (or changed your mind)? Just say **"abbrechen"** (or **"cancel"**) at the start or end of what you say. The whole clip is discarded — nothing is transcribed onward, routed, rewritten, or typed, and the overlay briefly shows *✗ Abgebrochen*. This is especially handy with the hands-free wakeword, where a stray trigger could otherwise type ambient speech. Tune the words under **Settings → Mic/Cues → "Cancel words"** (or `[routing] cancel_keywords`); clear the list to switch it off.
+
 ### 5. Explore Settings
 
 Click the ⚙️ gear icon in the panel header, or right-click the tray → **Settings…**
@@ -292,6 +297,7 @@ With the default `modifiers` input mode:
 | `Ctrl` | Stop → transcribe → type |
 | `Alt` | Stop → transcribe → type → press Enter |
 | `Esc` | Cancel (discard recording) |
+| say *"abbrechen"* / *"cancel"* | Cancel by voice — discard the clip (works hands-free too) |
 
 ---
 

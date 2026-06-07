@@ -19,7 +19,7 @@ from .notify import notify
 from .paste import active_window_id, deliver
 from .streaming import RivaRealtimeStreamer
 from .recorder import Recording, detect_recorder
-from .routing import route
+from .routing import is_cancel, route
 from .transcribe import Transcriber
 
 # status_cb(state, workflow_name, message)
@@ -459,6 +459,18 @@ class Daemon:
             if not text or (self.cfg.reject_hallucinations and quality.is_hallucination(text, duration)):
                 self._emit("idle", label, "No speech detected")
                 log("Nothing heard — no speech detected.")
+                return
+
+            # Spoken abort: a configured cancel word heard at an edge discards the
+            # whole clip — nothing is routed, rewritten, or typed. This is the
+            # rescue for an accidentally triggered (e.g. wakeword) dictation.
+            cancel_kw = is_cancel(text, self.cfg.cancel_keywords, threshold=self.cfg.routing_threshold)
+            if cancel_kw:
+                log(f"✗ Discarded by voice keyword “{cancel_kw}”.")
+                if self.text_cb:
+                    self.text_cb("✗ Abgebrochen")
+                self._emit("idle", label, "Cancelled")
+                self._dnotify("Abgebrochen", f"„{cancel_kw}“ gehört — verworfen.", "low")
                 return
 
             # Voice routing: pick the preset from a spoken keyword, strip it.
