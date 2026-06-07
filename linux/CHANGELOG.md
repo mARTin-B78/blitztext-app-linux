@@ -9,6 +9,8 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-07
+
 ### Added
 - **Pause wakeword (tray)**: a reversible "Pause wakeword" toggle appears in the
   system-tray menu when the wakeword is enabled. It pauses/resumes hands-free
