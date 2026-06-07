@@ -85,7 +85,13 @@ def route(
 
     best = None  # (score, span_len, position, preset_name, keyword)
     for preset in presets:
-        for keyword in getattr(preset, "keywords", None) or []:
+        # The preset's own name is always an implicit trigger, so a preset is
+        # speakable by name even when it has no keywords configured.
+        candidates = list(getattr(preset, "keywords", None) or [])
+        name = getattr(preset, "name", "")
+        if name:
+            candidates.append(name)
+        for keyword in candidates:
             kw_tokens = normalize(keyword)
             m = _match_window(tokens, kw_tokens, threshold)
             if m is None:

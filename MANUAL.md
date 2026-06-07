@@ -35,7 +35,7 @@ Use the dropdown at the top to pick a preset to edit, **+ Add** to create one, o
 | **Name** | `name` | Short name for the action, shown in the main panel. |
 | **Icon (emoji)** | `icon` | Emoji shown next to this preset in the "matched preset" notification — give each a distinct one to tell them apart at a glance. Default `⚡`. |
 | **Description** | `description` | One line explaining what the preset does (shown in the panel). |
-| **Keywords (comma)** | `keywords` | Spoken trigger words, comma-separated. Say one at the **start or end** of your speech to select this preset (fuzzy-matched, e.g. `nicer email, bessere email`). |
+| **Keywords (comma)** | `keywords` | Spoken trigger words, comma-separated. Say one at the **start or end** of your speech to select this preset (fuzzy-matched, e.g. `nicer email, bessere email`). The preset's **name is always an implicit trigger**, so it works by voice even with no keywords here; add keywords for alternate/foreign-language phrasings. |
 | **Hotkey (optional)** | `hotkey` | A direct keyboard shortcut for this preset. Click **Set** and press the combo, or type it (e.g. `<ctrl>+<alt>+e`). Leave blank for keyword-only. |
 | **Mode** | `mode` | `transcribe` types your words as-is · `rewrite` sends them to the language model first · `stream` shows live text from a realtime STT engine. |
 | **LLM model (opt.)** | `model` | Override the language model for *this preset only*. Blank = use the active LLM engine's model. |
@@ -212,7 +212,7 @@ Read-only information:
 
 - **Version** and a link to the source repository
   (`github.com/mARTin-B78/blitztext-app-linux`).
-- **License: MIT**.
+- **License: MIT** · **Copyright: 2026 mARTin Bierschenk - Design**.
 - Sub-tabs with the full **Changelog** and **License** text.
 
 ---

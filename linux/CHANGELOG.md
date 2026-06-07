@@ -9,6 +9,15 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+### Changed
+- **Presets are speakable by name**: voice routing now matches a preset's *name*
+  as an implicit keyword, so a preset works by voice even with no keywords
+  configured (e.g. just say "nicer email …"). Explicit keywords still take
+  precedence, and preset names also bias the STT for better recognition.
+- **General settings switches** moved to the far right of each row, each with an
+  inline description so it's clear what the toggle does without hovering.
+- **About**: added a "Copyright: 2026 mARTin Bierschenk - Design" line.
+
 ## [1.4.0] - 2026-06-07
 
 ### Added

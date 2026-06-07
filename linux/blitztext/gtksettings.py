@@ -92,6 +92,44 @@ def _labeled(parent: Gtk.Box, label: str, widget: Gtk.Widget, width: int = 130, 
     return widget
 
 
+def _switch_row(parent: Gtk.Box, label: str, switch: Gtk.Switch, description: str = "",
+                width: int = 130) -> Gtk.Switch:
+    """A settings row: [label] [grey description ……………] [switch, far right].
+
+    The description tells the user what the switch does without hovering.
+    """
+    row = Gtk.Box(spacing=10)
+    row.set_margin_top(3); row.set_margin_bottom(3)
+
+    lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(width, -1)
+    row.pack_start(lbl, False, False, 0)
+
+    desc = Gtk.Label(label=description, xalign=0.0)
+    desc.set_line_wrap(True)
+    desc.get_style_context().add_class("dim-label")
+    row.pack_start(desc, True, True, 0)
+
+    switch.set_halign(Gtk.Align.END)
+    switch.set_valign(Gtk.Align.CENTER)
+    row.pack_end(switch, False, False, 0)
+
+    # ATK accessibility + tooltips
+    if hasattr(lbl, "set_mnemonic_widget"):
+        lbl.set_mnemonic_widget(switch)
+    atk = switch.get_accessible()
+    if atk and label:
+        atk.set_name(label.replace("_", ""))
+        if description:
+            atk.set_description(description)
+    if description:
+        switch.set_tooltip_text(description)
+        lbl.set_tooltip_text(description)
+        desc.set_tooltip_text(description)
+
+    parent.pack_start(row, False, False, 0)
+    return switch
+
+
 def _infobox(parent: Gtk.Box, text: str) -> Gtk.Box:
     """A plain-language help box at the top of a tab (read by screen readers)."""
     box = Gtk.Box(spacing=8)
@@ -860,15 +898,15 @@ class SettingsDialog:
                                    tooltip="‘type’ types the text key by key. ‘paste’ copies it and presses Ctrl+V (faster for long text).")
         self.gen_lang = _labeled(page, "Language hint", _entry(self.cfg.language, placeholder="de, en, …   (blank = autodetect)"),
                                  tooltip="Spoken language code (de, en, …). Leave blank to auto-detect.")
-        self.gen_notify = Gtk.Switch(); self.gen_notify.set_active(self.cfg.notify); self.gen_notify.set_halign(Gtk.Align.START)
-        _labeled(page, "Notifications", self.gen_notify)
-        self.gen_notify_routing = Gtk.Switch(); self.gen_notify_routing.set_active(self.cfg.notify_routing); self.gen_notify_routing.set_halign(Gtk.Align.START)
-        _labeled(page, "Announce matched preset", self.gen_notify_routing,
-                 tooltip="Pop a notification showing which preset (and spoken keyword) a voice command "
-                         "matched. Shown even for hands-free wakeword sessions, so you can always see "
-                         "what you triggered. Each preset's emoji icon appears in the notification.")
-        self.gen_boot = Gtk.Switch(); self.gen_boot.set_active(autostart.is_enabled()); self.gen_boot.set_halign(Gtk.Align.START)
-        _labeled(page, "Launch on login", self.gen_boot)
+        self.gen_notify = Gtk.Switch(); self.gen_notify.set_active(self.cfg.notify)
+        _switch_row(page, "Notifications", self.gen_notify,
+                    "Desktop pop-ups for recording, transcription, and errors (manual dictation).")
+        self.gen_notify_routing = Gtk.Switch(); self.gen_notify_routing.set_active(self.cfg.notify_routing)
+        _switch_row(page, "Announce matched preset", self.gen_notify_routing,
+                    "After a voice command, show which preset and keyword matched — even hands-free.")
+        self.gen_boot = Gtk.Switch(); self.gen_boot.set_active(autostart.is_enabled())
+        _switch_row(page, "Launch on login", self.gen_boot,
+                    "Start Blitztext automatically when you log in.")
         self._start_meter()
 
     def _selected_mic_name(self) -> str:
@@ -1070,6 +1108,10 @@ class SettingsDialog:
         license_label = Gtk.Label(label="License: MIT", xalign=0.0)
         license_label.set_selectable(True)
         page.pack_start(license_label, False, False, 2)
+
+        copyright_label = Gtk.Label(label="Copyright: 2026 mARTin Bierschenk - Design", xalign=0.0)
+        copyright_label.set_selectable(True)
+        page.pack_start(copyright_label, False, False, 2)
 
         nb = Gtk.Notebook()
         nb.set_margin_top(8)

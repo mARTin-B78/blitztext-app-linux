@@ -51,3 +51,23 @@ def test_strip_span():
     # 'nicer e-mail' normalizes to 3 tokens
     res = _strip_span("Nicer e-mail can you send me the report", 3, "start")
     assert res == "can you send me the report"
+
+
+def test_route_matches_preset_name_without_keywords():
+    """A preset with no keywords is still speakable by its name."""
+    presets = [
+        DummyPreset("Transcribe", []),
+        DummyPreset("Nicer email", []),       # no keywords configured
+    ]
+    res = route("nicer email please call me back tomorrow", presets)
+    assert res.preset_name == "Nicer email"
+    assert res.text == "please call me back tomorrow"
+
+
+def test_explicit_keyword_still_wins_over_name():
+    presets = [
+        DummyPreset("Add emojis", ["emoji"]),
+    ]
+    res = route("emoji this is great", presets)
+    assert res.preset_name == "Add emojis"
+    assert res.text == "this is great"

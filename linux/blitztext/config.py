@@ -126,6 +126,8 @@ class Config:
         out: list[str] = []
         for w in self.workflows:
             out.extend(w.keywords)
+            if w.name and w.name not in out:
+                out.append(w.name)  # names are implicit triggers — bias STT for them too
         return out
 
     @property
