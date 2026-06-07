@@ -69,6 +69,13 @@ class Overlay:
         self._levels: deque[float] = deque([0.0] * _BARS, maxlen=_BARS)
         self._disp = [0.0] * _BARS       # eased bar heights for smooth motion
         self._pulse = 0.0
+        # Silence auto-stop countdown ring (wraps the mic): a deadline the ring
+        # drains toward, the window it spans, and an eased opacity so it fades in
+        # when you fall quiet and out the moment you speak again.
+        self._cd_deadline: float | None = None
+        self._cd_total = 1.0
+        self._cd_frac = 0.0
+        self._cd_alpha = 0.0
         self._tick_id: int | None = None
         self._hide_id: int | None = None
         self._t0 = time.time()
@@ -111,6 +118,11 @@ class Overlay:
     def set_text(self, text: str) -> None:
         GLib.idle_add(self._set_text, text or "")
 
+    def set_countdown(self, remaining: float | None, total: float) -> None:
+        """Silence auto-stop progress: ``remaining`` seconds until it fires over
+        a ``total``-second window, or ``None`` while you're still speaking."""
+        GLib.idle_add(self._set_countdown, remaining, total)
+
     def set_state(self, state: str, message: str = "") -> None:
         GLib.idle_add(self._set_state, state, message)
 
@@ -128,6 +140,9 @@ class Overlay:
         self._text = ""
         self._levels = deque([0.0] * _BARS, maxlen=_BARS)
         self._disp = [0.0] * _BARS
+        self._cd_deadline = None
+        self._cd_frac = 0.0
+        self._cd_alpha = 0.0
         self._anchor = caret.resolve(self.anchor_mode, window_id)
         self._relayout()
         self._visible = True
@@ -148,9 +163,21 @@ class Overlay:
         self._area.queue_draw()
         return False
 
+    def _set_countdown(self, remaining: float | None, total: float) -> bool:
+        if remaining is None:
+            self._cd_deadline = None
+        else:
+            self._cd_total = max(0.1, total)
+            self._cd_deadline = time.time() + max(0.0, remaining)
+        return False
+
     def _set_state(self, state: str, message: str) -> bool:
         self._state = state
         self._phase_label = _PHASES.get(state, ((1, 1, 1), message[:40]))[1] or message[:40]
+        if state not in ("recording", "streaming"):
+            # The countdown only makes sense while listening; drop it as soon as
+            # we move on to transcribing / done / idle so the ring doesn't linger.
+            self._cd_deadline = None
         if state in ("recording", "streaming", "busy"):
             self._cancel_hide()
         elif state in ("done", "idle", "error"):
@@ -195,6 +222,14 @@ class Overlay:
         for i, t in enumerate(targets):
             self._disp[i] += (t - self._disp[i]) * 0.35
         self._pulse = (math.sin((time.time() - self._t0) * 5.0) + 1.0) * 0.5
+        # Drain the silence ring against its own clock so it stays smooth between
+        # the ~10 Hz level samples. Fade in gently (so word gaps don't flash it)
+        # and out a touch faster.
+        if self._cd_deadline is not None:
+            self._cd_frac = max(0.0, min(1.0, (self._cd_deadline - time.time()) / self._cd_total))
+            self._cd_alpha += (1.0 - self._cd_alpha) * 0.15
+        else:
+            self._cd_alpha += (0.0 - self._cd_alpha) * 0.30
         self._area.queue_draw()
         return True
 
@@ -272,6 +307,7 @@ class Overlay:
         cx = _PAD + 14
         cy = body_top + _PAD + 12
         self._draw_mic(cr, cx, cy)
+        self._draw_countdown(cr, cx, cy)
 
         # Waveform fills the space right of the mic across the header row.
         wf_x = cx + 26
@@ -310,10 +346,11 @@ class Overlay:
     def _draw_mic(self, cr, cx, cy) -> None:
         colour, _ = _PHASES.get(self._state, ((1, 1, 1), ""))
         pulsing = self._state in ("recording", "streaming")
-        # Soft pulsing halo while listening.
+        # Soft pulsing halo while listening — but yield to the countdown ring as
+        # it takes over (you've gone quiet, so the pulse fades out under it).
         if pulsing:
             rad = 12 + self._pulse * 6
-            cr.set_source_rgba(*colour, 0.18 * (1 - self._pulse * 0.6))
+            cr.set_source_rgba(*colour, 0.18 * (1 - self._pulse * 0.6) * (1 - self._cd_alpha))
             cr.arc(cx, cy, rad, 0, 2 * math.pi)
             cr.fill()
         cr.set_source_rgba(*colour, 1.0)
@@ -334,6 +371,33 @@ class Overlay:
         cr.move_to(cx - 5, cy + 12)
         cr.line_to(cx + 5, cy + 12)
         cr.stroke()
+
+    def _draw_countdown(self, cr, cx, cy) -> None:
+        """Silence auto-stop ring wrapping the mic: a full circle that drains
+        clockwise as the trailing-silence timer runs out, recolouring from calm
+        cyan to an urgent red just before it fires."""
+        a = self._cd_alpha
+        if a <= 0.01:
+            return
+        r, lw = 16.0, 2.6
+        cr.set_line_width(lw)
+        # Faint full track so the drained part of the ring stays legible.
+        cr.set_source_rgba(1, 1, 1, 0.10 * a)
+        cr.arc(cx, cy, r, 0, 2 * math.pi)
+        cr.stroke()
+        frac = self._cd_frac
+        if frac <= 0.0:
+            return
+        spent = 1.0 - frac
+        red = 0.30 + spent * 0.70
+        grn = 0.80 - spent * 0.45
+        blu = 0.90 - spent * 0.60
+        cr.set_source_rgba(red, grn, blu, 0.95 * a)
+        cr.set_line_cap(cairo.LINE_CAP_ROUND)
+        start = -math.pi / 2          # 12 o'clock
+        cr.arc(cx, cy, r, start, start + frac * 2 * math.pi)
+        cr.stroke()
+        cr.set_line_cap(cairo.LINE_CAP_BUTT)
 
     def _draw_wave(self, cr, x, y, w, h) -> None:
         gap = 2.0

@@ -107,6 +107,7 @@ class App:
         self.daemon = Daemon(
             cfg, status_cb=self._status_cb,
             level_cb=self._on_level, text_cb=self._on_text,
+            countdown_cb=self._on_countdown,
         )
 
         _install_css()
@@ -270,6 +271,10 @@ class App:
     def _on_text(self, text: str) -> None:
         if self.overlay is not None:
             self.overlay.set_text(text)
+
+    def _on_countdown(self, remaining: float | None, total: float) -> None:
+        if self.overlay is not None:
+            self.overlay.set_countdown(remaining, total)
 
     def _overlay_status(self, state: str, message: str) -> None:
         """Translate engine phases into overlay show/update/hide (GTK thread)."""

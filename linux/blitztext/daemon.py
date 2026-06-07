@@ -26,18 +26,28 @@ from .transcribe import Transcriber
 #   state in {"loading", "idle", "recording", "streaming", "busy", "done", "error"}
 StatusCallback = Callable[[str, str | None, str], None]
 
+# A trailing pause shorter than this never arms the auto-stop countdown, so the
+# overlay ring doesn't flicker in the gaps between words. The visible countdown
+# therefore spans (silence_seconds - this) and begins full once you genuinely
+# stop speaking.
+_VAD_COUNTDOWN_GRACE = 0.35
+
 
 class Daemon:
     def __init__(self, cfg: Config, status_cb: StatusCallback | None = None,
                  level_cb: Callable[[float], None] | None = None,
-                 text_cb: Callable[[str], None] | None = None):
+                 text_cb: Callable[[str], None] | None = None,
+                 countdown_cb: Callable[[float | None, float], None] | None = None):
         self.cfg = cfg
         self.status_cb = status_cb
         # Optional UI feedback hooks for the on-screen overlay. The daemon stays
         # UI-agnostic: these are no-ops in headless mode. level_cb gets the live
-        # mic level (0..1); text_cb gets the running transcript while streaming.
+        # mic level (0..1); text_cb gets the running transcript while streaming;
+        # countdown_cb(seconds_left, window) drives the silence auto-stop ring
+        # (seconds_left=None while you're speaking, so the ring clears).
         self.level_cb = level_cb
         self.text_cb = text_cb
+        self.countdown_cb = countdown_cb
         self._ov_meter = None
         self._ov_text_final = ""
         self._lock = threading.Lock()
@@ -156,10 +166,21 @@ class Daemon:
             now = time.time()
             if level > 0.05:
                 self._vad_last_speech = now
-            elif now - self._vad_started_at > 2.0 and now - self._vad_last_speech > silence:
-                if getattr(self, "is_recording", False):
+                if self.countdown_cb:
+                    self.countdown_cb(None, silence)   # speaking — no countdown
+                return
+            quiet = now - self._vad_last_speech
+            armed = now - self._vad_started_at > 2.0
+            if armed and quiet > _VAD_COUNTDOWN_GRACE:
+                # Mirror the auto-stop window into the overlay ring: full when
+                # you fall quiet, empty exactly as it fires.
+                if self.countdown_cb:
+                    self.countdown_cb(silence - quiet, silence - _VAD_COUNTDOWN_GRACE)
+                if quiet > silence and getattr(self, "is_recording", False):
                     GLib.idle_add(lambda: self.finish_dictation(send_enter=False))
                     self._vad_stop()
+            elif self.countdown_cb:
+                self.countdown_cb(None, silence)
 
         self._vad_meter = audio.LevelMeter(self.cfg.mic, on_level=on_level)
         self._vad_meter.start()

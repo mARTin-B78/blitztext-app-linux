@@ -9,6 +9,17 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-06-07
+
+### Added
+- **Silence auto-stop countdown ring** on the dictation overlay: when you stop
+  speaking, a full circle wrapping the microphone glyph drains clockwise as the
+  trailing-silence timer runs out, recolouring from calm cyan to an urgent red
+  and emptying exactly as the recording auto-stops. It spans the configured
+  "Silence to stop (s)" window (`[wakeword] silence_seconds`), fades back in/out
+  as you pause and resume, and so finally makes the hands-free auto-stop visible
+  instead of a silent surprise.
+
 ## [1.5.0] - 2026-06-07
 
 ### Added
@@ -202,7 +213,8 @@ into that field.
   AppIndicator typelibs and GNOME `ubuntu-appindicators` extension are already
   present on the target host).
 
-[Unreleased]: https://github.com/mARTin-B78/blitztext-app-linux/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/mARTin-B78/blitztext-app-linux/compare/v1.5.1...HEAD
+[1.5.1]: https://github.com/mARTin-B78/blitztext-app-linux/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/mARTin-B78/blitztext-app-linux/compare/v1.4.0...v1.5.0
 [1.1.0]: https://github.com/mARTin-B78/blitztext-app-linux/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/mARTin-B78/blitztext-app-linux/compare/v1.0.0...v1.0.1
