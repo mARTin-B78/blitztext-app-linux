@@ -13,6 +13,7 @@ import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from typing import Callable
 
 from .stt import reachable
 
@@ -48,18 +49,28 @@ def chat(
     model: str | None = None,
     temperature: float | None = None,
     timeout: int = 45,
+    on_token: Callable[[str], None] | None = None,
 ) -> str:
+    """Run a chat completion and return the full text.
+
+    When ``on_token`` is given, the request is streamed and each content delta is
+    handed to the callback as it arrives (so a UI can show the model writing in
+    real time). The callback is best-effort — it never affects the return value,
+    which is always the complete, stripped response.
+    """
+    stream = on_token is not None
     api_key = engine.api_key
-    payload = json.dumps(
-        {
-            "model": model or engine.model,
-            "temperature": engine.temperature if temperature is None else temperature,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_text},
-            ],
-        }
-    ).encode("utf-8")
+    body_obj = {
+        "model": model or engine.model,
+        "temperature": engine.temperature if temperature is None else temperature,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_text},
+        ],
+    }
+    if stream:
+        body_obj["stream"] = True
+    payload = json.dumps(body_obj).encode("utf-8")
 
     headers = {"Content-Type": "application/json"}
     if api_key:
@@ -70,19 +81,46 @@ def chat(
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
+            if stream:
+                content = _read_stream(resp, on_token)
+            else:
+                body = json.loads(resp.read().decode("utf-8"))
+                content = body["choices"][0]["message"]["content"]
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:300]
         raise LLMError(f"HTTP {exc.code}: {detail}") from exc
     except urllib.error.URLError as exc:
         raise LLMError(f"Connection failed: {exc.reason}") from exc
-
-    try:
-        content = body["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
-        raise LLMError(f"Unexpected response: {str(body)[:300]}") from exc
+        raise LLMError(f"Unexpected response: {exc}") from exc
 
     content = (content or "").strip()
     if not content:
         raise LLMError("Empty response from model.")
     return content
+
+
+def _read_stream(resp, on_token: Callable[[str], None]) -> str:
+    """Parse an OpenAI-style SSE stream, returning the accumulated content and
+    feeding each delta to ``on_token``. Tolerant of keep-alive blanks and the
+    trailing ``[DONE]`` sentinel."""
+    parts: list[str] = []
+    for raw in resp:
+        line = raw.decode("utf-8", "replace").strip()
+        if not line or not line.startswith("data:"):
+            continue
+        data = line[len("data:"):].strip()
+        if data == "[DONE]":
+            break
+        try:
+            obj = json.loads(data)
+            delta = obj["choices"][0]["delta"].get("content")
+        except (ValueError, KeyError, IndexError, TypeError):
+            continue
+        if delta:
+            parts.append(delta)
+            try:
+                on_token(delta)
+            except Exception:  # noqa: BLE001 - UI hiccups must not break delivery
+                pass
+    return "".join(parts)

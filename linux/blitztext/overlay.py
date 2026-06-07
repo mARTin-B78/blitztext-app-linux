@@ -40,6 +40,7 @@ _TAIL_W = 20
 _TAIL_H = 11
 _GAP = 12               # clearance between the tail tip and the anchor
 _BARS = 30              # waveform bar count
+_PRESET_H = 22          # matched-preset header row (emoji + name + keyword)
 _MIN_TEXT_H = 0
 _MAX_TEXT_H = 120
 
@@ -62,6 +63,12 @@ class Overlay:
         self._state = "recording"
         self._text = ""
         self._phase_label = "Listening…"
+        # Matched-preset banner (fused in from voice routing instead of a separate
+        # desktop notification): the preset's emoji, its name, and the spoken
+        # keyword that selected it.
+        self._preset_icon = ""
+        self._preset_name = ""
+        self._keyword = ""
         self._anchor: caret.Anchor | None = None
         self._tail_up = False           # tail on top edge (bubble below anchor)?
         self._tail_x = _WIDTH // 2       # tail tip, window-local x
@@ -118,6 +125,11 @@ class Overlay:
     def set_text(self, text: str) -> None:
         GLib.idle_add(self._set_text, text or "")
 
+    def set_preset(self, icon: str, name: str, keyword: str | None) -> None:
+        """Show the matched voice-routing preset on the overlay (emoji + name +
+        the spoken keyword), in place of a separate desktop notification."""
+        GLib.idle_add(self._set_preset, icon or "", name or "", keyword or "")
+
     def set_countdown(self, remaining: float | None, total: float) -> None:
         """Silence auto-stop progress: ``remaining`` seconds until it fires over
         a ``total``-second window, or ``None`` while you're still speaking."""
@@ -138,6 +150,9 @@ class Overlay:
         self._state = state
         self._phase_label = _PHASES.get(state, ((1, 1, 1), ""))[1]
         self._text = ""
+        self._preset_icon = ""
+        self._preset_name = ""
+        self._keyword = ""
         self._levels = deque([0.0] * _BARS, maxlen=_BARS)
         self._disp = [0.0] * _BARS
         self._cd_deadline = None
@@ -163,6 +178,16 @@ class Overlay:
         self._area.queue_draw()
         return False
 
+    def _set_preset(self, icon: str, name: str, keyword: str) -> bool:
+        if (icon, name, keyword) == (self._preset_icon, self._preset_name, self._keyword):
+            return False
+        self._preset_icon = icon
+        self._preset_name = name
+        self._keyword = keyword
+        self._relayout()
+        self._area.queue_draw()
+        return False
+
     def _set_countdown(self, remaining: float | None, total: float) -> bool:
         if remaining is None:
             self._cd_deadline = None
@@ -173,7 +198,13 @@ class Overlay:
 
     def _set_state(self, state: str, message: str) -> bool:
         self._state = state
-        self._phase_label = _PHASES.get(state, ((1, 1, 1), message[:40]))[1] or message[:40]
+        if state == "busy":
+            # Honour a clean phase word from the caller ("Transcribing…",
+            # "Rewriting…") so the overlay narrates what's happening; fall back to
+            # the canned label otherwise.
+            self._phase_label = (message.strip() or _PHASES["busy"][1])[:28]
+        else:
+            self._phase_label = _PHASES.get(state, ((1, 1, 1), message[:40]))[1] or message[:40]
         if state not in ("recording", "streaming"):
             # The countdown only makes sense while listening; drop it as soon as
             # we move on to transcribing / done / idle so the ring doesn't linger.
@@ -255,8 +286,10 @@ class Overlay:
 
     def _relayout(self) -> None:
         text_h = self._text_height()
+        preset_h = _PRESET_H if self._preset_name else 0
+        gap_preset = 8 if preset_h else 0
         gap_text = 8 if text_h else 0
-        body_h = _HEADER_H + gap_text + text_h + 2 * _PAD
+        body_h = _HEADER_H + gap_preset + preset_h + gap_text + text_h + 2 * _PAD
         self._height = body_h + _TAIL_H
 
         geo = self._monitor_geo()
@@ -314,14 +347,55 @@ class Overlay:
         wf_w = w - _PAD - wf_x
         self._draw_wave(cr, wf_x, body_top + _PAD, wf_w, _HEADER_H)
 
-        # Phase label (top-right, small) when there's room and no text yet.
-        if self._phase_label and not self._text:
+        # Phase label by the waveform (top-right) — only when there's no preset
+        # banner below (which carries the phase instead) and no text yet.
+        if self._phase_label and not self._text and not self._preset_name:
             self._draw_label(cr, w - _PAD, body_top + _PAD + 12, self._phase_label)
 
-        # Recognised text below the header row.
+        y = body_top + _PAD + _HEADER_H
+        # Matched-preset banner: emoji + name (left), live phase chip (right).
+        if self._preset_name:
+            y += 8
+            self._draw_preset(cr, _PAD, y, w - 2 * _PAD)
+            y += _PRESET_H
+        # Recognised / rewritten text below.
         if self._text:
-            self._draw_text(cr, _PAD, body_top + _PAD + _HEADER_H + 8, w - 2 * _PAD)
+            y += 8
+            self._draw_text(cr, _PAD, y, w - 2 * _PAD)
         return False
+
+    def _draw_preset(self, cr, x, y, w) -> None:
+        """The matched voice-routing preset, fused onto the overlay in place of a
+        desktop notification: emoji + name (and the spoken keyword) on the left,
+        the current phase ("Transcribing…", "Rewriting…") on the right."""
+        cy = y + _PRESET_H / 2
+        cursor = x
+        if self._preset_icon:
+            ic = self._win.create_pango_layout(self._preset_icon)
+            ic.set_font_description(Pango.FontDescription("Sans 13"))
+            iw, ih = ic.get_pixel_size()
+            cr.set_source_rgba(1, 1, 1, 0.95)
+            cr.move_to(cursor, cy - ih / 2)
+            PangoCairo.show_layout(cr, ic)
+            cursor += iw + 7
+        name = GLib.markup_escape_text(self._preset_name)
+        if self._keyword:
+            kw = GLib.markup_escape_text(self._keyword)
+            markup = f'<b>{name}</b>  <span alpha="55%">“{kw}”</span>'
+        else:
+            markup = f"<b>{name}</b>"
+        layout = self._win.create_pango_layout("")
+        layout.set_markup(markup, -1)
+        layout.set_font_description(Pango.FontDescription("Sans 10"))
+        layout.set_ellipsize(Pango.EllipsizeMode.END)
+        avail = (x + w) - cursor - 96      # leave room for the phase chip
+        layout.set_width(max(40, avail) * Pango.SCALE)
+        _nw, nh = layout.get_pixel_size()
+        cr.set_source_rgba(0.95, 0.96, 0.99, 0.98)
+        cr.move_to(cursor, cy - nh / 2)
+        PangoCairo.show_layout(cr, layout)
+        if self._phase_label:
+            self._draw_label(cr, x + w, cy, self._phase_label)
 
     def _bubble_path(self, cr, x, y, w, h) -> None:
         r = _RADIUS

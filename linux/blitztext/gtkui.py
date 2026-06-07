@@ -108,6 +108,9 @@ class App:
             cfg, status_cb=self._status_cb,
             level_cb=self._on_level, text_cb=self._on_text,
             countdown_cb=self._on_countdown,
+            # Only consume routing on the overlay when there's an overlay to show
+            # it on; otherwise the daemon keeps the desktop notification.
+            routing_cb=self._on_routing if self.overlay is not None else None,
         )
 
         _install_css()
@@ -276,6 +279,10 @@ class App:
         if self.overlay is not None:
             self.overlay.set_countdown(remaining, total)
 
+    def _on_routing(self, icon: str, name: str, keyword: str | None) -> None:
+        if self.overlay is not None:
+            self.overlay.set_preset(icon, name, keyword)
+
     def _overlay_status(self, state: str, message: str) -> None:
         """Translate engine phases into overlay show/update/hide (GTK thread)."""
         ov = self.overlay
@@ -287,7 +294,10 @@ class App:
             ov.show(state, getattr(self.daemon, "_target_window", None))
         elif state == "busy":
             self._ov_state = state
-            ov.set_state("busy", message)
+            # The routing detail ("→ Nicer email (matched: …)") is shown on the
+            # preset banner, not as a phase chip — keep the chip a clean phase word.
+            phase = "Transcribing…" if message.startswith("→") else message
+            ov.set_state("busy", phase)
         elif state == "done":
             # Non-streaming: the 'done' message carries the final text. Streaming
             # already showed it live, so don't overwrite with "Streaming stopped".

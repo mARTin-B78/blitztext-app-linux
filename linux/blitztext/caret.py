@@ -6,8 +6,10 @@ through a chain of decreasing precision:
 
   1. AT-SPI caret  — the real text insertion point, when the focused app exposes
      it over accessibility (native GTK/Qt apps do; many terminals / Electron /
-     web views do not). Tracked passively via the GLib main loop, so reads are
-     instant and never block.
+     web views do not). We track only the *focused* object via a11y events (cheap,
+     low-frequency) and read its caret rectangle lazily, once, when the overlay
+     shows — never from inside an event dispatch, since synchronous AT-SPI reads
+     on the hot path can wedge the accessibility bus and freeze the session.
   2. Mouse pointer — `xdotool getmouselocation`. Always available on X11; a good
      proxy since the pointer is usually near where you're typing.
   3. Window / screen — top-centre of the target window, else screen bottom-centre.
@@ -40,25 +42,39 @@ class Anchor:
 # Tier 1: AT-SPI caret tracking (best-effort, passive)
 # --------------------------------------------------------------------------- #
 class _CaretTracker:
-    """Passively follow the focused editable text's caret via AT-SPI events.
+    """Remember the most recently focused text object; read its caret lazily.
 
-    We never poll the a11y tree on the hot path (that can be slow and can block
-    on unresponsive apps). Instead we subscribe to caret-moved / focus events and
-    cache the last caret rectangle; `rect()` just returns the cached value if it
-    is fresh enough to still be meaningful.
+    *Why so cautious.* AT-SPI queries (``get_character_extents`` and friends) are
+    **synchronous, blocking D-Bus round-trips into the target application**. The
+    earlier design subscribed to the high-frequency ``object:text-caret-moved``
+    signal and ran those blocking reads from *inside* the event handler. Two ways
+    that wedges a whole GNOME/X11 session:
+
+      • Calling a synchronous AT-SPI method from within an AT-SPI event dispatch
+        re-enters the a11y dispatcher and can deadlock the accessibility bus.
+      • ``text-caret-moved`` fires once *per character* — and delivering text is
+        exactly what this app does, typing via ``xdotool`` into the focused
+        field. So a single dictation became a storm of blocking round-trips on
+        the GTK main loop, congesting the a11y bus until the desktop froze.
+
+    So we now subscribe to **focus changes only** (rare, and never emitted by our
+    own synthetic typing), cache just the focused accessible, and do the one
+    blocking extents read **on demand** in :meth:`rect` — called once, when the
+    overlay shows, outside any event dispatch. Worst case is a slightly delayed
+    overlay placement, never a frozen session.
     """
 
-    STALE_SECONDS = 30.0  # ignore a cached caret older than this
+    STALE_SECONDS = 30.0  # ignore a focus older than this
 
     def __init__(self) -> None:
         self._ok = False
         self._listener = None
-        self._rect: tuple[int, int, int, int] | None = None  # x, y, w, h (screen)
+        self._focused = None          # last focused accessible (read lazily)
         self._stamp = 0.0
         self._Atspi = None
 
     def start(self) -> bool:
-        """Register AT-SPI listeners on the (already running) GLib main loop.
+        """Register the AT-SPI focus listener on the running GLib main loop.
 
         Safe to call when accessibility is disabled — it just returns False and
         the anchor logic skips this tier from then on.
@@ -74,10 +90,10 @@ class _CaretTracker:
             # init() is idempotent; returns 0/1. Connects to the a11y registry.
             Atspi.init()
             self._Atspi = Atspi
-            self._listener = Atspi.EventListener.new(self._on_event)
-            # Caret moves give us the live position; focus changes let us grab the
-            # caret of a freshly-focused field even before it moves.
-            self._listener.register("object:text-caret-moved")
+            self._listener = Atspi.EventListener.new(self._on_focus)
+            # Focus changes only. Deliberately NOT "object:text-caret-moved": that
+            # firehose (one event per typed character, including our own output)
+            # plus synchronous reads is what could freeze the session.
             self._listener.register("object:state-changed:focused")
             self._ok = True
             log("[overlay] AT-SPI caret tracking active")
@@ -90,26 +106,23 @@ class _CaretTracker:
     def stop(self) -> None:
         try:
             if self._listener is not None:
-                self._listener.deregister("object:text-caret-moved")
                 self._listener.deregister("object:state-changed:focused")
         except Exception:  # noqa: BLE001
             pass
         self._listener = None
+        self._focused = None
         self._ok = False
 
-    def _on_event(self, event) -> None:
-        # Runs on the GLib main thread (same loop GTK uses). Keep it cheap and
-        # never raise — an exception here would bubble into the a11y dispatcher.
+    def _on_focus(self, event) -> None:
+        # Runs on the GLib main thread (same loop GTK uses). Do the *minimum*:
+        # stash the focused accessible and stamp it. Crucially, make NO synchronous
+        # AT-SPI calls here — that would re-enter the a11y dispatcher and risk
+        # deadlocking the bus. The blocking extents read happens later, in rect().
         try:
-            if event.type.startswith("object:state-changed:focused") and not event.detail1:
-                return  # a *de*focus event — nothing to read
-            source = event.source
-            if source is None:
-                return
-            rect = self._caret_rect(source)
-            if rect is not None:
-                self._rect = rect
-                self._stamp = time.time()
+            if not event.detail1:
+                return  # a *de*focus event — nothing to track
+            self._focused = event.source
+            self._stamp = time.time()
         except Exception:  # noqa: BLE001
             pass
 
@@ -142,11 +155,17 @@ class _CaretTracker:
             return None
 
     def rect(self) -> tuple[int, int, int, int] | None:
-        if not self._ok or self._rect is None:
+        # Called once when the overlay shows (not on the a11y hot path), so the
+        # single blocking extents read here is safe: at worst it briefly delays
+        # the overlay, it cannot storm or re-enter the bus.
+        if not self._ok or self._focused is None:
             return None
         if time.time() - self._stamp > self.STALE_SECONDS:
             return None
-        return self._rect
+        try:
+            return self._caret_rect(self._focused)
+        except Exception:  # noqa: BLE001 - focused app may be gone/unresponsive
+            return None
 
 
 # --------------------------------------------------------------------------- #

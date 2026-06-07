@@ -37,17 +37,25 @@ class Daemon:
     def __init__(self, cfg: Config, status_cb: StatusCallback | None = None,
                  level_cb: Callable[[float], None] | None = None,
                  text_cb: Callable[[str], None] | None = None,
-                 countdown_cb: Callable[[float | None, float], None] | None = None):
+                 countdown_cb: Callable[[float | None, float], None] | None = None,
+                 routing_cb: Callable[[str, str, str | None], None] | None = None):
         self.cfg = cfg
         self.status_cb = status_cb
         # Optional UI feedback hooks for the on-screen overlay. The daemon stays
         # UI-agnostic: these are no-ops in headless mode. level_cb gets the live
-        # mic level (0..1); text_cb gets the running transcript while streaming;
-        # countdown_cb(seconds_left, window) drives the silence auto-stop ring
-        # (seconds_left=None while you're speaking, so the ring clears).
+        # mic level (0..1); text_cb gets the running transcript while streaming
+        # (and the live LLM rewrite); countdown_cb(seconds_left, window) drives the
+        # silence auto-stop ring (seconds_left=None while you're speaking, so the
+        # ring clears); routing_cb(icon, preset_name, keyword) fires when voice
+        # routing picks a preset, so the overlay can show it.
         self.level_cb = level_cb
         self.text_cb = text_cb
         self.countdown_cb = countdown_cb
+        self.routing_cb = routing_cb
+        # An overlay consumes routing_cb, and it narrates every phase on-screen, so
+        # the redundant desktop notifications are fused into it (only errors still
+        # pop a bubble). Headless / overlay-off keeps the notifications.
+        self._overlay = routing_cb is not None
         self._ov_meter = None
         self._ov_text_final = ""
         self._lock = threading.Lock()
@@ -99,14 +107,20 @@ class Daemon:
         notify(title, body, urgency=urgency, enabled=self.cfg.notify)
 
     def _dnotify(self, title: str, body: str = "", urgency: str = "normal") -> None:
-        """Per-dictation notification — suppressed for hands-free (wakeword) sessions."""
-        if not self._session_silent:
-            self._notify(title, body, urgency=urgency)
+        """Per-dictation notification — suppressed for hands-free (wakeword)
+        sessions, and (except for errors) when an overlay is narrating on-screen."""
+        if self._session_silent:
+            return
+        if self._overlay and urgency != "critical":
+            return  # fused into the on-screen overlay instead of a desktop bubble
+        self._notify(title, body, urgency=urgency)
 
     def _rnotify(self, title: str, body: str = "", urgency: str = "normal") -> None:
-        """Routing feedback — which preset/keyword a voice command matched. Shown
-        even for hands-free sessions (it has its own toggle) so you can always see
-        what you triggered. Only fires on a real match, so it never spams silence."""
+        """Routing feedback — which preset/keyword a voice command matched. When an
+        overlay is present this is shown there (via routing_cb) instead of a
+        notification; otherwise it pops a bubble. Only fires on a real match."""
+        if self._overlay:
+            return  # shown on the overlay banner instead
         notify(title, body, urgency=urgency, enabled=self.cfg.notify_routing)
 
     def _emit(self, state: str, workflow: str | None = None, message: str = "") -> None:
@@ -456,6 +470,13 @@ class Daemon:
                 icon = (getattr(target, "icon", "") or "🎙") if target else "🎙"
                 via = f"“{res.keyword}”" if res.keyword else "no keyword → default"
                 self._emit("busy", label, f"→ {label} ({via})")
+                # Fuse the match onto the overlay (icon + preset + keyword); falls
+                # back to a desktop notification only when there's no overlay.
+                if self.routing_cb:
+                    try:
+                        self.routing_cb(icon, label, res.keyword)
+                    except Exception:  # noqa: BLE001 - UI must not break the engine
+                        pass
                 self._rnotify(f"{icon} {label}", f"matched: {via}")
                 log(f"→ routed to {label} (matched: {via})")
             else:
@@ -468,6 +489,17 @@ class Daemon:
                     return
                 self._emit("busy", label, "Rewriting…")
                 self._dnotify(f"⌛ {label}", "Rewriting…")
+                # Stream the rewrite into the overlay so you watch the model write
+                # (the bubble updates token-by-token). The delivered text is still
+                # the complete result, typed once the rewrite finishes.
+                on_token = None
+                if self.text_cb:
+                    acc: list[str] = []
+
+                    def on_token(delta: str, _acc=acc) -> None:
+                        _acc.append(delta)
+                        self.text_cb("".join(_acc))
+
                 try:
                     text = llm.chat(
                         self.cfg.active_llm,
@@ -476,6 +508,7 @@ class Daemon:
                         model=target.model or None,
                         temperature=target.temperature,
                         timeout=self.cfg.timeout,
+                        on_token=on_token,
                     )
                 except LLMError as exc:
                     self._emit("error", label, str(exc))

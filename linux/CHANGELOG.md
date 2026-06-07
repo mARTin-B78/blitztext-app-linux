@@ -9,6 +9,31 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-06-07
+
+### Fixed
+- **Session freeze when the overlay's caret tracking was active** (could lock up
+  the whole GNOME/X11 desktop, forcing a logout/reboot). The AT-SPI caret tracker
+  subscribed to the high-frequency `object:text-caret-moved` signal and made
+  **synchronous, blocking AT-SPI reads from inside the event handler** — which
+  re-enters the accessibility dispatcher and is stormed by the app's *own*
+  `xdotool` typing (one event per character), congesting the a11y bus until the
+  desktop stopped responding. It now tracks **focus changes only** and reads the
+  caret rectangle lazily (once, when the overlay shows), never from inside an
+  event dispatch.
+
+### Changed
+- **Matched preset is fused into the overlay instead of a desktop notification**:
+  when voice routing picks a preset, the overlay shows its emoji icon, name, and
+  the spoken keyword on a banner, and narrates the phase ("Transcribing…" →
+  "Rewriting…"). With the overlay on, the redundant per-dictation notifications
+  are suppressed (errors still notify); headless/overlay-off keeps notifications.
+
+### Added
+- **Live LLM rewrite in the overlay**: rewrite presets now stream the model's
+  output into the bubble token-by-token, so you watch it write. The delivered
+  text is still the complete result, typed once the rewrite finishes.
+
 ## [1.5.1] - 2026-06-07
 
 ### Added

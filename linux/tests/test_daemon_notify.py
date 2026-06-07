@@ -108,6 +108,41 @@ def test_matched_preset_announced_even_hands_free(monkeypatch):
     assert shown == [], "no announcement when 'Announce matched preset' is off"
 
 
+def test_overlay_fuses_notifications(monkeypatch):
+    """With an overlay (routing_cb wired), the on-screen bubble narrates every
+    phase, so informational desktop notifications are suppressed — but errors
+    still pop a bubble, and the routing match is shown on the overlay, not a
+    notification."""
+    calls = []
+    monkeypatch.setattr(daemon_mod, "notify", lambda *a, **k: calls.append((a, k)))
+    monkeypatch.setattr(daemon_mod, "detect_recorder", lambda pref="auto": "pw-record")
+    d = Daemon(Config(), routing_cb=lambda *a: None)
+    assert d._overlay is True
+    d._session_silent = False
+
+    d._dnotify("⌛ Nicer email", "Rewriting…")           # informational
+    assert calls == [], "informational notifications fuse into the overlay"
+
+    d._dnotify("Error", "boom", urgency="critical")       # errors still notify
+    assert len(calls) == 1, "errors must still pop a desktop bubble"
+
+    calls.clear()
+    d.cfg.notify_routing = True
+    d._rnotify("⚡ Nicer email", "matched: “nicer email”")
+    assert calls == [], "the match is shown on the overlay banner, not as a notification"
+
+
+def test_no_overlay_keeps_notifications(monkeypatch):
+    """Headless / overlay-off: notifications remain the only feedback."""
+    calls = []
+    monkeypatch.setattr(daemon_mod, "notify", lambda *a, **k: calls.append((a, k)))
+    d = _make_daemon(monkeypatch)             # no routing_cb
+    assert d._overlay is False
+    d._session_silent = False
+    d._dnotify("⌛ Nicer email", "Rewriting…")
+    assert len(calls) == 1, "without an overlay, informational notifications still show"
+
+
 def test_wakeword_while_busy_does_not_notify(monkeypatch):
     """The away-from-keyboard "Busy" storm: a detection arriving while the
     previous clip is still being processed must be ignored silently."""
