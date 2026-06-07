@@ -4,7 +4,7 @@
 
 Blitztext is a native Linux dictation tool that captures your voice, transcribes it locally with [faster-whisper](https://github.com/SYSTRAN/faster-whisper), optionally rewrites the text through an LLM, and types the result directly into whatever application has focus. Think macOS Dictation, but open-source, extensible, and designed for power users who want full control over their speech-to-text pipeline.
 
-> **Status:** Experimental open-source Linux/X11 desktop app (v1.4.0).
+> **Status:** Experimental open-source Linux/X11 desktop app (v1.5.0).
 > No hosted backend — bring your own models and endpoints.
 
 <p align="center">
@@ -57,6 +57,7 @@ Stream:    hotkey → mic PCM chunks → Riva/NIM WebSocket → live words typed
 - **Voice-keyword routing.** One hotkey, multiple workflows. Say "nicer email" at the start or end of your speech and the email-rewrite preset activates automatically (fuzzy-matched, ASR-tolerant).
 - **Quality gate.** Silent clips, too-short recordings, and Whisper hallucinations ("Thank you.", "Untertitel…") are caught and rejected before they reach your text field.
 - **Realtime streaming.** Connect a Riva/NIM realtime STT server and see stable words typed live as you speak.
+- **On-screen overlay at the cursor.** The moment you start dictating — by hotkey *or* wakeword — a translucent bubble pops up at the cursor with a pulsing microphone, a live waveform of your mic level, and the recognised text (live with a streaming engine, or as a brief confirmation otherwise). Its tail points at the text caret (via accessibility) and finally gives hands-free wakeword sessions visible feedback. Click-through, never steals focus; toggle in Settings → General.
 - **Built-in benchmarking.** Compare all your configured STT engines against a reference WAV + transcript to find the fastest and most accurate.
 
 ---
@@ -88,7 +89,7 @@ and screen-reader (ATK) support. Click any image to open it full size.
 
 <p align="center">
   <a href="Screenshots/settings-general.png"><img src="Screenshots/settings-general.png" alt="General settings tab" width="100%"></a><br>
-  <em><b>General</b> — core preferences: microphone with a live level meter, output mode (type vs. paste), language hint, type delay, and autostart on login.</em>
+  <em><b>General</b> — core preferences: microphone with a live level meter, output mode (type vs. paste), language hint, type delay, the on-screen dictation overlay, and autostart on login.</em>
 </p>
 
 <p align="center">
@@ -413,6 +414,7 @@ systemctl --user enable --now blitztext
 - **Wayland support** requires `wtype` or `ydotool`. Wayland security prevents global window focus manipulation, so text is delivered to whatever window is active when delivery occurs.
 - **No automated tests yet.** Contributions welcome (routing, quality gate, config parsing are all highly testable).
 - **Realtime streaming** requires a compatible Riva/NIM server.
+- **The on-screen overlay is X11-only** (it positions a window at the cursor and reads the pointer/caret); on Wayland it falls back to a fixed screen corner. Caret-accurate anchoring further needs the focused app to expose its text caret over AT-SPI accessibility — otherwise it follows the mouse pointer.
 - **Local STT speed** depends on your hardware, Whisper model size, and CTranslate2 build (CPU `int8` by default).
 - This is experimental software provided as-is.
 

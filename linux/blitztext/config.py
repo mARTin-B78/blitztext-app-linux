@@ -40,6 +40,9 @@ class Config:
     notify: bool = True
     notify_routing: bool = True   # announce which preset/keyword a voice command matched
     language: str = "de"          # whisper hint; "" = autodetect
+    # on-screen overlay (mic + live waveform + recognised-text bubble)
+    overlay_enabled: bool = True
+    overlay_anchor: str = "caret"  # caret (best-effort AT-SPI) | pointer | corner
     # input scheme
     input_mode: str = "modifiers"   # "modifiers" (Ctrl+Win/Ctrl/Alt/Esc) | "hotkeys" (combos)
     push_to_talk: bool = False
@@ -160,6 +163,8 @@ def load(path: Path = CONFIG_PATH) -> Config:
         notify=bool(g.get("notify", True)),
         notify_routing=bool(g.get("notify_routing", True)),
         language=g.get("language", "de"),
+        overlay_enabled=bool(g.get("overlay_enabled", True)),
+        overlay_anchor=g.get("overlay_anchor", "caret"),
         model=w.get("model", "small"),
         device=w.get("device", "auto"),
         compute_type=w.get("compute_type", "auto"),
@@ -258,6 +263,8 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "notify": cfg.notify,
             "notify_routing": cfg.notify_routing,
             "language": cfg.language,
+            "overlay_enabled": cfg.overlay_enabled,
+            "overlay_anchor": cfg.overlay_anchor,
         },
         "whisper": {
             "model": cfg.model,
@@ -362,6 +369,8 @@ type_delay_ms = 12       # per-keystroke delay for xdotool type (raise if chars 
 notify = true            # desktop notifications for each phase
 notify_routing = true    # announce which preset/keyword a voice command matched (shown even hands-free)
 language = "de"          # Whisper language hint; "" = autodetect
+overlay_enabled = true   # on-screen mic + live waveform + recognised-text bubble at the cursor
+overlay_anchor = "caret" # caret (best-effort, follows the text cursor) | pointer | corner
 
 [input]
 # How you start/stop dictation.

@@ -904,6 +904,10 @@ class SettingsDialog:
         self.gen_notify_routing = Gtk.Switch(); self.gen_notify_routing.set_active(self.cfg.notify_routing)
         _switch_row(page, "Announce matched preset", self.gen_notify_routing,
                     "After a voice command, show which preset and keyword matched — even hands-free.")
+        self.gen_overlay = Gtk.Switch(); self.gen_overlay.set_active(self.cfg.overlay_enabled)
+        _switch_row(page, "Visual overlay", self.gen_overlay,
+                    "Show a microphone, a live waveform, and the recognised text in a bubble "
+                    "at the cursor while you dictate (also gives hands-free sessions feedback).")
         self.gen_boot = Gtk.Switch(); self.gen_boot.set_active(autostart.is_enabled())
         _switch_row(page, "Launch on login", self.gen_boot,
                     "Start Blitztext automatically when you log in.")
@@ -1206,6 +1210,7 @@ class SettingsDialog:
             c.language = self.gen_lang.get_text().strip()
             c.notify = self.gen_notify.get_active()
             c.notify_routing = self.gen_notify_routing.get_active()
+            c.overlay_enabled = self.gen_overlay.get_active()
             c.device = self.stt_device.get_active_text() or "auto"
             c.compute_type = self.stt_compute.get_active_text() or "auto"
             autostart.set_enabled(self.gen_boot.get_active())

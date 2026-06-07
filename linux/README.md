@@ -39,6 +39,14 @@ Each normal hotkey **toggles**: press to start recording, press again to stop �
 then it transcribes, optionally rewrites, and types the result where your cursor
 is. Streaming workflows type stable words live while you speak.
 
+While you dictate, an optional **on-screen overlay** (Settings → General →
+"Visual overlay", default on) shows a translucent bubble at the cursor with a
+pulsing microphone, a live waveform of your mic level, and the recognised text —
+word-by-word in streaming mode, or the final result as a brief confirmation. Its
+tail points at the text caret (via AT-SPI accessibility) or the mouse pointer; it
+is click-through, never steals focus, and also gives hands-free wakeword sessions
+visible feedback. Tune the anchor with `[general] overlay_anchor`. X11 only.
+
 ## Screenshots
 
 Everything is configured in the **Settings** window — every tab has tooltips and
@@ -66,7 +74,7 @@ screen-reader (ATK) support. Click any image to open it full size.
 
 <p align="center">
   <a href="../Screenshots/settings-general.png"><img src="../Screenshots/settings-general.png" alt="General settings tab" width="100%"></a><br>
-  <em><b>General</b> — core preferences: microphone with a live level meter, output mode (type vs. paste), language hint, type delay, and autostart on login.</em>
+  <em><b>General</b> — core preferences: microphone with a live level meter, output mode (type vs. paste), language hint, type delay, the on-screen dictation overlay, and autostart on login.</em>
 </p>
 
 <p align="center">

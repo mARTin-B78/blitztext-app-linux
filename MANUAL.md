@@ -167,7 +167,8 @@ hands-free wakeword sounds above are **separate and independent**.
 
 ## General tab
 
-Microphone, text delivery, language, notifications, and autostart.
+Microphone, text delivery, language, notifications, the on-screen overlay, and
+autostart.
 
 | Setting | TOML key | Description |
 |---|---|---|
@@ -177,6 +178,7 @@ Microphone, text delivery, language, notifications, and autostart.
 | **Language hint** | `language` | Spoken-language code (`de`, `en`, …). Blank = auto-detect. |
 | **Notifications** | `notify` | Show desktop notifications for recording/transcription status and errors (manual sessions). |
 | **Announce matched preset** | `notify_routing` | After a voice command, pop a notification showing which preset (and spoken keyword) matched — shown **even for hands-free** sessions, with the preset's emoji. Only fires on a real match. |
+| **Visual overlay** | `overlay_enabled` | Show a translucent bubble at the cursor while you dictate — a pulsing **microphone**, a **live waveform** of your mic level, and the **recognised text** (word-by-word with a streaming engine, or the final result as a brief confirmation). The tail points at where the text lands, and it gives **hands-free** sessions visible feedback. Click-through; never takes focus. *(X11 only.)* |
 | **Launch on login** | *(autostart file)* | Start Blitztext automatically when you log in (writes a desktop autostart entry, not `config.toml`). |
 
 ---
@@ -239,3 +241,8 @@ A few behaviours live in `config.toml` without a dedicated tab control:
   no keyword matches), and `threshold` (`0`–`1` fuzzy-match strictness).
 - **`timeout`** — network timeout (seconds) for remote STT/LLM requests.
 - **`type_delay_ms`** — delay between simulated keystrokes in `type` output mode.
+- **`overlay_anchor`** — where the overlay's tail points: `caret` (best-effort —
+  follows the focused app's text caret via AT-SPI accessibility, falling back to
+  the pointer), `pointer` (always the mouse pointer), or `corner` (a fixed screen
+  corner; also the automatic fallback on Wayland or when the cursor can't be
+  located). Paired with the **Visual overlay** toggle above.

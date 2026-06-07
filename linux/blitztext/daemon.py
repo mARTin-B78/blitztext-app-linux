@@ -28,9 +28,18 @@ StatusCallback = Callable[[str, str | None, str], None]
 
 
 class Daemon:
-    def __init__(self, cfg: Config, status_cb: StatusCallback | None = None):
+    def __init__(self, cfg: Config, status_cb: StatusCallback | None = None,
+                 level_cb: Callable[[float], None] | None = None,
+                 text_cb: Callable[[str], None] | None = None):
         self.cfg = cfg
         self.status_cb = status_cb
+        # Optional UI feedback hooks for the on-screen overlay. The daemon stays
+        # UI-agnostic: these are no-ops in headless mode. level_cb gets the live
+        # mic level (0..1); text_cb gets the running transcript while streaming.
+        self.level_cb = level_cb
+        self.text_cb = text_cb
+        self._ov_meter = None
+        self._ov_text_final = ""
         self._lock = threading.Lock()
         self._recording: Recording | None = None
         self._streaming: RivaRealtimeStreamer | None = None
@@ -140,6 +149,10 @@ class Daemon:
         
         silence = max(0.5, self.cfg.wakeword_silence_seconds)
         def on_level(level):
+            # Feed the overlay waveform (the VAD meter is already capturing, so
+            # we reuse its level rather than opening a second stream).
+            if self.level_cb:
+                self.level_cb(level)
             now = time.time()
             if level > 0.05:
                 self._vad_last_speech = now
@@ -155,6 +168,23 @@ class Daemon:
         if getattr(self, '_vad_meter', None) is not None:
             self._vad_meter.stop()
             self._vad_meter = None
+
+    def _ov_meter_start(self) -> None:
+        """A level meter purely to drive the overlay waveform in streaming mode.
+
+        Non-streaming recordings reuse the VAD meter instead; this only runs when
+        an overlay is attached and we have no other level source. Best-effort:
+        LevelMeter.start() fails quietly if the device is busy."""
+        if not self.level_cb:
+            return
+        from . import audio
+        self._ov_meter = audio.LevelMeter(self.cfg.mic, on_level=self.level_cb)
+        self._ov_meter.start()
+
+    def _ov_meter_stop(self) -> None:
+        if getattr(self, "_ov_meter", None) is not None:
+            self._ov_meter.stop()
+            self._ov_meter = None
 
     def _play_sound(self, sound_name: str) -> None:
         if not self.cfg.sounds_enabled:
@@ -204,6 +234,7 @@ class Daemon:
                     self._notify("Streaming unavailable", "Select a riva_realtime STT engine.", "critical")
                     return
                 self._stream_segment_text = ""
+                self._ov_text_final = ""
                 streamer = RivaRealtimeStreamer(
                     engine,
                     device=self.cfg.mic,
@@ -222,7 +253,9 @@ class Daemon:
             self._dnotify(f"● {wf.name}", "Live transcript…")
             try:
                 streamer.start()
+                self._ov_meter_start()
             except Exception as exc:  # noqa: BLE001
+                self._ov_meter_stop()
                 with self._lock:
                     if self._streaming is streamer:
                         self._streaming = None
@@ -253,6 +286,7 @@ class Daemon:
                 self._busy = True
         if streamer is not None:
             streamer.stop()
+            self._ov_meter_stop()
             if send_enter:
                 from .paste import press_enter
                 press_enter(win)
@@ -284,6 +318,7 @@ class Daemon:
                 self._active_workflow = None
         if streamer is not None:
             streamer.stop()
+            self._ov_meter_stop()
             self._emit("idle", None, "Cancelled")
             self._notify("Cancelled", "Streaming stopped.", "low")
             self._play_sound("device-removed")
@@ -323,6 +358,14 @@ class Daemon:
         return text[:cut + 1] if cut >= 0 else ""
 
     def _on_stream_text(self, text: str, final: bool) -> None:
+        # Mirror the live hypothesis into the overlay bubble (the full current
+        # guess, which is more responsive than the delivered stable prefix).
+        if self.text_cb:
+            disp_seg = quality.clean(text, strip_trailing_punctuation=False)
+            running = (self._ov_text_final + " " + disp_seg).strip()
+            self.text_cb(running)
+            if final:
+                self._ov_text_final = running
         stable = self._stable_stream_text(text, final)
         if not stable:
             return
@@ -343,6 +386,7 @@ class Daemon:
             self._stream_segment_text = "" if final else stable
 
     def _on_stream_error(self, label: str, exc: Exception) -> None:
+        self._ov_meter_stop()
         with self._lock:
             self._streaming = None
             self._active_workflow = None

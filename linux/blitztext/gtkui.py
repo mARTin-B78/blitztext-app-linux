@@ -85,9 +85,29 @@ class App:
         self.cfg = cfg
         self.tray_mode = tray_mode
         self.tray = None
-        self.daemon = Daemon(cfg, status_cb=self._status_cb)
         self._rows: dict[str, dict] = {}
         self._active: str | None = None
+
+        # On-screen dictation HUD (mic + waveform + recognised-text bubble).
+        self.overlay = None
+        self._ov_state = "idle"
+        self._ov_streaming = False
+        if cfg.overlay_enabled:
+            try:
+                from .overlay import Overlay
+
+                self.overlay = Overlay(anchor_mode=cfg.overlay_anchor)
+                if cfg.overlay_anchor == "caret":
+                    from . import caret
+
+                    caret.start_tracking()
+            except Exception:  # noqa: BLE001 - overlay is optional eye-candy
+                self.overlay = None
+
+        self.daemon = Daemon(
+            cfg, status_cb=self._status_cb,
+            level_cb=self._on_level, text_cb=self._on_text,
+        )
 
         _install_css()
         self._build_window()
@@ -242,6 +262,44 @@ class App:
             return
         threading.Thread(target=lambda: self.daemon.toggle(wf), daemon=True).start()
 
+    # -- overlay feedback -----------------------------------------------------
+    def _on_level(self, level: float) -> None:
+        if self.overlay is not None:
+            self.overlay.set_level(level)
+
+    def _on_text(self, text: str) -> None:
+        if self.overlay is not None:
+            self.overlay.set_text(text)
+
+    def _overlay_status(self, state: str, message: str) -> None:
+        """Translate engine phases into overlay show/update/hide (GTK thread)."""
+        ov = self.overlay
+        if ov is None:
+            return
+        if state in ("recording", "streaming"):
+            self._ov_streaming = state == "streaming"
+            self._ov_state = state
+            ov.show(state, getattr(self.daemon, "_target_window", None))
+        elif state == "busy":
+            self._ov_state = state
+            ov.set_state("busy", message)
+        elif state == "done":
+            # Non-streaming: the 'done' message carries the final text. Streaming
+            # already showed it live, so don't overwrite with "Streaming stopped".
+            if not self._ov_streaming and message:
+                ov.set_text(message)
+            self._ov_state = state
+            ov.set_state("done", message)
+        elif state == "error":
+            self._ov_state = state
+            ov.set_state("error", message)
+        elif state == "idle":
+            # Only when a session was actually live — and never clip a 'done'
+            # linger (idle is emitted right after done in the worker's finally).
+            if self._ov_state in ("recording", "streaming", "busy"):
+                ov.set_state("idle", message)
+            self._ov_state = "idle"
+
     # -- status (marshalled to GTK thread) ------------------------------------
     def _status_cb(self, state: str, workflow: str | None, message: str) -> None:
         GLib.idle_add(self._apply_status, state, workflow, message)
@@ -256,6 +314,8 @@ class App:
                   "streaming": "Live", "busy": "Working…", "done": "Ready", "error": message[:40] or "Error"}
         self._set_dot(colors.get(state, "#7b818b"))
         self.status_lbl.set_text(labels.get(state, message))
+
+        self._overlay_status(state, message)
 
         if self.tray is not None:
             self.tray.update_status(state, labels.get(state, message))
@@ -312,6 +372,11 @@ class App:
     def quit_all(self) -> None:
         try:
             self.daemon.stop_input()
+            if self.overlay is not None:
+                self.overlay.destroy()
+                from . import caret
+
+                caret.stop_tracking()
         finally:
             Gtk.main_quit()
 

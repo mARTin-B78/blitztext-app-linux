@@ -1,0 +1,382 @@
+"""On-screen dictation HUD: a translucent bubble at the cursor.
+
+Shows, while you dictate:
+  • a microphone glyph that pulses red as it listens,
+  • a live waveform driven by the real mic level,
+  • the recognised text (word-by-word in streaming mode, or the final result as
+    a brief confirmation in record-then-transcribe mode),
+with a little tail whose tip points at the cursor where the text will land
+(see :mod:`blitztext.caret` for how that anchor is resolved).
+
+It is a click-through, focus-free override-redirect window so it never steals
+input from the field you're dictating into. All public methods are safe to call
+from worker threads — they marshal onto the GTK main loop via ``GLib.idle_add``.
+Pure feedback: nothing here touches recording, transcription, or delivery, and
+the whole feature is gated by ``cfg.overlay_enabled`` in the caller.
+"""
+
+from __future__ import annotations
+
+import math
+import time
+from collections import deque
+
+import cairo
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+gi.require_version("PangoCairo", "1.0")
+from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
+
+from . import caret  # noqa: E402
+
+# Layout constants (logical px).
+_WIDTH = 360
+_PAD = 16
+_HEADER_H = 40          # mic + waveform row
+_RADIUS = 16
+_TAIL_W = 20
+_TAIL_H = 11
+_GAP = 12               # clearance between the tail tip and the anchor
+_BARS = 30              # waveform bar count
+_MIN_TEXT_H = 0
+_MAX_TEXT_H = 120
+
+_FPS_MS = 33            # ~30 fps animation tick
+
+# Phase → (mic colour, label). Recording/streaming pulse; others are steady.
+_PHASES = {
+    "recording": ((1.0, 0.27, 0.23), "Listening…"),
+    "streaming": ((1.0, 0.27, 0.23), "Listening…"),
+    "busy": ((1.0, 0.74, 0.16), "Transcribing…"),
+    "done": ((0.30, 0.80, 0.36), ""),
+    "error": ((1.0, 0.35, 0.35), "Error"),
+}
+
+
+class Overlay:
+    def __init__(self, anchor_mode: str = "caret") -> None:
+        self.anchor_mode = anchor_mode
+        self._visible = False
+        self._state = "recording"
+        self._text = ""
+        self._phase_label = "Listening…"
+        self._anchor: caret.Anchor | None = None
+        self._tail_up = False           # tail on top edge (bubble below anchor)?
+        self._tail_x = _WIDTH // 2       # tail tip, window-local x
+        self._height = _HEADER_H + 2 * _PAD + _TAIL_H
+        self._levels: deque[float] = deque([0.0] * _BARS, maxlen=_BARS)
+        self._disp = [0.0] * _BARS       # eased bar heights for smooth motion
+        self._pulse = 0.0
+        self._tick_id: int | None = None
+        self._hide_id: int | None = None
+        self._t0 = time.time()
+
+        self._win = Gtk.Window(type=Gtk.WindowType.POPUP)
+        self._win.set_app_paintable(True)
+        self._win.set_resizable(False)
+        self._win.set_skip_taskbar_hint(True)
+        self._win.set_skip_pager_hint(True)
+        self._win.set_accept_focus(False)
+        self._win.set_focus_on_map(False)
+        self._win.set_keep_above(True)
+        screen = self._win.get_screen()
+        visual = screen.get_rgba_visual() if screen else None
+        if visual is not None:
+            self._win.set_visual(visual)
+        self._area = Gtk.DrawingArea()
+        if visual is not None:
+            self._area.set_visual(visual)
+        self._area.connect("draw", self._on_draw)
+        self._win.add(self._area)
+        self._win.connect("realize", self._on_realize)
+        self._win.set_default_size(_WIDTH, self._height)
+
+    # -- click-through --------------------------------------------------------
+    def _on_realize(self, _w) -> None:
+        gdkwin = self._win.get_window()
+        if gdkwin is not None:
+            # Empty input region → the HUD ignores all clicks; they fall through
+            # to whatever is underneath (the field you're typing into).
+            gdkwin.input_shape_combine_region(cairo.Region(), 0, 0)
+
+    # -- thread-safe public API ----------------------------------------------
+    def show(self, state: str, window_id: str | None) -> None:
+        GLib.idle_add(self._show, state, window_id)
+
+    def set_level(self, level: float) -> None:
+        GLib.idle_add(self._set_level, float(level))
+
+    def set_text(self, text: str) -> None:
+        GLib.idle_add(self._set_text, text or "")
+
+    def set_state(self, state: str, message: str = "") -> None:
+        GLib.idle_add(self._set_state, state, message)
+
+    def hide(self) -> None:
+        GLib.idle_add(self._hide)
+
+    def destroy(self) -> None:
+        GLib.idle_add(self._destroy)
+
+    # -- main-thread handlers -------------------------------------------------
+    def _show(self, state: str, window_id: str | None) -> bool:
+        self._cancel_hide()
+        self._state = state
+        self._phase_label = _PHASES.get(state, ((1, 1, 1), ""))[1]
+        self._text = ""
+        self._levels = deque([0.0] * _BARS, maxlen=_BARS)
+        self._disp = [0.0] * _BARS
+        self._anchor = caret.resolve(self.anchor_mode, window_id)
+        self._relayout()
+        self._visible = True
+        self._win.show_all()
+        if self._tick_id is None:
+            self._tick_id = GLib.timeout_add(_FPS_MS, self._tick)
+        return False
+
+    def _set_level(self, level: float) -> bool:
+        self._levels.append(max(0.0, min(1.0, level)))
+        return False
+
+    def _set_text(self, text: str) -> bool:
+        if text == self._text:
+            return False
+        self._text = text
+        self._relayout()
+        self._area.queue_draw()
+        return False
+
+    def _set_state(self, state: str, message: str) -> bool:
+        self._state = state
+        self._phase_label = _PHASES.get(state, ((1, 1, 1), message[:40]))[1] or message[:40]
+        if state in ("recording", "streaming", "busy"):
+            self._cancel_hide()
+        elif state in ("done", "idle", "error"):
+            # Linger on the final text, then fade out. Errors stay a touch longer.
+            delay = 2500 if state == "error" else (1600 if self._text else 700)
+            self._schedule_hide(delay)
+        self._area.queue_draw()
+        return False
+
+    def _hide(self) -> bool:
+        self._visible = False
+        self._cancel_hide()
+        if self._tick_id is not None:
+            GLib.source_remove(self._tick_id)
+            self._tick_id = None
+        self._win.hide()
+        return False
+
+    def _destroy(self) -> bool:
+        self._hide()
+        self._win.destroy()
+        return False
+
+    # -- hide scheduling ------------------------------------------------------
+    def _schedule_hide(self, delay_ms: int) -> None:
+        self._cancel_hide()
+        self._hide_id = GLib.timeout_add(delay_ms, self._hide)
+
+    def _cancel_hide(self) -> None:
+        if self._hide_id is not None:
+            GLib.source_remove(self._hide_id)
+            self._hide_id = None
+
+    # -- animation ------------------------------------------------------------
+    def _tick(self) -> bool:
+        if not self._visible:
+            self._tick_id = None
+            return False
+        # Ease displayed bars toward the latest levels for fluid motion even
+        # though real levels arrive at ~10 Hz.
+        targets = list(self._levels)
+        for i, t in enumerate(targets):
+            self._disp[i] += (t - self._disp[i]) * 0.35
+        self._pulse = (math.sin((time.time() - self._t0) * 5.0) + 1.0) * 0.5
+        self._area.queue_draw()
+        return True
+
+    # -- geometry -------------------------------------------------------------
+    def _monitor_geo(self):
+        disp = Gdk.Display.get_default()
+        if self._anchor is not None:
+            mon = disp.get_monitor_at_point(self._anchor.x, self._anchor.y)
+        else:
+            mon = disp.get_primary_monitor() or disp.get_monitor(0)
+        return mon.get_geometry()
+
+    def _text_height(self) -> int:
+        if not self._text:
+            return _MIN_TEXT_H
+        layout = self._win.create_pango_layout(self._text)
+        layout.set_width((_WIDTH - 2 * _PAD) * Pango.SCALE)
+        layout.set_wrap(Pango.WrapMode.WORD_CHAR)
+        font = Pango.FontDescription("Sans 11")
+        layout.set_font_description(font)
+        _w, h = layout.get_pixel_size()
+        return min(_MAX_TEXT_H, max(_MIN_TEXT_H, h))
+
+    def _relayout(self) -> None:
+        text_h = self._text_height()
+        gap_text = 8 if text_h else 0
+        body_h = _HEADER_H + gap_text + text_h + 2 * _PAD
+        self._height = body_h + _TAIL_H
+
+        geo = self._monitor_geo()
+        a = self._anchor
+        ax = a.x if a else geo.x + geo.width // 2
+        ay = a.y if a else geo.y + geo.height - 140
+        ah = a.height if a else 0
+
+        # Prefer placing the bubble above the anchor; flip below if it won't fit.
+        above_y = ay - _GAP - self._height
+        if above_y >= geo.y + 4:
+            self._tail_up = False
+            win_y = above_y
+        else:
+            self._tail_up = True
+            win_y = ay + ah + _GAP
+
+        tip_x = max(geo.x + _RADIUS + _TAIL_W, min(ax, geo.x + geo.width - _RADIUS - _TAIL_W))
+        win_x = tip_x - _WIDTH // 2
+        win_x = max(geo.x + 6, min(win_x, geo.x + geo.width - _WIDTH - 6))
+        self._tail_x = tip_x - win_x
+
+        self._win.resize(_WIDTH, self._height)
+        self._win.move(int(win_x), int(win_y))
+        self._area.set_size_request(_WIDTH, self._height)
+
+    # -- drawing --------------------------------------------------------------
+    def _on_draw(self, _area, cr) -> bool:
+        # Start fully transparent.
+        cr.set_operator(cairo.OPERATOR_SOURCE)
+        cr.set_source_rgba(0, 0, 0, 0)
+        cr.paint()
+        cr.set_operator(cairo.OPERATOR_OVER)
+
+        w = _WIDTH
+        body_top = _TAIL_H if self._tail_up else 0
+        body_h = self._height - _TAIL_H
+        body_bottom = body_top + body_h
+
+        # Bubble + tail as one path, so the fill/stroke wrap the tail cleanly.
+        self._bubble_path(cr, 0, body_top, w, body_h)
+        cr.set_source_rgba(0.10, 0.11, 0.14, 0.94)
+        cr.fill_preserve()
+        cr.set_source_rgba(1, 1, 1, 0.08)
+        cr.set_line_width(1.0)
+        cr.stroke()
+
+        cx = _PAD + 14
+        cy = body_top + _PAD + 12
+        self._draw_mic(cr, cx, cy)
+
+        # Waveform fills the space right of the mic across the header row.
+        wf_x = cx + 26
+        wf_w = w - _PAD - wf_x
+        self._draw_wave(cr, wf_x, body_top + _PAD, wf_w, _HEADER_H)
+
+        # Phase label (top-right, small) when there's room and no text yet.
+        if self._phase_label and not self._text:
+            self._draw_label(cr, w - _PAD, body_top + _PAD + 12, self._phase_label)
+
+        # Recognised text below the header row.
+        if self._text:
+            self._draw_text(cr, _PAD, body_top + _PAD + _HEADER_H + 8, w - 2 * _PAD)
+        return False
+
+    def _bubble_path(self, cr, x, y, w, h) -> None:
+        r = _RADIUS
+        cr.new_sub_path()
+        cr.arc(x + w - r, y + r, r, -math.pi / 2, 0)
+        cr.arc(x + w - r, y + h - r, r, 0, math.pi / 2)
+        cr.arc(x + r, y + h - r, r, math.pi / 2, math.pi)
+        cr.arc(x + r, y + r, r, math.pi, 1.5 * math.pi)
+        cr.close_path()
+        # Tail: a small triangle on the top or bottom edge at self._tail_x.
+        tx = max(r + _TAIL_W, min(self._tail_x, w - r - _TAIL_W))
+        if self._tail_up:
+            cr.move_to(tx - _TAIL_W / 2, y)
+            cr.line_to(tx, y - _TAIL_H)
+            cr.line_to(tx + _TAIL_W / 2, y)
+        else:
+            cr.move_to(tx - _TAIL_W / 2, y + h)
+            cr.line_to(tx, y + h + _TAIL_H)
+            cr.line_to(tx + _TAIL_W / 2, y + h)
+        cr.close_path()
+
+    def _draw_mic(self, cr, cx, cy) -> None:
+        colour, _ = _PHASES.get(self._state, ((1, 1, 1), ""))
+        pulsing = self._state in ("recording", "streaming")
+        # Soft pulsing halo while listening.
+        if pulsing:
+            rad = 12 + self._pulse * 6
+            cr.set_source_rgba(*colour, 0.18 * (1 - self._pulse * 0.6))
+            cr.arc(cx, cy, rad, 0, 2 * math.pi)
+            cr.fill()
+        cr.set_source_rgba(*colour, 1.0)
+        cr.set_line_width(2.0)
+        # Capsule head.
+        head_w, head_top, head_bot = 9.0, cy - 11, cy + 1
+        cr.arc(cx, head_top + head_w / 2, head_w / 2, math.pi, 2 * math.pi)
+        cr.arc(cx, head_bot - head_w / 2, head_w / 2, 0, math.pi)
+        cr.close_path()
+        cr.fill()
+        # Stand arc + post + base.
+        cr.set_source_rgba(*colour, 0.95)
+        cr.arc(cx, cy, 8, math.radians(25), math.radians(155))
+        cr.stroke()
+        cr.move_to(cx, cy + 8)
+        cr.line_to(cx, cy + 12)
+        cr.stroke()
+        cr.move_to(cx - 5, cy + 12)
+        cr.line_to(cx + 5, cy + 12)
+        cr.stroke()
+
+    def _draw_wave(self, cr, x, y, w, h) -> None:
+        gap = 2.0
+        bw = max(1.5, (w - gap * (_BARS - 1)) / _BARS)
+        mid = y + h / 2
+        listening = self._state in ("recording", "streaming")
+        for i in range(_BARS):
+            v = self._disp[i] if i < len(self._disp) else 0.0
+            # Idle baseline shimmer so the meter never looks frozen.
+            if listening and v < 0.04:
+                v = 0.04 + 0.03 * math.sin((self._t0 - time.time()) * 4 + i * 0.5)
+            bh = max(2.0, v * (h - 2))
+            bx = x + i * (bw + gap)
+            alpha = 0.85 if listening else 0.4
+            cr.set_source_rgba(0.42, 0.62, 1.0, alpha)
+            self._round_rect(cr, bx, mid - bh / 2, bw, bh, min(bw / 2, 2))
+            cr.fill()
+
+    def _draw_label(self, cr, right_x, cy, text) -> None:
+        layout = self._win.create_pango_layout(text)
+        layout.set_font_description(Pango.FontDescription("Sans 9"))
+        tw, th = layout.get_pixel_size()
+        cr.set_source_rgba(1, 1, 1, 0.55)
+        cr.move_to(right_x - tw, cy - th / 2)
+        PangoCairo.show_layout(cr, layout)
+
+    def _draw_text(self, cr, x, y, w) -> None:
+        layout = self._win.create_pango_layout(self._text)
+        layout.set_width(w * Pango.SCALE)
+        layout.set_wrap(Pango.WrapMode.WORD_CHAR)
+        layout.set_ellipsize(Pango.EllipsizeMode.END)
+        layout.set_height(_MAX_TEXT_H * Pango.SCALE)
+        layout.set_font_description(Pango.FontDescription("Sans 11"))
+        cr.set_source_rgba(0.95, 0.96, 0.99, 0.97)
+        cr.move_to(x, y)
+        PangoCairo.show_layout(cr, layout)
+
+    @staticmethod
+    def _round_rect(cr, x, y, w, h, r) -> None:
+        r = min(r, w / 2, h / 2)
+        cr.new_sub_path()
+        cr.arc(x + w - r, y + r, r, -math.pi / 2, 0)
+        cr.arc(x + w - r, y + h - r, r, 0, math.pi / 2)
+        cr.arc(x + r, y + h - r, r, math.pi / 2, math.pi)
+        cr.arc(x + r, y + r, r, math.pi, 1.5 * math.pi)
+        cr.close_path()

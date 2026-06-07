@@ -9,6 +9,23 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-06-07
+
+### Added
+- **On-screen dictation overlay** (Settings → General → "Visual overlay", or
+  `[general] overlay_enabled`, default on): the moment recording starts — by
+  hotkey **or** wakeword — a translucent bubble appears at the cursor showing a
+  pulsing **microphone**, a **live waveform** of your mic level, and the
+  **recognised text** (word-by-word with a realtime streaming STT engine, or the
+  final result as a brief confirmation otherwise). Its tail points at where the
+  text will land: it follows the **text caret** when the focused app exposes it
+  over accessibility (AT-SPI), otherwise the **mouse pointer**, otherwise a
+  screen corner — tune via `[general] overlay_anchor = "caret" | "pointer" |
+  "corner"`. The window is click-through and never takes focus, and it finally
+  gives **hands-free wakeword sessions** visible feedback (their notifications
+  are suppressed by design). X11 only; falls back to a corner where the cursor
+  can't be located.
+
 ### Changed
 - **Presets are speakable by name**: voice routing now matches a preset's *name*
   as an implicit keyword, so a preset works by voice even with no keywords
@@ -185,7 +202,8 @@ into that field.
   AppIndicator typelibs and GNOME `ubuntu-appindicators` extension are already
   present on the target host).
 
-[Unreleased]: https://github.com/mARTin-B78/blitztext-app-linux/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/mARTin-B78/blitztext-app-linux/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/mARTin-B78/blitztext-app-linux/compare/v1.4.0...v1.5.0
 [1.1.0]: https://github.com/mARTin-B78/blitztext-app-linux/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/mARTin-B78/blitztext-app-linux/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/mARTin-B78/blitztext-app-linux/releases/tag/v1.0.0
