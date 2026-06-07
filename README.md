@@ -4,7 +4,7 @@
 
 Blitztext is a native Linux dictation tool that captures your voice, transcribes it locally with [faster-whisper](https://github.com/SYSTRAN/faster-whisper), optionally rewrites the text through an LLM, and types the result directly into whatever application has focus. Think macOS Dictation, but open-source, extensible, and designed for power users who want full control over their speech-to-text pipeline.
 
-> **Status:** Experimental open-source Linux/X11 desktop app (v1.3.0).
+> **Status:** Experimental open-source Linux/X11 desktop app (v1.4.0).
 > No hosted backend — bring your own models and endpoints.
 
 <p align="center">

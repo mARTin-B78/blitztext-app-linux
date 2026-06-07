@@ -9,6 +9,8 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-06-07
+
 ### Added
 - **"Announce matched preset" notification** (Settings → General, or
   `[general] notify_routing`, default on): after a voice command, a notification
