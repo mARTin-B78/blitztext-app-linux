@@ -39,6 +39,12 @@ echo "==> Installing blitztext package"
 # Copy the package into site-packages so this source folder can be deleted.
 cp -r blitztext "$VENV/lib/python"*/site-packages/
 
+# On Debian/Ubuntu, python3-gi lives in /usr/lib/python3/dist-packages — the
+# generic (non-versioned) path that venvs don't include even with
+# --system-site-packages. A .pth file adds it to sys.path at startup.
+echo "/usr/lib/python3/dist-packages" \
+    > "$VENV/lib/python"*/site-packages/debian-system-packages.pth
+
 echo "==> Writing default config (if absent)"
 "$VENV/bin/python" -m blitztext config-path
 
