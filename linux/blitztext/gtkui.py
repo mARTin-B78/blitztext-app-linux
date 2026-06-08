@@ -366,9 +366,18 @@ class App:
 
     # -- panel / settings / lifecycle -----------------------------------------
     def open_settings(self) -> None:
+        # Single instance: if Settings is already open, bring it to the front
+        # instead of spawning a second dialog (the tray menu bypasses the
+        # dialog's own modality, so it could otherwise be opened repeatedly).
+        existing = getattr(self, "_settings", None)
+        if existing is not None:
+            existing.dlg.present()
+            return
         from .gtksettings import SettingsDialog
 
-        SettingsDialog(self.win, self.cfg, daemon=self.daemon).run_dialog()
+        self._settings = SettingsDialog(self.win, self.cfg, daemon=self.daemon)
+        self._settings.dlg.connect("destroy", lambda *_: setattr(self, "_settings", None))
+        self._settings.run_dialog()
 
     def show_panel(self) -> None:
         self.win.show_all()

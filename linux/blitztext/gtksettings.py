@@ -256,6 +256,8 @@ def _url_field(parent: Gtk.Box, label: str, placeholder: str, on_reload,
     row = Gtk.Box(spacing=10); row.set_margin_top(3); row.set_margin_bottom(3)
     lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(130, -1)
     row.pack_start(lbl, False, False, 0)
+    if dot is not None:
+        row.pack_start(dot, False, False, 0)   # connection dot beside the field (left), like Engines
     e = Gtk.Entry(); e.set_hexpand(True)
     if placeholder:
         e.set_placeholder_text(placeholder)
@@ -272,8 +274,6 @@ def _url_field(parent: Gtk.Box, label: str, placeholder: str, on_reload,
         btn.get_accessible().set_name("Refresh models")
     btn.connect("clicked", lambda _b: on_reload())
     row.pack_start(btn, False, False, 0)
-    if dot is not None:
-        row.pack_start(dot, False, False, 0)
     parent.pack_start(row, False, False, 0)
     return e
 
@@ -340,13 +340,22 @@ class SettingsDialog:
 
         nb = Gtk.Notebook()
         self.dlg.get_content_area().pack_start(nb, True, True, 0)
-        self._build_presets(_page(nb, "Presets"))
-        self._build_engines(_page(nb, "Engines"))
-        self._build_input(_page(nb, "Input"))
-        self._build_general(_page(nb, "General"))
-        self._build_benchmark(_page(nb, "Benchmark"))
-        self._build_log(_page(nb, "Log"))
-        self._build_about(_page(nb, "About"))
+        # Build each tab lazily on first view so the dialog opens instantly. The
+        # heavy bits are the Gtk.FileChooserButton pickers in Input/Benchmark
+        # (~0.2s each to construct); deferring them until you visit that tab keeps
+        # the initial open near-instant. _collect() force-builds any unvisited tab
+        # before saving, so no field is ever missed.
+        self._pending_tabs: dict = {}
+        for title, builder in (("Presets", self._build_presets),
+                               ("Engines", self._build_engines),
+                               ("Input", self._build_input),
+                               ("General", self._build_general),
+                               ("Benchmark", self._build_benchmark),
+                               ("Log", self._build_log),
+                               ("About", self._build_about)):
+            self._pending_tabs[_page(nb, title)] = builder
+        self._build_tab(nb.get_nth_page(0))   # the visible tab, eagerly
+        nb.connect("switch-page", lambda _nb, page, _n: self._build_tab(page))
 
         self._bind_entry = None
         self._bind_pressed: list[str] = []
@@ -354,6 +363,18 @@ class SettingsDialog:
         self.dlg.connect("key-release-event", self._on_bind_release)
         self.dlg.connect("response", self._on_response)
         self.dlg.connect("destroy", lambda *_: self._cleanup())
+
+    def _build_tab(self, page: Gtk.Box) -> None:
+        """Build a notebook tab's contents the first time it's shown (lazy)."""
+        builder = self._pending_tabs.pop(page, None)
+        if builder is not None:
+            builder(page)
+            page.show_all()   # the dialog may already be on-screen
+
+    def _force_build_tabs(self) -> None:
+        """Build any not-yet-visited tabs so _collect() sees every field."""
+        for page in list(self._pending_tabs):
+            self._build_tab(page)
 
     # ===== Presets ==========================================================
     def _build_presets(self, page: Gtk.Box) -> None:
@@ -1495,6 +1516,8 @@ class SettingsDialog:
         d.run(); d.destroy()
 
     def _on_response(self, dlg, resp):
+        if resp in (RESP_SAVE, RESP_SAVE_RESTART):
+            self._force_build_tabs()   # ensure every tab's fields exist
         if resp == RESP_SAVE:
             if self._collect():
                 save(self.cfg)

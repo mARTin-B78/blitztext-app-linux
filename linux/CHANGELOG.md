@@ -9,6 +9,21 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-06-08
+
+### Changed
+- **Settings opens instantly.** Each tab's contents are now built the first time
+  you view it instead of all up front, so the dialog no longer pauses ~1.3s
+  constructing the file-choosers in the Input/Benchmark tabs. Saving force-builds
+  any tab you didn't visit first, so no field is ever missed.
+- **Connection dots moved beside their field.** The Wakeword and TTS reachability
+  dots now sit just left of the URL entry (matching the Engines tab) instead of
+  at the far right of the row.
+
+### Fixed
+- **Settings could be opened more than once.** Choosing Settings while it's
+  already open now raises the existing window instead of stacking a second copy.
+
 ## [1.9.0] - 2026-06-08
 
 ### Added
