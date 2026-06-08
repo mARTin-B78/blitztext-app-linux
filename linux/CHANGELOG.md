@@ -9,6 +9,16 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-06-08
+
+### Added
+- **Connection indicators** for remote endpoints. The **Wakeword engine** field
+  (Input tab — renamed from "Wyoming URI" to read more generally) and the **TTS
+  URL** field (Benchmark tab) now show a coloured dot: green when the server is
+  reachable, red when it's configured but unreachable, grey when blank — mirroring
+  the STT/LLM engine dots. It's a lightweight background TCP probe, refreshed when
+  the dialog opens, when you press ⟳, and when you leave the field.
+
 ## [1.8.1] - 2026-06-08
 
 ### Fixed

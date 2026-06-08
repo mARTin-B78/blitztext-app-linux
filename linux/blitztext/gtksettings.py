@@ -251,7 +251,8 @@ def _fill_combo(combo: ModelPicker, options, current: str) -> None:
     combo.set_text(current or "")
 
 
-def _url_field(parent: Gtk.Box, label: str, placeholder: str, on_reload) -> Gtk.Entry:
+def _url_field(parent: Gtk.Box, label: str, placeholder: str, on_reload,
+               dot: Gtk.Label | None = None) -> Gtk.Entry:
     row = Gtk.Box(spacing=10); row.set_margin_top(3); row.set_margin_bottom(3)
     lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(130, -1)
     row.pack_start(lbl, False, False, 0)
@@ -271,6 +272,8 @@ def _url_field(parent: Gtk.Box, label: str, placeholder: str, on_reload) -> Gtk.
         btn.get_accessible().set_name("Refresh models")
     btn.connect("clicked", lambda _b: on_reload())
     row.pack_start(btn, False, False, 0)
+    if dot is not None:
+        row.pack_start(dot, False, False, 0)
     parent.pack_start(row, False, False, 0)
     return e
 
@@ -743,6 +746,40 @@ class SettingsDialog:
             GLib.idle_add(self.llm_dot.set_markup, _dot(lc))
         threading.Thread(target=check, daemon=True).start()
 
+    def _probe_dot(self, dot: Gtk.Label, uri: str, fallback_port: int) -> None:
+        """Colour a connection dot by TCP reachability of a host:port URL (threaded).
+
+        Green = something is listening at the address, red = configured but
+        unreachable, grey = empty. Deliberately lightweight — the per-tab Test /
+        Connect buttons do the deeper, protocol-aware checks.
+        """
+        uri = (uri or "").strip()
+        if not uri:
+            dot.set_markup(_dot(GREY))
+            return
+        from urllib.parse import urlparse
+        p = urlparse(uri if "://" in uri else "//" + uri)
+        host = p.hostname or "127.0.0.1"
+        port = p.port or (443 if p.scheme == "https" else fallback_port)
+
+        def work():
+            import socket
+            try:
+                with socket.create_connection((host, port), timeout=2.0):
+                    ok = True
+            except OSError:
+                ok = False
+            GLib.idle_add(dot.set_markup, _dot(GREEN if ok else RED))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_ww_uri_leave(self, *_a) -> bool:
+        self._probe_dot(self.ww_dot, self.ww_uri.get_text(), 10400)
+        return False
+
+    def _on_tts_url_leave(self, *_a) -> bool:
+        self._probe_dot(self.tts_dot, self.wwb_url.get_text(), 80)
+        return False
+
     # -- key binding ("Set" button captures the next keypress) ---
     def _key_field(self, page: Gtk.Box, label: str, value: str, placeholder: str = "", width: int = 150) -> Gtk.Entry:
         row = Gtk.Box(spacing=10); row.set_margin_top(3); row.set_margin_bottom(3)
@@ -807,8 +844,14 @@ class SettingsDialog:
         page.pack_start(Gtk.Label(label="Hands-free (Wakeword)", xalign=0.0), False, False, 2)
         self.ww_enabled = Gtk.Switch(); self.ww_enabled.set_active(self.cfg.wakeword_enabled); self.ww_enabled.set_halign(Gtk.Align.START)
         _labeled(page, "Enable wakeword", self.ww_enabled)
-        self.ww_uri = _url_field(page, "Wyoming URI", "tcp://127.0.0.1:10400", self._ww_load)
+        self.ww_dot = Gtk.Label(); self.ww_dot.set_markup(_dot(GREY))
+        self.ww_dot.set_tooltip_text("Wakeword (Wyoming / openWakeWord) server: "
+                                     "green = reachable, red = unreachable")
+        self.ww_uri = _url_field(page, "Wakeword engine", "tcp://127.0.0.1:10400",
+                                 self._ww_load, dot=self.ww_dot)
         self.ww_uri.set_text(self.cfg.wakeword_uri)
+        self.ww_uri.connect("focus-out-event", self._on_ww_uri_leave)
+        self._probe_dot(self.ww_dot, self.cfg.wakeword_uri, 10400)
         self.ww_model = _labeled(page, "Model name", _model_combo("Search models…"))
         _fill_combo(self.ww_model, [], self.cfg.wakeword_model)
         
@@ -962,6 +1005,8 @@ class SettingsDialog:
             self._meter.stop(); self._meter = None
 
     def _ww_load(self) -> None:
+        self._probe_dot(self.ww_dot, self.ww_uri.get_text(), 10400)
+
         def work():
             import socket, json
             from urllib.parse import urlparse
@@ -1090,8 +1135,13 @@ class SettingsDialog:
 
         # URL with a ⟳ reload that loads models + voices from the server (like the
         # Engines tab). Set the saved URL after building the field.
-        self.wwb_url = _url_field(page, "TTS URL", "http://localhost:8880/v1", self._tts_reload)
+        self.tts_dot = Gtk.Label(); self.tts_dot.set_markup(_dot(GREY))
+        self.tts_dot.set_tooltip_text("TTS server: green = reachable, red = unreachable")
+        self.wwb_url = _url_field(page, "TTS URL", "http://localhost:8880/v1",
+                                  self._tts_reload, dot=self.tts_dot)
         self.wwb_url.set_text(self.cfg.tts_url)
+        self.wwb_url.connect("focus-out-event", self._on_tts_url_leave)
+        self._probe_dot(self.tts_dot, self.cfg.tts_url, 80)
         self.wwb_key = _labeled(
             page, "API key env", _entry(self.cfg.tts_api_key_env, placeholder="(optional, e.g. OPENAI_API_KEY)"),
             tooltip="Name of an environment variable holding a bearer token. Leave empty for "
@@ -1183,6 +1233,7 @@ class SettingsDialog:
         if not url:
             self._error("Enter the TTS server URL first (e.g. http://localhost:8880/v1).")
             return
+        self._probe_dot(self.tts_dot, url, 80)
         self.wwb_test_lbl.set_markup("<i>Loading models &amp; voices…</i>")
 
         def work():
