@@ -1070,7 +1070,7 @@ class SettingsDialog:
                         self._info("Loaded models successfully.")
                     GLib.idle_add(apply)
             except Exception as e:
-                GLib.idle_add(lambda: self._error(f"Failed to load models:\n{e}"))
+                GLib.idle_add(lambda e=e: self._error(f"Failed to load models:\n{e}"))
         threading.Thread(target=work, daemon=True).start()
 
     def _ww_test(self, _b) -> None:
