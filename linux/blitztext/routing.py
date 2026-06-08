@@ -130,6 +130,35 @@ def is_cancel(transcript: str, cancel_keywords, *, threshold: float = DEFAULT_TH
     return None
 
 
+def match_send(transcript: str, send_keywords, *, threshold: float = DEFAULT_THRESHOLD):
+    """Detect a spoken 'send' keyword at an edge; return (keyword, cleaned_text).
+
+    Like is_cancel, but the keyword is *stripped* and the remaining text is meant
+    to be delivered and submitted with Enter — the spoken equivalent of
+    stop+paste+Enter. Returns (None, transcript) when nothing matches. Matched the
+    same edge-anchored, ASR-tolerant way as routing keywords, so the word deep
+    inside a sentence won't trigger it — only at the start or end.
+    """
+    if not send_keywords:
+        return None, transcript
+    tokens = normalize(transcript)
+    if not tokens:
+        return None, transcript
+    best = None  # (score, span, position, keyword)
+    for kw in send_keywords:
+        kw_tokens = normalize(kw)
+        m = _match_window(tokens, kw_tokens, threshold)
+        if m is None:
+            continue
+        position, score, span = m
+        if best is None or (score, span) > (best[0], best[1]):
+            best = (score, span, position, kw)
+    if best is None:
+        return None, transcript
+    _score, span, position, kw = best
+    return kw, _strip_span(transcript, span, position)
+
+
 def _strip_span(transcript: str, span_words: int, position: str) -> str:
     """Remove the matched keyword from the given edge of the original transcript.
 

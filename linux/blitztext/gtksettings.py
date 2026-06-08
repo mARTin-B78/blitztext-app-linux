@@ -24,7 +24,7 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
 
-from . import __version__, audio, autostart, benchmark, llm, logbuffer, stt  # noqa: E402
+from . import __version__, audio, autostart, benchmark, llm, logbuffer, stt, wakeword_bench  # noqa: E402
 from .config import Config, save  # noqa: E402
 from .llm import LLMEngine  # noqa: E402
 from .stt import STTEngine  # noqa: E402
@@ -223,6 +223,19 @@ class ModelPicker(Gtk.Box):
 
     def set_text(self, value: str) -> None:
         self.entry.set_text(value or "")
+
+
+class MultiPicker(ModelPicker):
+    """Like ModelPicker, but picking a row APPENDS to a comma-separated list —
+    for fields that hold several values (e.g. the benchmark's voices)."""
+
+    def _activated(self, _lb, row) -> None:
+        val = row.get_child().get_text()
+        cur = [v.strip() for v in self.entry.get_text().split(",") if v.strip()]
+        if val and val not in cur:
+            cur.append(val)
+        self.entry.set_text(", ".join(cur))
+        self.pop.popdown()
 
 
 def _model_combo(placeholder="") -> ModelPicker:
@@ -820,6 +833,14 @@ class SettingsDialog:
                     "nothing is transcribed onward, routed, rewritten, or typed. "
                     "Rescues an accidentally triggered dictation. Empty = off.")
 
+        self.send_keywords = _labeled(
+            page, "Send words (comma)",
+            _entry(", ".join(self.cfg.send_keywords), placeholder="computer send, computer abschicken"),
+            tooltip="Say one of these at the start or end of a clip to SEND it: the word is "
+                    "stripped and the rest is typed AND submitted with Enter (spoken "
+                    "‘stop+paste+Enter’). Because it presses Enter, use a distinctive "
+                    "multi-word phrase (e.g. your wakeword + ‘send’). Empty = off.")
+
         self.ww_snd_detected = self._sound_field(
             page, "Sound: detected", self.cfg.wakeword_sound_detected,
             "HANDS-FREE ONLY. Plays the instant the wake word is recognised and recording starts "
@@ -1058,6 +1079,56 @@ class SettingsDialog:
         self.bench_summary = Gtk.Label(xalign=0.0); self.bench_summary.set_line_wrap(True)
         page.pack_start(self.bench_summary, False, False, 4)
 
+        # --- Wakeword benchmark ---------------------------------------------
+        page.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), False, False, 10)
+        _infobox(page, "Stress-test the wakeword. It synthesizes short sentences with your "
+                       "wakeword spoken in random voices (plus filler with none), streams them to "
+                       "your wyoming-openwakeword server, and reports how reliably it fires "
+                       "(recall) and whether it false-fires. Speech comes from any OpenAI-compatible "
+                       "TTS server (Kokoro, XTTS, OpenAI …) — set its URL, model and voices, then "
+                       "Connect to test it.")
+
+        # URL with a ⟳ reload that loads models + voices from the server (like the
+        # Engines tab). Set the saved URL after building the field.
+        self.wwb_url = _url_field(page, "TTS URL", "http://localhost:8880/v1", self._tts_reload)
+        self.wwb_url.set_text(self.cfg.tts_url)
+        self.wwb_key = _labeled(
+            page, "API key env", _entry(self.cfg.tts_api_key_env, placeholder="(optional, e.g. OPENAI_API_KEY)"),
+            tooltip="Name of an environment variable holding a bearer token. Leave empty for "
+                    "no-auth local servers. The key itself is never stored in the config.")
+        self.wwb_model = _model_combo("press ⟳ to load, or type a model id")
+        self.wwb_model.set_text(self.cfg.tts_model)
+        _labeled(page, "TTS model", self.wwb_model,
+                 tooltip="The TTS model id your endpoint serves (from {url}/models). Required.")
+        self.wwb_voices = MultiPicker("press ⟳ to load voices, or type names")
+        self.wwb_voices.set_text(", ".join(self.cfg.tts_voices))
+        _labeled(page, "Voices (comma)", self.wwb_voices,
+                 tooltip="Voices to cycle through at random so the test covers different timbres. "
+                         "⟳ fills these from the server; the ▾ dropdown appends one at a time.")
+
+        self.wwb_test_btn = Gtk.Button(label="Connect")
+        self.wwb_test_btn.set_tooltip_text("Synthesize a test phrase with the selected model + voice.")
+        self.wwb_test_btn.connect("clicked", self._connect_tts)
+        self.wwb_test_lbl = Gtk.Label(xalign=0.0); self.wwb_test_lbl.set_line_wrap(True)
+        connect_box = Gtk.Box(spacing=10)
+        connect_box.pack_start(self.wwb_test_btn, False, False, 0)
+        connect_box.pack_start(self.wwb_test_lbl, False, False, 0)
+        _labeled(page, "", connect_box)
+
+        adj = Gtk.Adjustment(value=12, lower=1, upper=200, step_increment=1, page_increment=10)
+        self.wwb_count = Gtk.SpinButton(adjustment=adj, climb_rate=1, digits=0)
+        self.wwb_count.set_halign(Gtk.Align.START); self.wwb_count.set_size_request(90, -1)
+        _labeled(page, "Wakeword samples", self.wwb_count,
+                 tooltip="How many wakeword utterances to synthesize and test (filler-only "
+                         "utterances for false-fire checking are added on top).")
+
+        wrun = Gtk.Button(label="Run wakeword benchmark"); wrun.connect("clicked", self._run_wakeword_bench)
+        wrun.set_halign(Gtk.Align.START)
+        page.pack_start(wrun, False, False, 6)
+        self.wwb_summary = Gtk.Label(xalign=0.0); self.wwb_summary.set_line_wrap(True)
+        self.wwb_summary.set_selectable(True)
+        page.pack_start(self.wwb_summary, False, False, 4)
+
     def _run_bench(self, _b) -> None:
         wav = self.bench_wav.get_filename()
         refp = self.bench_ref.get_filename()
@@ -1092,6 +1163,123 @@ class SettingsDialog:
         self.bench_summary.set_markup(
             f"<b>Fastest:</b> {GLib.markup_escape_text(fastest.engine)} ({fastest.seconds:.2f}s)"
             f"     ·     <b>Most accurate:</b> {GLib.markup_escape_text(acc.engine)} ({acc.accuracy:.1f}%)")
+        return False
+
+    # ----- wakeword benchmark ----------------------------------------------
+    def _read_tts_fields(self):
+        """(url, api_key_env, model, voices) from the Benchmark tab, persisted to cfg."""
+        url = self.wwb_url.get_text().strip().rstrip("/")
+        key = self.wwb_key.get_text().strip()
+        model = self.wwb_model.get_text().strip()
+        voices = [v.strip() for v in self.wwb_voices.get_text().split(",") if v.strip()]
+        self.cfg.tts_url, self.cfg.tts_api_key_env = url, key
+        self.cfg.tts_model, self.cfg.tts_voices = model, voices
+        return url, key, model, voices
+
+    def _tts_reload(self) -> None:
+        """⟳ — load the model list ({url}/models) and voice list into the dropdowns."""
+        url = self.wwb_url.get_text().strip().rstrip("/")
+        key = self.wwb_key.get_text().strip()
+        if not url:
+            self._error("Enter the TTS server URL first (e.g. http://localhost:8880/v1).")
+            return
+        self.wwb_test_lbl.set_markup("<i>Loading models &amp; voices…</i>")
+
+        def work():
+            models = stt.list_models(url, key)
+            voices = wakeword_bench.list_voices(url, api_key_env=key)
+
+            def apply():
+                _fill_combo(self.wwb_model, models, self.wwb_model.get_text())
+                self.wwb_voices.set_models(voices)
+                if voices and not self.wwb_voices.get_text().strip():
+                    self.wwb_voices.set_text(", ".join(voices))   # default: test them all
+                colour = "#34c759" if (models or voices) else "#ff9f0a"
+                self.wwb_test_lbl.set_markup(
+                    f"<span foreground='{colour}'>Loaded {len(models)} models, "
+                    f"{len(voices)} voices.</span>")
+                return False
+            GLib.idle_add(apply)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _connect_tts(self, _b) -> None:
+        url, key, model, voices = self._read_tts_fields()
+        if not url or not model:
+            self._error("Enter the TTS URL and model (press ⟳ to load them).")
+            return
+        self.wwb_test_btn.set_sensitive(False)
+        self.wwb_test_lbl.set_markup("<i>Testing synthesis…</i>")
+        voice = voices[0] if voices else "alloy"
+
+        def work():
+            ok, msg = wakeword_bench.probe(url, model=model, voice=voice, api_key_env=key)
+            GLib.idle_add(self._connect_tts_done, ok, msg)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _connect_tts_done(self, ok, msg) -> bool:
+        self.wwb_test_btn.set_sensitive(True)
+        colour = "#34c759" if ok else "#ff3b30"
+        self.wwb_test_lbl.set_markup(f"<span foreground='{colour}'>{GLib.markup_escape_text(msg)}</span>")
+        return False
+
+    def _run_wakeword_bench(self, _b) -> None:
+        url, key, model, voices = self._read_tts_fields()
+        count = int(self.wwb_count.get_value())
+        if not url:
+            self._error("Enter the TTS server URL (e.g. http://localhost:8880/v1).")
+            return
+        if not model:
+            self._error("Set a TTS model id (your endpoint's /audio/speech model).")
+            return
+        if not voices:
+            self._error("Add at least one voice (or press Connect to fetch them).")
+            return
+        self.wwb_summary.set_markup("<i>Synthesizing and streaming… this talks to your TTS "
+                                    "and wyoming-openwakeword servers.</i>")
+
+        def work():
+            def prog(done, total, u):
+                GLib.idle_add(self._wwbench_progress, done, total, u)
+            try:
+                res = wakeword_bench.run(
+                    tts_url=url, tts_api_key_env=key, tts_model=model, voices=voices,
+                    wakeword_model=self.cfg.wakeword_model, wakeword_uri=self.cfg.wakeword_uri,
+                    language=self.cfg.language, count=count, progress=prog)
+            except Exception as exc:  # noqa: BLE001 - surface setup errors
+                GLib.idle_add(self._wwbench_error, str(exc))
+                return
+            GLib.idle_add(self._wwbench_done, res)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _wwbench_progress(self, done, total, u) -> bool:
+        tag = "✓" if (u.ok and (u.detections > 0) == u.has_wakeword) else ("•" if u.ok else "⚠")
+        kind = "wake" if u.has_wakeword else "filler"
+        self.wwb_summary.set_markup(
+            f"<i>{done}/{total}</i>  {tag} {kind} · {GLib.markup_escape_text(u.voice)}"
+            + (f" · <span foreground='#ff3b30'>{GLib.markup_escape_text(u.error)}</span>" if u.error else ""))
+        return False
+
+    def _wwbench_error(self, msg: str) -> bool:
+        self.wwb_summary.set_markup(f"<span foreground='#ff3b30'>{GLib.markup_escape_text(msg)}</span>")
+        return False
+
+    def _wwbench_done(self, res) -> bool:
+        if res.expected == 0:
+            errs = {u.error for u in res.utterances if u.error}
+            hint = ("  " + GLib.markup_escape_text(next(iter(errs)))) if errs else ""
+            self.wwb_summary.set_markup(
+                f"<span foreground='#ff3b30'>No utterances synthesized — check the TTS model/endpoint.</span>{hint}")
+            return False
+        by_voice = res.recall_by_voice()
+        voice_bits = "  ".join(
+            f"{GLib.markup_escape_text(v)} {d}/{t}" for v, (d, t) in sorted(by_voice.items()))
+        colour = "#34c759" if res.recall >= 0.9 and res.false_fires == 0 else (
+            "#ff9f0a" if res.recall >= 0.6 else "#ff3b30")
+        self.wwb_summary.set_markup(
+            f"<b><span foreground='{colour}'>Recall {res.recall * 100:.0f}%</span></b> "
+            f"({res.detected}/{res.expected} fired)   ·   "
+            f"<b>False fires:</b> {res.false_fires} in {len(res.filler)} filler   ·   "
+            f"{res.seconds:.0f}s\n<small>per voice: {voice_bits}</small>")
         return False
 
     # ===== About ============================================================
@@ -1213,6 +1401,11 @@ class SettingsDialog:
             c.wakeword_sound_done = self.ww_snd_done.get_filename() or ""
             c.wakeword_silence_seconds = float(self.ww_silence.get_text())
             c.cancel_keywords = [k.strip() for k in self.cancel_keywords.get_text().split(",") if k.strip()]
+            c.send_keywords = [k.strip() for k in self.send_keywords.get_text().split(",") if k.strip()]
+            c.tts_url = self.wwb_url.get_text().strip().rstrip("/")
+            c.tts_api_key_env = self.wwb_key.get_text().strip()
+            c.tts_model = self.wwb_model.get_text().strip()
+            c.tts_voices = [v.strip() for v in self.wwb_voices.get_text().split(",") if v.strip()]
             c.mic = self._selected_mic_name()
             c.output = self.gen_output.get_active_text() or "type"
             c.language = self.gen_lang.get_text().strip()

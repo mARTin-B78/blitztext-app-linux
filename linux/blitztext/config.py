@@ -31,6 +31,14 @@ class Workflow:
 
 
 @dataclass
+class WakewordEngine:
+    """A wyoming-openwakeword endpoint to compare in the wakeword benchmark."""
+    name: str = ""
+    uri: str = "tcp://127.0.0.1:10400"
+    model: str = "okay_computer"
+
+
+@dataclass
 class Config:
     # general
     recorder: str = "auto"
@@ -79,6 +87,12 @@ class Config:
     # dictation is discarded — never transcribed onward, routed, rewritten, or
     # typed. Empty list = disabled. Mainly for accidental wakeword triggers.
     cancel_keywords: list[str] = field(default_factory=lambda: ["abbrechen", "cancel"])
+    # Spoken send: if one of these is heard at the start/end of a clip, it is
+    # stripped and the rest is delivered *and submitted with Enter* — the spoken
+    # equivalent of "stop + paste + Enter". Empty = disabled. Because it presses
+    # Enter, prefer a distinctive multi-word phrase (e.g. "computer send") so a
+    # sentence that merely ends in "send" doesn't submit by accident.
+    send_keywords: list[str] = field(default_factory=list)
     # speech-to-text engines (presets)
     stt_engines: list[STTEngine] = field(default_factory=list)
     stt_active: str = ""
@@ -92,6 +106,17 @@ class Config:
     wakeword_sound_detected: str = ""   # WAV played when the wakeword fires (speak now)
     wakeword_sound_done: str = ""        # WAV played when the command is captured
     wakeword_silence_seconds: float = 2.0  # auto-stop after this much trailing silence
+    # Text-to-speech for the wakeword benchmark — its own OpenAI-compatible
+    # endpoint (Kokoro, XTTS, OpenAI, …): base URL incl. /v1, an optional bearer
+    # key env var, a model id, and the voices to cycle through.
+    tts_url: str = ""
+    tts_api_key_env: str = ""
+    tts_model: str = ""
+    tts_voices: list[str] = field(
+        default_factory=lambda: ["alloy", "echo", "fable", "onyx", "nova", "shimmer"])
+    # Wakeword engines to compare in the benchmark (each a wyoming-openwakeword
+    # endpoint). Empty → the benchmark falls back to the live [wakeword] above.
+    wakeword_engines: list[WakewordEngine] = field(default_factory=list)
     # workflows
     workflows: list[Workflow] = field(default_factory=list)
 
@@ -158,6 +183,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
     q = data.get("quality", {})
     snd = data.get("sounds", {})
     ww = data.get("wakeword", {})
+    tts = data.get("tts", {})
 
     cfg = Config(
         recorder=g.get("recorder", "auto"),
@@ -183,6 +209,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
         routing_default=rt.get("default", ""),
         routing_threshold=float(rt.get("threshold", 0.82)),
         cancel_keywords=list(rt.get("cancel_keywords", ["abbrechen", "cancel"])),
+        send_keywords=list(rt.get("send_keywords", [])),
         input_mode=inp.get("mode", "modifiers"),
         push_to_talk=bool(inp.get("push_to_talk", False)),
         key_start=inp.get("start", "<ctrl>+<cmd>"),
@@ -202,6 +229,10 @@ def load(path: Path = CONFIG_PATH) -> Config:
         wakeword_sound_detected=ww.get("sound_detected", ""),
         wakeword_sound_done=ww.get("sound_done", ""),
         wakeword_silence_seconds=float(ww.get("silence_seconds", 2.0)),
+        tts_url=tts.get("url", "").rstrip("/"),
+        tts_api_key_env=tts.get("api_key_env", ""),
+        tts_model=tts.get("model", ""),
+        tts_voices=list(tts.get("voices", ["alloy", "echo", "fable", "onyx", "nova", "shimmer"])),
     )
 
     for entry in data.get("workflow", []):
@@ -234,6 +265,17 @@ def load(path: Path = CONFIG_PATH) -> Config:
         for e in data.get("stt_engine", [])
     ] or [STTEngine("Local faster-whisper", "local", model=cfg.model)]
     cfg.stt_active = data.get("stt", {}).get("active", cfg.stt_engines[0].name)
+
+    # Wakeword engines for the benchmark (optional; benchmark falls back to the
+    # live [wakeword] config when none are listed).
+    cfg.wakeword_engines = [
+        WakewordEngine(
+            name=e.get("name", ""),
+            uri=e.get("uri", "tcp://127.0.0.1:10400"),
+            model=e.get("model", "okay_computer"),
+        )
+        for e in data.get("wakeword_engine", [])
+    ]
 
     # LLM engines (default: synthesized from the legacy [rewrite] block).
     cfg.llm_engines = [
@@ -298,6 +340,7 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "default": cfg.routing_default,
             "threshold": cfg.routing_threshold,
             "cancel_keywords": cfg.cancel_keywords,
+            "send_keywords": cfg.send_keywords,
         },
         "quality": {
             "min_speech_seconds": cfg.min_speech_seconds,
@@ -318,6 +361,15 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "sound_done": cfg.wakeword_sound_done,
             "silence_seconds": cfg.wakeword_silence_seconds,
         },
+        "tts": {
+            "url": cfg.tts_url,
+            "api_key_env": cfg.tts_api_key_env,
+            "model": cfg.tts_model,
+            "voices": cfg.tts_voices,
+        },
+        "wakeword_engine": [
+            {"name": e.name, "uri": e.uri, "model": e.model} for e in cfg.wakeword_engines
+        ],
         "stt": {"active": cfg.stt_active},
         "stt_engine": [
             {k: v for k, v in {
@@ -439,6 +491,12 @@ threshold = 0.82         # 0..1 fuzzy-match strictness (higher = stricter)
 # routed, rewritten, or typed. Handy when a wakeword fires by accident. Pick
 # words you won't naturally end a real dictation with. Empty list = off.
 cancel_keywords = ["abbrechen", "cancel"]
+# Say one of these at the start or end of a clip to SEND it: the word is stripped
+# and the rest is delivered AND submitted with Enter (spoken "stop+paste+Enter").
+# Because it presses Enter, use a distinctive multi-word phrase (e.g. your
+# wakeword + "send") so a sentence that just ends in "send" won't submit. Off by
+# default; empty list = off.
+send_keywords = []
 
 [wakeword]
 # Hands-free dictation using an external wyoming-openwakeword server.
@@ -454,6 +512,30 @@ sound_detected = ""
 sound_done = ""
 # Auto-stop the recording this many seconds after you stop speaking (silence).
 silence_seconds = 2.0
+
+[tts]
+# Text-to-speech for the WAKEWORD BENCHMARK only (Settings → Benchmark). Point it
+# at any OpenAI-compatible TTS server's /audio/speech (Kokoro-FastAPI, XTTS-v2,
+# OpenAI, …). url = base incl. /v1; api_key_env = env var holding a bearer key
+# (leave empty for no-auth local servers); model = the TTS model id; voices = the
+# names your endpoint serves. Leave url/model empty to disable the benchmark.
+url = ""
+api_key_env = ""
+model = ""
+voices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
+
+# Wakeword engines to COMPARE in the benchmark — add one block per
+# wyoming-openwakeword endpoint/model you want side by side. Leave this out to
+# just benchmark the live [wakeword] engine above.
+# [[wakeword_engine]]
+# name = "openWakeWord · computer"
+# uri = "tcp://127.0.0.1:10400"
+# model = "computer"
+#
+# [[wakeword_engine]]
+# name = "microWakeWord · hey_jarvis"
+# uri = "tcp://127.0.0.1:10500"
+# model = "hey_jarvis"
 
 # ----------------------------------------------------------------------------
 # Speech-to-text engines (presets). The active one is used for transcription.

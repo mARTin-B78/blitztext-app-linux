@@ -9,6 +9,27 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-06-08
+
+### Added
+- **Send by voice**: say a distinctive phrase like **"computer send"** at the
+  start or end of a clip and the word is stripped, then the rest is typed **and
+  submitted with Enter** — the spoken equivalent of "stop + paste + Enter".
+  Mainly for hands-free use, where you can't press a key. Configure under
+  Settings → Input → "Send words", or `[routing] send_keywords`. Off by default;
+  because it presses Enter, use a multi-word phrase (e.g. your wakeword + "send")
+  so a sentence that merely ends in "send" doesn't submit by accident. Matched
+  the same edge-anchored, ASR-tolerant way as routing/cancel keywords.
+- **Wakeword benchmark** (Settings → Benchmark): stress-test hands-free
+  detection. It synthesizes short sentences with your wake phrase spoken in
+  random voices (plus pure-filler utterances with none), streams them to your
+  wyoming-openwakeword server, and reports **recall** (how reliably it fires),
+  **false fires**, and a **per-voice** breakdown. Speech comes from any
+  OpenAI-compatible TTS server (Kokoro-FastAPI, XTTS, OpenAI, …): set its URL,
+  optional API-key env var, model, and voices under the new `[tts]` config / the
+  Benchmark tab, and use **Connect** to test it (it auto-fills the voice list
+  when the server exposes one).
+
 ## [1.7.1] - 2026-06-08
 
 ### Fixed

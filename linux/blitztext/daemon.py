@@ -19,7 +19,7 @@ from .notify import notify
 from .paste import active_window_id, deliver
 from .streaming import RivaRealtimeStreamer
 from .recorder import Recording, detect_recorder
-from .routing import is_cancel, route
+from .routing import is_cancel, match_send, route
 from .transcribe import Transcriber
 
 # status_cb(state, workflow_name, message)
@@ -472,6 +472,14 @@ class Daemon:
                 self._emit("idle", label, "Cancelled")
                 self._dnotify("Abgebrochen", f"„{cancel_kw}“ gehört — verworfen.", "low")
                 return
+
+            # Spoken send: a configured word at an edge ("computer send") is
+            # stripped, and the rest is delivered AND submitted with Enter — the
+            # spoken equivalent of stop+paste+Enter. Mainly for hands-free use.
+            send_kw, text = match_send(text, self.cfg.send_keywords, threshold=self.cfg.routing_threshold)
+            if send_kw:
+                send_enter = True
+                log(f"⏎ Send keyword “{send_kw}” — delivering and pressing Enter.")
 
             # Voice routing: pick the preset from a spoken keyword, strip it.
             if workflow.mode == "route":

@@ -45,6 +45,12 @@ It's the rescue for an accidentally triggered (e.g. wakeword) recording. Set the
 words under `[routing] cancel_keywords` (default `["abbrechen", "cancel"]`; an
 empty list turns it off).
 
+**Send by voice:** say a distinctive phrase like *"computer send"* at the start
+or end of a clip and the word is stripped, then the rest is typed **and submitted
+with Enter** — the spoken equivalent of "stop + paste + Enter", ideal hands-free.
+Off by default; set the phrases under `[routing] send_keywords` (use a multi-word
+phrase so a sentence merely ending in "send" doesn't submit by accident).
+
 While you dictate, an optional **on-screen overlay** (Settings → General →
 "Visual overlay", default on) shows a translucent bubble at the cursor with a
 pulsing microphone, a live waveform of your mic level, and the recognised text —
@@ -85,7 +91,7 @@ screen-reader (ATK) support. Click any image to open it full size.
 
 <p align="center">
   <a href="../Screenshots/settings-benchmark.png"><img src="../Screenshots/settings-benchmark.png" alt="Benchmark settings tab" width="100%"></a><br>
-  <em><b>Benchmark</b> — compare every configured STT engine against a reference WAV + transcript to find the fastest and most accurate, with a Device column (CPU / GPU / remote).</em>
+  <em><b>Benchmark</b> — compare every configured STT engine against a reference WAV + transcript to find the fastest and most accurate, with a Device column (CPU / GPU / remote). Also includes a <b>wakeword benchmark</b>: point it at any OpenAI-compatible TTS server (Kokoro, XTTS, …), and it synthesizes your wake phrase in random voices, streams it to your wyoming-openwakeword server, and reports recall + false-fires per voice.</em>
 </p>
 
 <p align="center">
