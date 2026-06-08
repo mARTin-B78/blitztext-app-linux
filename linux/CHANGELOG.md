@@ -9,6 +9,18 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-06-08
+
+### Fixed
+- **Settings dialog and control panel wouldn't open on some desktops.** When the
+  gvfs `org.gtk.vfs.UDisks2VolumeMonitor` dbus service fails to activate (common
+  on headless or minimal sessions), every `Gtk.FileChooserButton` blocked ~25s on
+  a `StartServiceByName` timeout while realizing — so the Settings dialog never
+  finished appearing, and the stalled GTK main loop froze the panel too. Blitztext
+  now selects GIO's native `/proc/mounts` volume monitor
+  (`GIO_USE_VOLUME_MONITOR=unix`) before any window is realized, so file choosers
+  open instantly with no dbus dependency.
+
 ## [1.8.0] - 2026-06-08
 
 ### Added

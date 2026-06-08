@@ -408,6 +408,13 @@ class App:
 
 
 def run_gui(tray_mode: bool = False) -> int:
+    # Use GIO's native /proc/mounts volume monitor instead of the gvfs/udisks2
+    # one. On headless or minimal desktops the `org.gtk.vfs.UDisks2VolumeMonitor`
+    # dbus service often fails to activate, and every Gtk.FileChooserButton then
+    # blocks ~25s on a StartServiceByName timeout while realizing — which freezes
+    # the settings dialog (and, via the stalled main loop, the panel) so neither
+    # ever appears. The unix monitor needs no dbus and opens choosers instantly.
+    os.environ.setdefault("GIO_USE_VOLUME_MONITOR", "unix")
     # Identify to the window manager as "blitztext" rather than the Python entry
     # point's filename. Launched via `python -m blitztext`, GTK's default program
     # name is argv[0]'s basename ("__main__.py"), which is what shows in the
