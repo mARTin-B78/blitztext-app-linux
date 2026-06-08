@@ -408,6 +408,14 @@ class App:
 
 
 def run_gui(tray_mode: bool = False) -> int:
+    # Identify to the window manager as "blitztext" rather than the Python entry
+    # point's filename. Launched via `python -m blitztext`, GTK's default program
+    # name is argv[0]'s basename ("__main__.py"), which is what shows in the
+    # taskbar and in GNOME's "… is not responding" dialog. Setting it here (before
+    # any window is realized) gives every window the app's real name + .desktop
+    # match, without touching the `-m blitztext` entry point.
+    GLib.set_prgname("blitztext")
+    GLib.set_application_name("Blitztext")
     cfg = load()
     App(cfg, tray_mode=tray_mode).run()
     return 0

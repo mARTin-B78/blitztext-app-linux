@@ -196,7 +196,7 @@ class Daemon:
             elif self.countdown_cb:
                 self.countdown_cb(None, silence)
 
-        self._vad_meter = audio.LevelMeter(self.cfg.mic, on_level=on_level)
+        self._vad_meter = audio.LevelMeter(self.cfg.mic, on_level=on_level, recorder=self.recorder_name)
         self._vad_meter.start()
 
     def _vad_stop(self) -> None:
@@ -213,7 +213,7 @@ class Daemon:
         if not self.level_cb:
             return
         from . import audio
-        self._ov_meter = audio.LevelMeter(self.cfg.mic, on_level=self.level_cb)
+        self._ov_meter = audio.LevelMeter(self.cfg.mic, on_level=self.level_cb, recorder=self.recorder_name)
         self._ov_meter.start()
 
     def _ov_meter_stop(self) -> None:

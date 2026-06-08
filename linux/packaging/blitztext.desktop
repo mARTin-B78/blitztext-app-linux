@@ -6,6 +6,7 @@ Comment=Linux voice dictation with local, remote, and realtime STT engines
 Exec=blitztext tray
 Icon=blitztext
 Terminal=false
+StartupWMClass=blitztext
 Categories=Utility;AudioVideo;Accessibility;
 Keywords=dictation;speech;voice;transcription;whisper;stt;riva;nim;
 StartupNotify=false

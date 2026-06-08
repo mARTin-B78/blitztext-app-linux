@@ -9,6 +9,26 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-06-08
+
+### Fixed
+- **Overlay waveform and silence countdown ring never appeared** on systems
+  where PortAudio/`sounddevice` can't open the default input — notably PipeWire
+  boxes, where opening an input stream simply hangs. Both the live waveform and
+  the auto-stop countdown are driven by a single level meter, which was the only
+  part of the app still using `sounddevice` (everything else records via
+  `pw-record`). The meter now streams raw PCM from the **same system recorder as
+  the WAV recorder** (`pw-record`/`parecord`/`arecord`) and computes the level
+  itself, so it works wherever recording works — on both the hotkey and
+  hands-free (wakeword) paths, plus the mic-level preview in Settings. No more
+  PortAudio dependency for metering.
+- **App reported itself as "`__main__.py`"** in the taskbar and in GNOME's
+  "… is not responding" dialog. Launched via `python -m blitztext`, GTK's default
+  program name is `argv[0]`'s basename. It now sets `prgname`/application name to
+  **Blitztext** before any window is realized (and the desktop file gains
+  `StartupWMClass=blitztext` for the .desktop match + icon), without touching the
+  `-m blitztext` entry point.
+
 ## [1.7.0] - 2026-06-07
 
 ### Added

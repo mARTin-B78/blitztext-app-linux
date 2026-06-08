@@ -1,43 +1,39 @@
 """Audio helpers: enumerate input devices and a live input-level meter.
 
 Mic enumeration uses pactl (PipeWire/PulseAudio source names, which pw-record
-and parecord accept via --target/-d). The level meter uses sounddevice to read
-the chosen input and report a 0..1 level to a callback.
+and parecord accept via --target/-d). The level meter shells out to the same
+system recorder the app uses (pw-record/parecord/arecord), reading raw PCM from
+its stdout and reporting a 0..1 level to a callback — no Python audio binding,
+so it works wherever the recorder does (PortAudio/sounddevice can't open the
+default input on some PipeWire systems).
 """
 
 from __future__ import annotations
 
-import contextlib
-import os
 import shutil
 import subprocess
-import sys
 import threading
 
+from .recorder import detect_recorder
 
-@contextlib.contextmanager
-def _quiet_c_stderr():
-    """Silence chatter written directly to fd 2 by C libraries.
+# Raw-PCM (s16le, 16 kHz mono) variants of the recorders, streamed to stdout so
+# we can RMS each chunk directly. Mirrors recorder.py's WAV commands but emits
+# headerless PCM. pw-record/parecord default to stdout; arecord uses "-t raw".
+_METER_ARGV: dict[str, list[str]] = {
+    "pw-record": ["pw-record", "--rate=16000", "--channels=1", "--format=s16", "-"],
+    "parecord": ["parecord", "--rate=16000", "--channels=1", "--format=s16le"],
+    "arecord": ["arecord", "-q", "-f", "S16_LE", "-r", "16000", "-c", "1", "-t", "raw"],
+}
 
-    PortAudio/ALSA print harmless thread-teardown noise
-    ("pthread_join ... failed", "PaUnixThread_Terminate ... failed") straight to
-    the underlying stderr file descriptor, which Python-level redirection can't
-    catch. We briefly point fd 2 at /dev/null around the offending call.
-    """
-    try:
-        stderr_fd = sys.stderr.fileno()
-    except (AttributeError, ValueError, OSError):
-        yield  # No real stderr fd (already captured/redirected) — nothing to do.
-        return
-    saved_fd = os.dup(stderr_fd)
-    devnull_fd = os.open(os.devnull, os.O_WRONLY)
-    try:
-        os.dup2(devnull_fd, stderr_fd)
-        yield
-    finally:
-        os.dup2(saved_fd, stderr_fd)
-        os.close(devnull_fd)
-        os.close(saved_fd)
+# How to point each recorder at a specific pactl/pipewire source (mirrors
+# recorder._DEVICE_FLAG; arecord uses ALSA names, so it stays on the default).
+_DEVICE_FLAG: dict[str, list[str]] = {
+    "pw-record": ["--target"],
+    "parecord": ["-d"],
+    "arecord": [],
+}
+
+_CHUNK_BYTES = 3200  # 100 ms of 16 kHz, 16-bit, mono → ~10 Hz level updates
 
 
 def list_mics() -> list[tuple[str, str]]:
@@ -68,58 +64,76 @@ def list_mics() -> list[tuple[str, str]]:
 
 
 class LevelMeter:
-    """Open the given input device and call `on_level(0..1)` periodically."""
+    """Stream mic audio via a system recorder and call `on_level(0..1)` ~10x/s.
 
-    def __init__(self, device: str = "", on_level=None):
-        self.device = device or None
+    Uses pw-record/parecord/arecord (the same recorders as the WAV recorder)
+    rather than a Python audio binding, so it works on PipeWire boxes where
+    PortAudio can't open the default input. Best-effort: ``start()`` returns
+    False if no recorder is available or the device can't be opened.
+    """
+
+    def __init__(self, device: str = "", on_level=None, recorder: str = "auto"):
+        self.device = device or ""
         self.on_level = on_level
-        self._stream = None
-        self._lock = threading.Lock()
+        self._recorder = recorder
+        self._proc: subprocess.Popen | None = None
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
+
+    def _argv(self, recorder: str) -> list[str]:
+        argv = list(_METER_ARGV[recorder])
+        flag = _DEVICE_FLAG.get(recorder, [])
+        if self.device and flag:
+            argv += flag + [self.device]
+        return argv
 
     def start(self) -> bool:
-        import numpy as np
-        import sounddevice as sd
-
-        def _cb(indata, _frames, _time, _status):
-            level = float(np.sqrt(np.mean(np.square(indata)))) if indata.size else 0.0
-            if self.on_level:
-                # Scale RMS (typically small) into a usable 0..1 range.
-                self.on_level(min(1.0, level * 12.0))
-
         try:
-            with _quiet_c_stderr():
-                self._stream = sd.InputStream(
-                    samplerate=16000, channels=1, dtype="float32",
-                    blocksize=1600, device=self._resolve_device(), callback=_cb,
-                )
-                self._stream.start()
-            return True
-        except Exception:  # noqa: BLE001 - device may be busy/unavailable
-            self._stream = None
+            recorder = detect_recorder(self._recorder)
+        except RuntimeError:
             return False
-
-    def _resolve_device(self):
-        # sounddevice wants an index/name it knows; pactl names rarely match, so
-        # fall back to the default input when the name isn't resolvable.
-        if not self.device:
-            return None
+        if recorder not in _METER_ARGV:
+            return False
         try:
-            import sounddevice as sd
+            self._proc = subprocess.Popen(
+                self._argv(recorder), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+            )
+        except OSError:
+            self._proc = None
+            return False
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._loop, daemon=True, name="LevelMeter")
+        self._thread.start()
+        return True
 
-            for i, d in enumerate(sd.query_devices()):
-                if d["max_input_channels"] > 0 and self.device in d["name"]:
-                    return i
-        except Exception:  # noqa: BLE001
+    def _loop(self) -> None:
+        import numpy as np
+
+        proc = self._proc
+        if proc is None or proc.stdout is None:
+            return
+        try:
+            while not self._stop.is_set() and proc.poll() is None:
+                chunk = proc.stdout.read(_CHUNK_BYTES)
+                if not chunk:
+                    break
+                samples = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0
+                level = float(np.sqrt(np.mean(np.square(samples)))) if samples.size else 0.0
+                if self.on_level:
+                    # Scale RMS (typically small) into a usable 0..1 range.
+                    self.on_level(min(1.0, level * 12.0))
+        except Exception:  # noqa: BLE001 - metering is eye-candy; never crash the app
             pass
-        return None
 
     def stop(self) -> None:
-        with self._lock:
-            if self._stream is not None:
-                try:
-                    # PortAudio/ALSA spews thread-teardown noise to fd 2 here.
-                    with _quiet_c_stderr():
-                        self._stream.stop()
-                        self._stream.close()
-                finally:
-                    self._stream = None
+        self._stop.set()
+        proc, self._proc = self._proc, None
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        thread, self._thread = self._thread, None
+        if thread is not None:
+            thread.join(timeout=1.0)
