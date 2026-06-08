@@ -44,9 +44,13 @@ echo "==> Writing default config (if absent)"
 
 echo "==> Installing launcher → $BIN"
 mkdir -p "$(dirname "$BIN")"
+# Use a Python entry-point script (not `python -m`) so the current working
+# directory is never added to sys.path and can't shadow the installed package.
 cat > "$BIN" <<EOF
-#!/bin/sh
-exec "$VENV/bin/python" -m blitztext "\$@"
+#!$VENV/bin/python
+import sys
+from blitztext.blitztext import main
+sys.exit(main())
 EOF
 chmod +x "$BIN"
 
