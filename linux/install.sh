@@ -14,15 +14,17 @@ BIN="$HOME/.local/bin/blitztext"
 
 echo "==> Checking host tools"
 need_pkg=()
+# python3-gi (PyGObject) must come from apt — it can't be pip-installed.
+python3 -c "import gi" 2>/dev/null || need_pkg+=("python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-appindicator3-0.1")
 command -v xdotool    >/dev/null || need_pkg+=("xdotool")
 command -v notify-send >/dev/null || need_pkg+=("libnotify-bin")
 if ! command -v pw-record >/dev/null && ! command -v arecord >/dev/null && ! command -v parecord >/dev/null; then
-    need_pkg+=("pipewire-bin (or alsa-utils)")
+    need_pkg+=("pipewire-bin")
 fi
 if (( ${#need_pkg[@]} )); then
-    echo "   Missing host tools: ${need_pkg[*]}"
-    echo "   On Ubuntu/Debian:  sudo apt install xdotool libnotify-bin pipewire-bin"
-    echo "   (continuing — install them before running the app)"
+    echo "   Missing system packages — installing now (requires sudo):"
+    echo "   sudo apt install ${need_pkg[*]}"
+    sudo apt-get install -y "${need_pkg[@]}"
 fi
 
 echo "==> Creating venv at $VENV"
