@@ -252,9 +252,9 @@ def _fill_combo(combo: ModelPicker, options, current: str) -> None:
 
 
 def _url_field(parent: Gtk.Box, label: str, placeholder: str, on_reload,
-               dot: Gtk.Label | None = None) -> Gtk.Entry:
+               dot: Gtk.Label | None = None, width: int = 130) -> Gtk.Entry:
     row = Gtk.Box(spacing=10); row.set_margin_top(3); row.set_margin_bottom(3)
-    lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(130, -1)
+    lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(width, -1)
     row.pack_start(lbl, False, False, 0)
     if dot is not None:
         row.pack_start(dot, False, False, 0)   # connection dot beside the field (left), like Engines
@@ -845,54 +845,61 @@ class SettingsDialog:
                        "‘modifiers’ mode: hold Ctrl and the Windows key to talk, then press "
                        "Ctrl to stop and paste. Below you can tune the noise filter, set up "
                        "hands-free wakeword, and pick sounds that confirm start and stop.")
+        LW = 175  # uniform label width for all rows in this tab
         self.in_mode = _labeled(page, "Input mode", _combo(["modifiers", "hotkeys"], self.cfg.input_mode),
-                                tooltip="‘modifiers’: hold/press the keys below. ‘hotkeys’: each preset has its own shortcut combo.")
+                                width=LW,
+                                tooltip="’modifiers’: hold/press the keys below. ‘hotkeys’: each preset has its own shortcut combo.")
         self.in_ptt = Gtk.Switch(); self.in_ptt.set_active(self.cfg.push_to_talk); self.in_ptt.set_halign(Gtk.Align.START)
-        _labeled(page, "Push-to-talk", self.in_ptt)
-        self.in_start = self._key_field(page, "Start", self.cfg.key_start)
-        self.in_stop = self._key_field(page, "Stop + paste", self.cfg.key_stop)
-        self.in_send = self._key_field(page, "Stop + paste + Enter", self.cfg.key_send)
-        self.in_cancel = self._key_field(page, "Cancel", self.cfg.key_cancel)
+        _labeled(page, "Push-to-talk", self.in_ptt, width=LW)
+        self.in_start = self._key_field(page, "Start", self.cfg.key_start, width=LW)
+        self.in_stop = self._key_field(page, "Stop + paste", self.cfg.key_stop, width=LW)
+        self.in_send = self._key_field(page, "Stop + paste + Enter", self.cfg.key_send, width=LW)
+        self.in_cancel = self._key_field(page, "Cancel", self.cfg.key_cancel, width=LW)
         page.pack_start(Gtk.Separator(), False, False, 8)
         page.pack_start(Gtk.Label(label="Quality gate", xalign=0.0), False, False, 2)
-        self.q_min = _labeled(page, "Min seconds", _entry(self.cfg.min_speech_seconds), tooltip="Minimum audio length. Shorter clips are ignored.")
-        self.q_rms = _labeled(page, "Silence RMS", _entry(self.cfg.silence_rms), tooltip="Microphone volume threshold to ignore background noise.")
+        self.q_min = _labeled(page, "Min seconds", _entry(self.cfg.min_speech_seconds), width=LW,
+                              tooltip="Minimum audio length. Shorter clips are ignored.")
+        self.q_rms = _labeled(page, "Silence RMS", _entry(self.cfg.silence_rms), width=LW,
+                              tooltip="Microphone volume threshold to ignore background noise.")
         self.q_halluc = Gtk.Switch(); self.q_halluc.set_active(self.cfg.reject_hallucinations); self.q_halluc.set_halign(Gtk.Align.START)
-        _labeled(page, "Reject hallucinations", self.q_halluc, tooltip="Automatically drop STT ghost outputs like 'Thank you.' or 'Bye.'")
+        _labeled(page, "Reject hallucinations", self.q_halluc, width=LW,
+                 tooltip="Automatically drop STT ghost outputs like ‘Thank you.’ or ‘Bye.’")
         self.q_strip = Gtk.Switch(); self.q_strip.set_active(self.cfg.strip_trailing_punctuation); self.q_strip.set_halign(Gtk.Align.START)
-        _labeled(page, "Strip trailing punctuation", self.q_strip, tooltip="Remove ending periods from pasted text, useful for code inserts.")
+        _labeled(page, "Strip trailing punctuation", self.q_strip, width=LW,
+                 tooltip="Remove ending periods from pasted text, useful for code inserts.")
         page.pack_start(Gtk.Separator(), False, False, 8)
         page.pack_start(Gtk.Label(label="Hands-free (Wakeword)", xalign=0.0), False, False, 2)
         self.ww_enabled = Gtk.Switch(); self.ww_enabled.set_active(self.cfg.wakeword_enabled); self.ww_enabled.set_halign(Gtk.Align.START)
-        _labeled(page, "Enable wakeword", self.ww_enabled)
+        _labeled(page, "Enable wakeword", self.ww_enabled, width=LW)
         self.ww_dot = Gtk.Label(); self.ww_dot.set_markup(_dot(GREY))
         self.ww_dot.set_tooltip_text("Wakeword (Wyoming / openWakeWord) server: "
                                      "green = reachable, red = unreachable")
         self.ww_uri = _url_field(page, "Wakeword engine", "tcp://127.0.0.1:10400",
-                                 self._ww_load, dot=self.ww_dot)
+                                 self._ww_load, dot=self.ww_dot, width=LW)
         self.ww_uri.set_text(self.cfg.wakeword_uri)
         self.ww_uri.connect("focus-out-event", self._on_ww_uri_leave)
         self._probe_dot(self.ww_dot, self.cfg.wakeword_uri, 10400)
-        self.ww_model = _labeled(page, "Model name", _model_combo("Search models…"))
+        self.ww_model = _labeled(page, "Model name", _model_combo("Search models…"), width=LW)
         _fill_combo(self.ww_model, [], self.cfg.wakeword_model)
-        
+
         self.ww_mic_level = Gtk.LevelBar(); self.ww_mic_level.set_min_value(0); self.ww_mic_level.set_max_value(1)
-        _labeled(page, "Input level", self.ww_mic_level)
-        
+        _labeled(page, "Input level", self.ww_mic_level, width=LW)
+
         self.ww_test_btn = Gtk.Button(label="Test Wakeword"); self.ww_test_btn.set_halign(Gtk.Align.START)
         self.ww_test_btn.connect("clicked", self._ww_test)
         self.ww_test_lbl = Gtk.Label(label=""); self.ww_test_lbl.set_xalign(0.0)
         box = Gtk.Box(spacing=10); box.pack_start(self.ww_test_btn, False, False, 0); box.pack_start(self.ww_test_lbl, False, False, 0)
-        _labeled(page, "", box)
+        _labeled(page, "", box, width=LW)
 
-        self.ww_silence = _labeled(page, "Silence to stop (s)", _entry(self.cfg.wakeword_silence_seconds),
+        self.ww_silence = _labeled(page, "Silence to stop (s)", _entry(self.cfg.wakeword_silence_seconds), width=LW,
                                    tooltip="After the wakeword starts recording, end it this many seconds "
                                            "after you stop speaking. Hands-free auto-stop — the wakeword "
-                                           "can't be released like a key. Default 2.0.")
+                                           "can’t be released like a key. Default 2.0.")
 
         self.cancel_keywords = _labeled(
             page, "Cancel words (comma)",
             _entry(", ".join(self.cfg.cancel_keywords), placeholder="abbrechen, cancel"),
+            width=LW,
             tooltip="Say one of these at the start or end of a clip to DISCARD it — "
                     "nothing is transcribed onward, routed, rewritten, or typed. "
                     "Rescues an accidentally triggered dictation. Empty = off.")
@@ -900,9 +907,10 @@ class SettingsDialog:
         self.send_keywords = _labeled(
             page, "Send words (comma)",
             _entry(", ".join(self.cfg.send_keywords), placeholder="computer send, computer abschicken"),
+            width=LW,
             tooltip="Say one of these at the start or end of a clip to SEND it: the word is "
                     "stripped and the rest is typed AND submitted with Enter (spoken "
-                    "‘stop+paste+Enter’). Because it presses Enter, use a distinctive "
+                    "’stop+paste+Enter’). Because it presses Enter, use a distinctive "
                     "multi-word phrase (e.g. your wakeword + ‘send’). Empty = off.")
 
         self.ww_snd_detected = self._sound_field(
@@ -910,35 +918,37 @@ class SettingsDialog:
             "HANDS-FREE ONLY. Plays the instant the wake word is recognised and recording starts "
             "— your ‘speak now’ cue. (Keyboard/hotkey dictation ignores this and uses ‘Play before’.)",
             empty_note="Leave empty for no sound. These wakeword cues are independent of the "
-                       "‘Play audio cues’ switch below.",
-            clear_tip="Clear — no sound")
+                       "’Play audio cues’ switch below.",
+            clear_tip="Clear — no sound", width=LW)
         self.ww_snd_done = self._sound_field(
             page, "Sound: captured", self.cfg.wakeword_sound_done,
             "HANDS-FREE ONLY. Plays when your spoken command is captured and recording stops "
             "(on silence or stop). (Keyboard/hotkey dictation ignores this and uses ‘Play after’.)",
             empty_note="Leave empty for no sound.",
-            clear_tip="Clear — no sound")
+            clear_tip="Clear — no sound", width=LW)
 
         page.pack_start(Gtk.Separator(), False, False, 8)
         page.pack_start(Gtk.Label(label="Audio cues (manual dictation)", xalign=0.0), False, False, 2)
         self.snd_enabled = Gtk.Switch(); self.snd_enabled.set_active(self.cfg.sounds_enabled); self.snd_enabled.set_halign(Gtk.Align.START)
-        _labeled(page, "Play audio cues", self.snd_enabled,
+        _labeled(page, "Play audio cues", self.snd_enabled, width=LW,
                  tooltip="On/off for the MANUAL start/stop chimes below (keyboard/hotkey dictation). "
                          "The hands-free wakeword sounds above are separate and always play when set.")
         self.snd_before = self._sound_field(
             page, "Play before", self.cfg.sound_before,
             "MANUAL (keyboard/hotkey) dictation only. Plays when recording starts. "
-            "(Hands-free sessions use ‘Sound: detected’ instead.)")
+            "(Hands-free sessions use ‘Sound: detected’ instead.)", width=LW)
         self.snd_after = self._sound_field(
             page, "Play after", self.cfg.sound_after,
             "MANUAL (keyboard/hotkey) dictation only. Plays when recording stops "
-            "(paste, paste+Enter, or auto-stop on silence). (Hands-free uses ‘Sound: captured’ instead.)")
+            "(paste, paste+Enter, or auto-stop on silence). (Hands-free uses ‘Sound: captured’ instead.)",
+            width=LW)
 
     def _sound_field(self, page: Gtk.Box, label: str, value: str, tooltip: str = "",
                      empty_note: str = "Leave empty to use the built-in system sound.",
-                     clear_tip: str = "Clear — use the built-in system sound") -> Gtk.FileChooserButton:
+                     clear_tip: str = "Clear — use the built-in system sound",
+                     width: int = 150) -> Gtk.FileChooserButton:
         row = Gtk.Box(spacing=10); row.set_margin_top(3); row.set_margin_bottom(3)
-        lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(150, -1)
+        lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(width, -1)
         if tooltip:
             lbl.set_tooltip_text(tooltip)
         row.pack_start(lbl, False, False, 0)

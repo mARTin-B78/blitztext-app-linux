@@ -50,6 +50,7 @@ def set_enabled(enabled: bool) -> None:
         f"Exec={_exec_command()}\n"
         "Icon=blitztext\n"
         "Terminal=false\n"
-        "X-GNOME-Autostart-enabled=true\n",
+        "X-GNOME-Autostart-enabled=true\n"
+        "X-GNOME-Autostart-Delay=12\n",
         encoding="utf-8",
     )
