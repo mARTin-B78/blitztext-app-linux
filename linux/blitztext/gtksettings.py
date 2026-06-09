@@ -1146,9 +1146,8 @@ notebook.bt-nb tab:checked label {
         qs.set_tooltip_text("Fill the form from a common service template")
         qs.connect("clicked", self._show_stt_templates)
         bar.pack_start(qs, False, False, 0)
-        # Right: actions
+        # Right: actions (Test moved to its own row below the config)
         for label, cb, tip in (
-            ("Test",    self._stt_test,                  "Record 4 s and transcribe to test this engine"),
             ("Delete",  self._stt_delete,                "Remove this engine preset"),
             ("⟳",       lambda _b: self._refresh_status(), "Re-check connection status"),
         ):
@@ -1185,8 +1184,19 @@ notebook.bt-nb tab:checked label {
                                     tooltip="Precision of the model. int8 is fastest and uses least memory. "
                                             "float16 is most accurate. Auto lets Blitztext decide.")
 
-        self.stt_result = Gtk.Label(xalign=0.0); self.stt_result.set_line_wrap(True)
-        box.pack_start(self.stt_result, False, False, 2)
+        test_row = Gtk.Box(spacing=10)
+        test_row.set_margin_top(6)
+        stt_test_btn = Gtk.Button(label="Test")
+        stt_test_btn.set_tooltip_text("Record 4 s and transcribe to test this engine")
+        stt_test_btn.connect("clicked", self._stt_test)
+        stt_test_btn.set_valign(Gtk.Align.START)
+        test_row.pack_start(stt_test_btn, False, False, 0)
+        self.stt_result = Gtk.Label(xalign=0.0)
+        self.stt_result.set_line_wrap(True)
+        self.stt_result.set_selectable(True)
+        self.stt_result.set_valign(Gtk.Align.START)
+        test_row.pack_start(self.stt_result, True, True, 0)
+        box.pack_start(test_row, False, False, 2)
         self._stt_load(self.stt_combo.get_active())
         return box
 
@@ -1842,16 +1852,30 @@ notebook.bt-nb tab:checked label {
         ft = Gtk.FileFilter(); ft.set_name("Text (.txt)"); ft.add_pattern("*.txt"); reff.add_filter(ft)
         self.bench_ref = _labeled(page, "Reference (.txt)", reff)
 
+        # Restore saved paths
+        if self.cfg.bench_wav and Path(self.cfg.bench_wav).exists():
+            wavf.set_filename(self.cfg.bench_wav)
+        if self.cfg.bench_ref and Path(self.cfg.bench_ref).exists():
+            reff.set_filename(self.cfg.bench_ref)
+
         def _on_wav_set(_b):
             fn = wavf.get_filename()
             if not fn: return
+            self.cfg.bench_wav = fn
             p = Path(fn)
             for ext in (".reference.txt", ".txt"):
                 cand = p.with_name(p.stem + ext)
                 if cand.exists():
                     reff.set_filename(str(cand))
+                    self.cfg.bench_ref = str(cand)
                     break
         wavf.connect("file-set", _on_wav_set)
+
+        def _on_ref_set(_b):
+            fn = reff.get_filename()
+            if fn:
+                self.cfg.bench_ref = fn
+        reff.connect("file-set", _on_ref_set)
 
         run_row = Gtk.Box(spacing=16)
         run_row.set_margin_bottom(2)
@@ -1862,6 +1886,9 @@ notebook.bt-nb tab:checked label {
         self.bench_expand.set_tooltip_text(
             "Fetch every available model from each remote engine and run a separate "
             "benchmark row per model — useful to compare models on the same server.")
+        self.bench_expand.set_active(self.cfg.bench_expand_models)
+        self.bench_expand.connect("toggled",
+            lambda cb: setattr(self.cfg, "bench_expand_models", cb.get_active()))
         run_row.pack_start(self.bench_expand, False, False, 0)
         page.pack_start(run_row, False, False, 6)
 
@@ -1945,6 +1972,11 @@ notebook.bt-nb tab:checked label {
     def _run_bench(self, _b) -> None:
         wav = self.bench_wav.get_filename()
         refp = self.bench_ref.get_filename()
+        # Persist immediately so paths survive without clicking Save
+        if wav:
+            self.cfg.bench_wav = wav
+        if refp:
+            self.cfg.bench_ref = refp
         if not wav or not refp:
             self._error("Pick a .wav file and a matching reference .txt file.")
             return

@@ -120,6 +120,10 @@ class Config:
     # Wakeword engines to compare in the benchmark (each a wyoming-openwakeword
     # endpoint). Empty → the benchmark falls back to the live [wakeword] above.
     wakeword_engines: list[WakewordEngine] = field(default_factory=list)
+    # STT benchmark: last-used WAV / reference transcript paths and options
+    bench_wav: str = ""
+    bench_ref: str = ""
+    bench_expand_models: bool = False
     # workflows
     workflows: list[Workflow] = field(default_factory=list)
 
@@ -236,6 +240,9 @@ def load(path: Path = CONFIG_PATH) -> Config:
         tts_api_key_env=tts.get("api_key_env", ""),
         tts_model=tts.get("model", ""),
         tts_voices=list(tts.get("voices", ["alloy", "echo", "fable", "onyx", "nova", "shimmer"])),
+        bench_wav=data.get("benchmark", {}).get("wav", ""),
+        bench_ref=data.get("benchmark", {}).get("ref", ""),
+        bench_expand_models=bool(data.get("benchmark", {}).get("expand_models", False)),
     )
 
     for entry in data.get("workflow", []):
@@ -370,6 +377,11 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "api_key_env": cfg.tts_api_key_env,
             "model": cfg.tts_model,
             "voices": cfg.tts_voices,
+        },
+        "benchmark": {
+            "wav": cfg.bench_wav,
+            "ref": cfg.bench_ref,
+            "expand_models": cfg.bench_expand_models,
         },
         "wakeword_engine": [
             {"name": e.name, "uri": e.uri, "model": e.model} for e in cfg.wakeword_engines
