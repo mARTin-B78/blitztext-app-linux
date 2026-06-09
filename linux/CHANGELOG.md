@@ -9,6 +9,14 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.08] - 2026-06-09
+
+### Fixed
+- **Engines tab layout.** The "Internal engine — device & precision" section is
+  now hidden when a remote (Server) or streaming engine type is selected —
+  removing the confusing whitespace gap and irrelevant device controls for
+  non-local engines.
+
 ## [2.03.01] - 2026-06-09
 
 ### Added

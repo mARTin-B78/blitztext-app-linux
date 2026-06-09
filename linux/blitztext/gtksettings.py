@@ -1201,12 +1201,12 @@ notebook.bt-nb tab:checked label {
         self.stt_key.connect("changed", lambda _e: self._schedule_models("stt"))
         self.stt_type.connect("changed", self._stt_type_changed)
 
-        # ── Device & precision card ───────────────────────────────────────────
-        dev_card = _card_section(box, "Internal engine — device & precision")
-        self.stt_device  = _labeled(dev_card, "Device", _type_combo(_DEVICE_OPTIONS, self.cfg.device),
+        # ── Device & precision card (local engines only) ─────────────────────
+        self.stt_dev_card = _card_section(box, "Internal engine — device & precision", margin_top=4)
+        self.stt_device  = _labeled(self.stt_dev_card, "Device", _type_combo(_DEVICE_OPTIONS, self.cfg.device),
                                     tooltip="Which processor runs the speech model. "
                                             "Auto tries your GPU first. GPU (CUDA) requires NVIDIA — much faster than CPU.")
-        self.stt_compute = _labeled(dev_card, "Compute type", _type_combo(_COMPUTE_OPTIONS, self.cfg.compute_type),
+        self.stt_compute = _labeled(self.stt_dev_card, "Compute type", _type_combo(_COMPUTE_OPTIONS, self.cfg.compute_type),
                                     tooltip="Precision of the model. int8 is fastest and uses least memory. "
                                             "float16 is most accurate. Auto lets Blitztext decide.")
 
@@ -1298,6 +1298,8 @@ notebook.bt-nb tab:checked label {
         else:
             _fill_combo(self.stt_model, [], e.model)
         self._stt_idx = idx
+        if hasattr(self, "stt_dev_card"):
+            self.stt_dev_card.set_visible(e.type == "local")
         self._stt_update_bench_info(e.name)
 
     def _stt_update_bench_info(self, engine_name: str) -> None:
@@ -1501,6 +1503,8 @@ notebook.bt-nb tab:checked label {
             self._schedule_models("stt")
         else:
             _fill_combo(self.stt_model, [], _combo_text(self.stt_model))
+        if hasattr(self, "stt_dev_card"):
+            self.stt_dev_card.set_visible(typ == "local")
 
     # -- model dropdowns (fetched from {url}/models) ---
     def _populate_models(self, combo, url: str, key_env: str) -> None:
