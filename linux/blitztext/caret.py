@@ -4,14 +4,12 @@ The overlay wants to sit at "the cursor where the text will land". On X11 there
 is no portable way to read the text caret of an arbitrary app, so we degrade
 through a chain of decreasing precision:
 
-  1. AT-SPI caret  — the real text insertion point, when the focused app exposes
-     it over accessibility (native GTK/Qt apps do; many terminals / Electron /
-     web views do not). We track only the *focused* object via a11y events (cheap,
-     low-frequency) and read its caret rectangle lazily, once, when the overlay
-     shows — never from inside an event dispatch, since synchronous AT-SPI reads
-     on the hot path can wedge the accessibility bus and freeze the session.
-  2. Mouse pointer — `xdotool getmouselocation`. Always available on X11; a good
-     proxy since the pointer is usually near where you're typing.
+  1. Mouse pointer — `xdotool getmouselocation`. Default; always available on X11;
+     a reliable proxy since the pointer is usually near where you're typing.
+  2. AT-SPI caret  — the real text insertion point (opt-in via overlay_anchor=caret).
+     Only native GTK/Qt apps expose it; many terminals / Electron / web views do
+     not. The blocking D-Bus read runs in a thread with a 300ms hard timeout so it
+     can never stall the GTK main loop and freeze the session.
   3. Window / screen — top-centre of the target window, else screen bottom-centre.
 
 Everything here is defensive: any failure falls through to the next tier, and
@@ -24,6 +22,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 
@@ -155,17 +154,27 @@ class _CaretTracker:
             return None
 
     def rect(self) -> tuple[int, int, int, int] | None:
-        # Called once when the overlay shows (not on the a11y hot path), so the
-        # single blocking extents read here is safe: at worst it briefly delays
-        # the overlay, it cannot storm or re-enter the bus.
+        # Called once when the overlay shows (not on the a11y hot path).
+        # We run the blocking D-Bus extents read in a worker thread and join it
+        # with a hard 300ms deadline — so even a frozen or slow target app can
+        # never stall the GTK main loop long enough to freeze the session.
         if not self._ok or self._focused is None:
             return None
         if time.time() - self._stamp > self.STALE_SECONDS:
             return None
-        try:
-            return self._caret_rect(self._focused)
-        except Exception:  # noqa: BLE001 - focused app may be gone/unresponsive
-            return None
+        result: list[tuple[int, int, int, int] | None] = [None]
+        focused = self._focused
+
+        def _read() -> None:
+            try:
+                result[0] = self._caret_rect(focused)
+            except Exception:  # noqa: BLE001
+                pass
+
+        t = threading.Thread(target=_read, daemon=True)
+        t.start()
+        t.join(timeout=0.3)
+        return result[0]
 
 
 # --------------------------------------------------------------------------- #

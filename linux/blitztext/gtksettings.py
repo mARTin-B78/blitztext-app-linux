@@ -536,6 +536,145 @@ def _app_paths() -> dict[str, list[Path]]:
     }
 
 
+def _md_panel(text: str, height: int = 420) -> Gtk.ScrolledWindow:
+    """Render a Markdown string into a read-only styled Gtk.TextView.
+
+    Handles: # h1/h2/h3, **bold**, *italic*, `inline code`,
+    > blockquotes, --- rules, bullet/numbered lists, and | tables |.
+    """
+    import re
+
+    sw = Gtk.ScrolledWindow()
+    sw.set_min_content_height(height)
+    sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+    view = Gtk.TextView()
+    view.set_editable(False)
+    view.set_cursor_visible(False)
+    view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+    view.set_left_margin(14)
+    view.set_right_margin(14)
+    view.set_top_margin(10)
+    view.set_bottom_margin(10)
+
+    buf = view.get_buffer()
+
+    t_h1    = buf.create_tag("h1",    weight=Pango.Weight.BOLD, size_points=17.0,
+                             pixels_above_lines=14, pixels_below_lines=4)
+    t_h2    = buf.create_tag("h2",    weight=Pango.Weight.BOLD, size_points=13.0,
+                             pixels_above_lines=10, pixels_below_lines=3)
+    t_h3    = buf.create_tag("h3",    weight=Pango.Weight.BOLD, size_points=11.0,
+                             pixels_above_lines=8,  pixels_below_lines=2)
+    t_bold  = buf.create_tag("bold",  weight=Pango.Weight.BOLD)
+    t_ital  = buf.create_tag("ital",  style=Pango.Style.ITALIC)
+    t_code  = buf.create_tag("code",  family="Monospace", size_points=10.0,
+                             background="#f0f0f4", foreground="#c7254e")
+    t_quote = buf.create_tag("quote", left_margin=20, foreground="#666",
+                             style=Pango.Style.ITALIC,
+                             pixels_above_lines=2, pixels_below_lines=2)
+    t_hr    = buf.create_tag("hr",    foreground="#aaa",
+                             pixels_above_lines=6, pixels_below_lines=6)
+    t_tbl   = buf.create_tag("tbl",   family="Monospace", size_points=10.0,
+                             pixels_above_lines=1, pixels_below_lines=1)
+    t_thdr  = buf.create_tag("thdr",  family="Monospace", size_points=10.0,
+                             weight=Pango.Weight.BOLD,
+                             pixels_above_lines=2, pixels_below_lines=1)
+
+    _inline_re = re.compile(r'(\*\*.*?\*\*|\*.*?\*|`.*?`)')
+
+    def _insert_inline(line: str, end_iter, *extra_tags) -> None:
+        for part in _inline_re.split(line):
+            if part.startswith("**") and part.endswith("**") and len(part) > 4:
+                buf.insert_with_tags(end_iter, part[2:-2], t_bold, *extra_tags)
+            elif part.startswith("*") and part.endswith("*") and len(part) > 2:
+                buf.insert_with_tags(end_iter, part[1:-1], t_ital, *extra_tags)
+            elif part.startswith("`") and part.endswith("`") and len(part) > 2:
+                buf.insert_with_tags(end_iter, part[1:-1], t_code, *extra_tags)
+            elif extra_tags:
+                buf.insert_with_tags(end_iter, part, *extra_tags)
+            else:
+                buf.insert(end_iter, part)
+
+    # Collect lines, detect table blocks so we can measure column widths
+    lines = text.splitlines()
+    # Pre-scan: mark which lines are table rows vs separators
+    _tbl_sep = re.compile(r'^\|[-| :]+\|$')
+
+    def _is_table_row(s: str) -> bool:
+        return s.strip().startswith("|") and s.strip().endswith("|")
+
+    first_line = True
+    i = 0
+    while i < len(lines):
+        raw = lines[i].rstrip()
+        end = buf.get_end_iter()
+
+        if not first_line:
+            buf.insert(end, "\n")
+            end = buf.get_end_iter()
+        first_line = False
+
+        # --- Table block: gather all consecutive table rows ---
+        if _is_table_row(raw):
+            tbl_rows: list[list[str]] = []
+            while i < len(lines) and (_is_table_row(lines[i].rstrip()) or _tbl_sep.match(lines[i].rstrip())):
+                row_line = lines[i].rstrip()
+                if not _tbl_sep.match(row_line):
+                    cells = [c.strip() for c in row_line.strip("|").split("|")]
+                    tbl_rows.append(cells)
+                i += 1
+
+            if tbl_rows:
+                # Column widths: max of each column (plain text length, stripped of markup)
+                n_cols = max(len(r) for r in tbl_rows)
+                widths = [0] * n_cols
+                for row in tbl_rows:
+                    for ci, cell in enumerate(row):
+                        plain = re.sub(r'\*\*|`|\*', '', cell)
+                        widths[ci] = max(widths[ci], len(plain))
+
+                for ri, row in enumerate(tbl_rows):
+                    end = buf.get_end_iter()
+                    tag = t_thdr if ri == 0 else t_tbl
+                    line_text = ""
+                    for ci in range(n_cols):
+                        cell = row[ci] if ci < len(row) else ""
+                        plain = re.sub(r'\*\*|`|\*', '', cell)
+                        line_text += plain.ljust(widths[ci] + 2)
+                    buf.insert_with_tags(end, line_text.rstrip(), tag)
+                    if ri < len(tbl_rows) - 1:
+                        end = buf.get_end_iter()
+                        buf.insert(end, "\n")
+            continue  # i already advanced
+
+        # --- Normal lines ---
+        if raw.startswith("### "):
+            buf.insert_with_tags(end, raw[4:], t_h3)
+        elif raw.startswith("## "):
+            buf.insert_with_tags(end, raw[3:], t_h2)
+        elif raw.startswith("# "):
+            buf.insert_with_tags(end, raw[2:], t_h1)
+        elif raw.startswith("> "):
+            _insert_inline(raw[2:], end, t_quote)
+        elif re.match(r'^-{3,}$', raw):
+            buf.insert_with_tags(end, "─" * 64, t_hr)
+        elif raw.startswith("- ") or raw.startswith("* "):
+            buf.insert(end, "  • ")
+            end = buf.get_end_iter()
+            _insert_inline(raw[2:], end)
+        elif re.match(r'^\d+\. ', raw):
+            m = re.match(r'^(\d+\. )(.*)', raw)
+            buf.insert(end, "  " + m.group(1))
+            end = buf.get_end_iter()
+            _insert_inline(m.group(2), end)
+        else:
+            _insert_inline(raw, end)
+
+        i += 1
+
+    sw.add(view)
+    return sw
+
+
 def _text_panel(text: str, *, monospace: bool = True, height: int = 180) -> Gtk.ScrolledWindow:
     sw = Gtk.ScrolledWindow()
     sw.set_min_content_height(height)
@@ -589,10 +728,36 @@ class SettingsDialog:
 }
 .bt-infobox {
     border-radius: 6px;
-    border: 1px solid mix(@theme_fg_color, @theme_bg_color, 0.75);
-    background-color: mix(@theme_fg_color, @theme_bg_color, 0.05);
+    border: 1px solid rgba(66, 133, 244, 0.50);
+    background-color: rgba(66, 133, 244, 0.09);
     padding: 4px;
     margin-bottom: 10px;
+}
+.bt-infobox label {
+    color: @theme_fg_color;
+}
+notebook.bt-nb tab {
+    padding: 7px 16px;
+    border-radius: 4px 4px 0 0;
+}
+notebook.bt-nb tab label {
+    font-size: 12px;
+}
+notebook.bt-nb tab:checked label {
+    font-weight: bold;
+    color: #1a73e8;
+}
+.bt-emoji-btn {
+    font-size: 20px;
+    min-width: 38px;
+    min-height: 38px;
+    padding: 2px;
+}
+.bt-emoji-cat-btn {
+    font-size: 18px;
+    min-width: 34px;
+    min-height: 34px;
+    padding: 2px;
 }
 """)
         Gtk.StyleContext.add_provider_for_screen(
@@ -601,6 +766,7 @@ class SettingsDialog:
         )
 
         nb = Gtk.Notebook()
+        nb.get_style_context().add_class("bt-nb")
         self.dlg.get_content_area().pack_start(nb, True, True, 0)
         # Build each tab lazily on first view so the dialog opens instantly. The
         # heavy bits are the Gtk.FileChooserButton pickers in Input/Benchmark
@@ -867,6 +1033,7 @@ class SettingsDialog:
             for emoji in emojis:
                 eb = Gtk.Button(label=emoji)
                 eb.set_relief(Gtk.ReliefStyle.NONE)
+                eb.get_style_context().add_class("bt-emoji-btn")
                 eb.connect("clicked", lambda _b, e=emoji: (entry.set_text(e), pop.popdown()))
                 flow.add(eb)
             sw = Gtk.ScrolledWindow()
@@ -876,6 +1043,7 @@ class SettingsDialog:
 
             cb = Gtk.Button(label=cat_emoji)
             cb.set_relief(Gtk.ReliefStyle.NONE)
+            cb.get_style_context().add_class("bt-emoji-cat-btn")
             cb.set_tooltip_text(cat_name)
             cb.connect("clicked", lambda _b, n=cat_name, b=cb: _select(n, b))
             cat_bar.pack_start(cb, True, True, 0)
@@ -918,6 +1086,7 @@ class SettingsDialog:
                     if query in _keywords(emoji) or query in emoji:
                         btn = Gtk.Button(label=emoji)
                         btn.set_relief(Gtk.ReliefStyle.NONE)
+                        btn.get_style_context().add_class("bt-emoji-btn")
                         btn.connect("clicked", lambda _b, e=emoji: (entry.set_text(e), pop.popdown()))
                         search_flow.add(btn)
                 search_flow.show_all()
@@ -1906,7 +2075,7 @@ class SettingsDialog:
                            fallback="Manual not available in this install.\n\n"
                                     "See the online documentation at "
                                     "github.com/mARTin-B78/blitztext-app-linux")
-        page.pack_start(_text_panel(text, monospace=False, height=420), True, True, 0)
+        page.pack_start(_md_panel(text, height=420), True, True, 0)
 
     # ===== About ============================================================
     def _build_about(self, page: Gtk.Box) -> None:
