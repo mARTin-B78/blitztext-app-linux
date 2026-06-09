@@ -456,6 +456,7 @@ class Daemon:
             )
 
             text = quality.clean(text, strip_trailing_punctuation=self.cfg.strip_trailing_punctuation)
+            text = quality.expand_spoken_punctuation(text)
             if not text or (self.cfg.reject_hallucinations and quality.is_hallucination(text, duration)):
                 self._emit("idle", label, "No speech detected")
                 log("Nothing heard — no speech detected.")
@@ -515,8 +516,26 @@ class Daemon:
                 on_token = None
                 if self.text_cb:
                     acc: list[str] = []
+                    # Pulse "thinking" dots until the first token arrives.
+                    _thinking_frames = ["⏳ Thinking.", "⏳ Thinking..", "⏳ Thinking...", "⏳ Thinking"]
+                    _thinking_state: list[int] = [0]   # [frame_idx]  0 = still thinking
+                    _first_token: list[bool] = [False]
 
-                    def on_token(delta: str, _acc=acc) -> None:
+                    def _pulse_thinking(_s=_thinking_state, _f=_first_token) -> bool:
+                        if _f[0]:
+                            return False  # first token arrived, stop pulsing
+                        self.text_cb(_thinking_frames[_s[0] % len(_thinking_frames)])
+                        _s[0] += 1
+                        return True  # keep timer running
+
+                    try:
+                        from gi.repository import GLib as _GLib
+                        _GLib.timeout_add(400, _pulse_thinking)
+                    except Exception:  # noqa: BLE001 - headless mode, no GLib
+                        pass
+
+                    def on_token(delta: str, _acc=acc, _f=_first_token) -> None:
+                        _f[0] = True
                         _acc.append(delta)
                         self.text_cb("".join(_acc))
 

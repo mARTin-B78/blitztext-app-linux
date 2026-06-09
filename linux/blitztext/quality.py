@@ -71,3 +71,23 @@ def clean(text: str, *, strip_trailing_punctuation: bool = False) -> str:
     if strip_trailing_punctuation:
         text = text.rstrip(" .,!?;:")
     return text
+
+
+# Spoken phrases that should become newlines/paragraphs in the typed output.
+# Matched case-insensitively, whole-phrase (surrounded by word boundaries or
+# start/end of string). German and English variants are both covered.
+_NEWLINE_PHRASES: list[tuple[re.Pattern[str], str]] = [
+    # Paragraph break (blank line) — must come before single-newline patterns
+    (re.compile(r"(?i)\b(new paragraph|neuer absatz|neues absatz|absatz)\b"), "\n\n"),
+    # Single line break
+    (re.compile(r"(?i)\b(new line|neue zeile|zeilenumbruch|line break)\b"), "\n"),
+]
+
+
+def expand_spoken_punctuation(text: str) -> str:
+    """Replace spoken newline/paragraph commands with actual control characters."""
+    for pattern, replacement in _NEWLINE_PHRASES:
+        text = pattern.sub(replacement, text)
+    # Collapse leading/trailing whitespace per line but preserve intentional newlines
+    lines = [ln.strip() for ln in text.split("\n")]
+    return "\n".join(lines).strip()
