@@ -2387,6 +2387,33 @@ notebook.bt-nb tab:checked label {
         connect_box.pack_start(self.wwb_test_lbl, False, False, 0)
         _labeled(page, "", connect_box)
 
+        # ---- Wakeword engine checkboxes ----
+        _section_title(page, "Engines to test", margin_top=10,
+                       icon="audio-input-microphone-symbolic")
+        self._wwb_checks: dict[str, Gtk.CheckButton] = {}
+        eng_row = Gtk.Box(spacing=16)
+        eng_row.set_margin_bottom(4)
+        for e in self.cfg.wakeword_engines:
+            cb = Gtk.CheckButton(label=e.name)
+            cb.set_active(True)
+            self._wwb_checks[e.name] = cb
+            eng_row.pack_start(cb, False, False, 0)
+        if not self.cfg.wakeword_engines:
+            eng_row.pack_start(Gtk.Label(label="(no wakeword engines configured — add one in the Input tab)"),
+                               False, False, 0)
+        page.pack_start(eng_row, False, False, 0)
+
+        # ---- Wakeword model selector ----
+        all_ww_models = list(dict.fromkeys(
+            e.model for e in self.cfg.wakeword_engines if e.model))
+        self.wwb_wakeword = _model_combo("auto — each engine's own model")
+        self.wwb_wakeword.set_models(all_ww_models)
+        _labeled(page, "Wakeword", self.wwb_wakeword,
+                 tooltip="Which wakeword model to test. Leave empty to use each engine's own "
+                         "configured model. Select a specific model to override all engines "
+                         "and test that phrase (e.g. okay_computer on all servers).")
+
+        # ---- Samples + run ----
         adj = Gtk.Adjustment(value=12, lower=1, upper=200, step_increment=1, page_increment=10)
         self.wwb_count = Gtk.SpinButton(adjustment=adj, climb_rate=1, digits=0)
         self.wwb_count.set_halign(Gtk.Align.START); self.wwb_count.set_size_request(90, -1)
@@ -2589,6 +2616,23 @@ notebook.bt-nb tab:checked label {
         if not voices:
             self._error("Add at least one voice (or press Connect to fetch them).")
             return
+
+        # Filter engines by checkboxes
+        checks = getattr(self, "_wwb_checks", {})
+        engines = [e for e in self.cfg.wakeword_engines
+                   if not checks or checks.get(e.name, Gtk.CheckButton(active=True)).get_active()]
+        if not engines:
+            self._error("Select at least one wakeword engine to benchmark.")
+            return
+
+        # Override wakeword model if the user picked a specific one
+        ww_override = self.wwb_wakeword.get_text().strip() if hasattr(self, "wwb_wakeword") else ""
+        if ww_override:
+            import copy as _copy
+            engines = [_copy.copy(e) for e in engines]
+            for e in engines:
+                e.model = ww_override
+
         self.wwb_summary.set_markup("<i>Synthesizing and streaming… this talks to your TTS "
                                     "and wyoming-openwakeword servers.</i>")
 
@@ -2597,7 +2641,7 @@ notebook.bt-nb tab:checked label {
                 GLib.idle_add(self._wwbench_progress, ei, n_eng, eng_name, ui, total, u)
             try:
                 runs = wakeword_bench.run(
-                    self.cfg.wakeword_engines,
+                    engines,
                     tts_url=url, tts_api_key_env=key, tts_model=model, voices=voices,
                     language=self.cfg.language, count=count, progress=prog)
             except Exception as exc:  # noqa: BLE001 - surface setup errors

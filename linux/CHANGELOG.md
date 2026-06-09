@@ -9,6 +9,17 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.19] - 2026-06-10
+
+### Added
+- **Wakeword engine checkboxes in benchmark.** A row of checkboxes above the
+  "Run wakeword benchmark" button lets you pick which engines to include.
+  All are checked by default.
+- **Wakeword model selector in benchmark.** A "Wakeword" combo lets you
+  override which wakeword phrase (model) to test. Leave empty for the default
+  (each engine uses its own configured model). Pick a specific model (e.g.
+  `okay_computer`) to test that phrase on every selected engine.
+
 ## [2.03.18] - 2026-06-10
 
 ### Fixed
