@@ -44,6 +44,9 @@ rm -rf "$VENV/lib/python"*/site-packages/pip "$VENV/lib/python"*/site-packages/p
        "$VENV"/bin/pip* "$VENV/lib/python"*/site-packages/setuptools* 2>/dev/null || true
 
 cp "$LINUX_DIR/README.md" "$LINUX_DIR/CHANGELOG.md" "$APPDIR/"
+# MANUAL.md lives at repo root (one level above linux/)
+REPO_MANUAL="$(dirname "$LINUX_DIR")/MANUAL.md"
+[ -f "$REPO_MANUAL" ] && cp "$REPO_MANUAL" "$APPDIR/MANUAL.md"
 
 # 2) Launcher, desktop entry, icon, docs ------------------------------------
 install -Dm755 /dev/stdin "$ROOT/usr/bin/$PKG" <<'EOF'

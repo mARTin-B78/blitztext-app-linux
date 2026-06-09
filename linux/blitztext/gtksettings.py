@@ -68,10 +68,21 @@ _LLM_TEMPLATES: list[tuple[str, str, str, str, str]] = [
     ("llama-swap",   "http://localhost:28080/v1",           "",                   "local", ""),
 ]
 _STT_TEMPLATES: list[tuple[str, str, str, str, str]] = [
-    ("OpenAI Whisper",        "https://api.openai.com/v1",      "OPENAI_API_KEY", "openai",        "whisper-1"),
-    ("Groq Whisper",          "https://api.groq.com/openai/v1", "GROQ_API_KEY",   "openai",        "whisper-large-v3-turbo"),
-    ("faster-whisper-server", "http://localhost:8010/v1",        "",               "openai",        ""),
-    ("Realtime (Riva / NIM)", "http://localhost:8006/v1",        "",               "riva_realtime", ""),
+    # ── Cloud / API services ──────────────────────────────────────────────────
+    ("OpenAI Whisper",          "https://api.openai.com/v1",      "OPENAI_API_KEY", "openai",        "whisper-1"),
+    ("Groq Whisper (free tier)","https://api.groq.com/openai/v1", "GROQ_API_KEY",   "openai",        "whisper-large-v3-turbo"),
+    # ── Local servers ─────────────────────────────────────────────────────────
+    ("faster-whisper-server",   "http://localhost:8010/v1",        "",               "openai",        ""),
+    ("Speaches (docker)",       "http://localhost:8080/v1",        "",               "openai",        ""),
+    ("whisper.cpp server",      "http://localhost:8081/v1",        "",               "openai",        ""),
+    ("NVIDIA NIM / Parakeet",   "http://localhost:8007/v1",        "",               "openai",        ""),
+    ("Realtime (Riva / NIM)",   "http://localhost:8006/v1",        "",               "riva_realtime", ""),
+    # ── Built-in local models (no server needed) ──────────────────────────────
+    ("Local tiny  — fastest, ~39 MB",   "", "", "local", "tiny"),
+    ("Local base  — fast,    ~74 MB",   "", "", "local", "base"),
+    ("Local small — balanced, ~244 MB", "", "", "local", "small"),
+    ("Local medium — accurate, ~769 MB","", "", "local", "medium"),
+    ("Local large-v3 — best,  ~1.5 GB", "", "", "local", "large-v3"),
 ]
 
 # (cat_emoji, label, [emojis]) — standard Unicode categories, WhatsApp-style
@@ -1877,7 +1888,71 @@ notebook.bt-nb tab:checked label {
                 self.cfg.bench_ref = fn
         reff.connect("file-set", _on_ref_set)
 
+        # ── Engine / model selector ───────────────────────────────────────────
+        _section_title(page, "Engines to benchmark", margin_top=10)
+
+        sel_hdr = Gtk.Box(spacing=6); sel_hdr.set_margin_bottom(4)
+        self._bench_filter = Gtk.SearchEntry()
+        self._bench_filter.set_placeholder_text("Filter by name, model or URL…")
+        sel_hdr.pack_start(self._bench_filter, True, True, 0)
+        all_b = Gtk.Button(label="All")
+        all_b.connect("clicked", lambda _: [cb.set_active(True)
+                                             for cb in self._bench_checks.values()])
+        none_b = Gtk.Button(label="None")
+        none_b.connect("clicked", lambda _: [cb.set_active(False)
+                                              for cb in self._bench_checks.values()])
+        sel_hdr.pack_start(all_b, False, False, 0)
+        sel_hdr.pack_start(none_b, False, False, 0)
+        page.pack_start(sel_hdr, False, False, 0)
+
+        sel_sw = Gtk.ScrolledWindow()
+        sel_sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        sel_sw.set_min_content_height(80)
+        sel_sw.set_max_content_height(180)
+        sel_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        sel_list.set_margin_start(4); sel_list.set_margin_end(4)
+        sel_list.set_margin_top(2); sel_list.set_margin_bottom(2)
+        sel_sw.add(sel_list)
+        page.pack_start(sel_sw, False, False, 0)
+
+        self._bench_checks: dict[str, Gtk.CheckButton] = {}
+        self._bench_dots: dict[str, Gtk.Label] = {}
+        self._bench_sel_rows: list[tuple[Gtk.Box, str, str]] = []  # (row, name, search_text)
+
+        for e in self.cfg.stt_engines:
+            row = Gtk.Box(spacing=6)
+            dot = Gtk.Label(); dot.set_markup(_dot(GREY))
+            self._bench_dots[e.name] = dot
+            row.pack_start(dot, False, False, 0)
+            label = e.name
+            if e.model:
+                label += f"  [{e.model}]"
+            cb = Gtk.CheckButton(label=label)
+            cb.set_active(True)
+            self._bench_checks[e.name] = cb
+            row.pack_start(cb, True, True, 0)
+            sel_list.pack_start(row, False, False, 2)
+            search_text = f"{e.name} {e.model} {e.url}".lower()
+            self._bench_sel_rows.append((row, e.name, search_text))
+
+        def _filter_bench(_e=None):
+            q = self._bench_filter.get_text().lower()
+            for row, _name, stext in self._bench_sel_rows:
+                row.set_visible(not q or q in stext)
+        self._bench_filter.connect("changed", _filter_bench)
+
+        # Background reachability check for all engines
+        def _check_bench_status():
+            for e in self.cfg.stt_engines:
+                ok = stt.status(e, timeout=2.0)
+                color = GREEN if ok else RED
+                dot = self._bench_dots.get(e.name)
+                if dot:
+                    GLib.idle_add(dot.set_markup, _dot(color))
+        threading.Thread(target=_check_bench_status, daemon=True).start()
+
         run_row = Gtk.Box(spacing=16)
+        run_row.set_margin_top(8)
         run_row.set_margin_bottom(2)
         run = Gtk.Button(label="Run benchmark"); run.connect("clicked", self._run_bench)
         run.set_halign(Gtk.Align.START)
@@ -1986,22 +2061,22 @@ notebook.bt-nb tab:checked label {
         self.bench_store.clear()
         self._stt_commit()
 
-        # Deduplicate by name — show warning if any were skipped
+        # Filter to checked engines (deduplicate by name as safety net)
+        checks = getattr(self, "_bench_checks", {})
         seen: set[str] = set()
         engines: list = []
-        skipped: list[str] = []
         for e in self.cfg.stt_engines:
             if e.name in seen:
-                skipped.append(e.name)
-            else:
-                seen.add(e.name)
+                continue
+            seen.add(e.name)
+            if not checks or checks.get(e.name, None) is None or checks[e.name].get_active():
                 engines.append(e)
-        if skipped:
-            names = ", ".join(skipped)
+
+        if not engines:
             self.bench_summary.set_markup(
-                f"<i>Running… </i><span foreground='#e67e00'>⚠ Skipped duplicate engines: {GLib.markup_escape_text(names)}</span>")
-        else:
-            self.bench_summary.set_markup("<i>Running… (local models load on first use)</i>")
+                f'<span foreground="{RED}">No engines selected — tick at least one above.</span>')
+            return
+        self.bench_summary.set_markup("<i>Running… (local models load on first use)</i>")
 
         expand = self.bench_expand.get_active()
 
@@ -2178,11 +2253,19 @@ notebook.bt-nb tab:checked label {
 
     # ===== Manual ===========================================================
     def _build_manual(self, page: Gtk.Box) -> None:
-        text = _read_first(_app_paths()["manual"],
-                           fallback="Manual not available in this install.\n\n"
-                                    "See the online documentation at "
-                                    "github.com/mARTin-B78/blitztext-app-linux")
-        page.pack_start(_md_panel(text, height=420), True, True, 0)
+        text = _read_first(_app_paths()["manual"])
+        if text == "Not available in this install.":
+            # Show a clickable link instead of raw text
+            lbl = Gtk.Label(xalign=0.0)
+            lbl.set_line_wrap(True)
+            lbl.set_markup("Manual not bundled in this install.\n\n"
+                           "Read it online: "
+                           "<a href='https://github.com/mARTin-B78/blitztext-app-linux'>"
+                           "github.com/mARTin-B78/blitztext-app-linux</a>")
+            lbl.set_margin_top(20); lbl.set_margin_start(20)
+            page.pack_start(lbl, False, False, 0)
+        else:
+            page.pack_start(_md_panel(text, height=420), True, True, 0)
 
     # ===== About ============================================================
     def _build_about(self, page: Gtk.Box) -> None:
@@ -2219,7 +2302,7 @@ notebook.bt-nb tab:checked label {
         page.pack_start(nb, True, True, 0)
 
         changelog_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        changelog_box.pack_start(_text_panel(changelog, height=300), True, True, 0)
+        changelog_box.pack_start(_md_panel(changelog, height=300), True, True, 0)
         nb.append_page(changelog_box, Gtk.Label(label="Changelog"))
 
         license_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
