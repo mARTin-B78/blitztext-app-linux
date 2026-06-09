@@ -2073,7 +2073,8 @@ notebook.bt-nb tab:checked label {
             return
         reference = Path(refp).read_text(errors="replace")
         self.bench_store.clear()
-        self._stt_commit()
+        if hasattr(self, "stt_name"):   # only if Engines tab has been built
+            self._stt_commit()
 
         # Filter to checked engines (deduplicate by name as safety net)
         checks = getattr(self, "_bench_checks", {})
