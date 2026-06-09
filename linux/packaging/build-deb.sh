@@ -105,4 +105,8 @@ mkdir -p "$OUT_DIR"
 DEB="$OUT_DIR/${PKG}_${VER}_${ARCH}.deb"
 fakeroot dpkg-deb --build --root-owner-group "$ROOT" "$DEB" >/dev/null
 chmod 644 "$DEB"
+# Also copy to ~ so `sudo apt install ~/blitztext_*.deb` works without a separate cp
+DEST="$HOME/$(basename "$DEB")"
+install -m644 "$DEB" "$DEST"
 echo "==> Built: $DEB ($(du -h "$DEB" | cut -f1))"
+echo "==> Copied: $DEST"
