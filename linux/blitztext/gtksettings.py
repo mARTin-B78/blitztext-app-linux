@@ -75,6 +75,7 @@ _STT_TEMPLATES: list[tuple[str, str, str, str, str]] = [
     ("faster-whisper-server",   "http://localhost:8010/v1",        "",               "openai",        ""),
     ("Speaches (docker)",       "http://localhost:8080/v1",        "",               "openai",        ""),
     ("whisper.cpp server",      "http://localhost:8081/v1",        "",               "openai",        ""),
+    ("WhisperX server",         "http://localhost:8081/transcribe","",               "openai",        "whisper-large-v3"),
     ("NVIDIA NIM / Parakeet",   "http://localhost:8007/v1",        "",               "openai",        ""),
     ("Realtime (Riva / NIM)",   "http://localhost:8006/v1",        "",               "riva_realtime", ""),
     # ── Built-in local models (no server needed) ──────────────────────────────
@@ -496,7 +497,8 @@ def _url_field(parent: Gtk.Box, label: str, placeholder: str, on_reload,
 
 
 def _url_field_lb(lb: Gtk.ListBox, label: str, placeholder: str, on_reload,
-                  dot: Gtk.Label | None = None, width: int = 130) -> Gtk.Entry:
+                  dot: Gtk.Label | None = None, width: int = 130,
+                  tooltip: str = "") -> Gtk.Entry:
     """_url_field variant that adds the row as a ListBox card row."""
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
     _url_field(box, label, placeholder, on_reload, dot=dot, width=width)
@@ -508,6 +510,8 @@ def _url_field_lb(lb: Gtk.ListBox, label: str, placeholder: str, on_reload,
     # return the Entry widget (second child of row_box after label [and optional dot])
     for child in row_box.get_children():
         if isinstance(child, Gtk.Entry):
+            if tooltip:
+                child.set_tooltip_text(tooltip)
             return child
     return row_box.get_children()[-2]  # fallback: second-to-last (before refresh btn)
 
@@ -1178,7 +1182,11 @@ notebook.bt-nb tab:checked label {
                                          "Realtime: live streaming via NVIDIA Riva or NIM.")
         self.stt_url  = _url_field_lb(cfg_card, "URL",
                                       "http://localhost:8010/v1  ·  realtime: http://localhost:8006/v1",
-                                      lambda: self._populate_models(self.stt_model, self.stt_url.get_text().strip(), self.stt_key.get_text().strip()))
+                                      lambda: self._populate_models(self.stt_model, self.stt_url.get_text().strip(), self.stt_key.get_text().strip()),
+                                      tooltip="Base URL of the server including /v1 for OpenAI-compatible servers "
+                                              "(e.g. http://host:8010/v1). For WhisperX or other non-standard servers, "
+                                              "enter the full transcription endpoint directly "
+                                              "(e.g. http://host:8081/transcribe).")
         self.stt_model = _labeled(cfg_card, "Model", _model_combo("tiny/base/small… or server model"),
                                   tooltip="Which Whisper model to load. For Internal: tiny (fastest) → large-v3 (most accurate). "
                                           "For a server, press ⟳ to fetch available models from its URL.")
