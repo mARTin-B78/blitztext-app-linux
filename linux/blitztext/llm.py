@@ -93,6 +93,13 @@ def chat(
         raise LLMError(f"Connection failed: {exc.reason}") from exc
     except (KeyError, IndexError, TypeError) as exc:
         raise LLMError(f"Unexpected response: {exc}") from exc
+    except (TimeoutError, OSError) as exc:
+        # socket.timeout (subclass of OSError / TimeoutError) fires when the server
+        # stops sending data mid-stream. Not wrapped in URLError — must be caught
+        # separately or it would propagate uncaught and kill the background thread.
+        raise LLMError(f"Request timed out or connection lost: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise LLMError(f"Unexpected error: {exc}") from exc
 
     content = (content or "").strip()
     if not content:

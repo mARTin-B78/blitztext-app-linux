@@ -510,6 +510,9 @@ class Daemon:
                     return
                 self._emit("busy", label, "Rewriting…")
                 self._dnotify(f"⌛ {label}", "Rewriting…")
+                # Show the transcribed text immediately so the user sees what was heard.
+                if self.text_cb:
+                    self.text_cb(f"📝 {text}")
                 # Stream the rewrite into the overlay so you watch the model write
                 # (the bubble updates token-by-token). The delivered text is still
                 # the complete result, typed once the rewrite finishes.
@@ -559,6 +562,27 @@ class Daemon:
                     self._emit("error", label, str(exc))
                     self._dnotify("Rewrite failed", str(exc), "critical")
                     log(f"ERROR ({label} rewrite): {exc}")
+                    if self.text_cb:
+                        self.text_cb(f"✗ {exc}")
+                    return
+                except Exception as exc:  # noqa: BLE001 - guard against any uncaught error
+                    msg = f"LLM error: {exc}"
+                    self._emit("error", label, msg)
+                    log(f"ERROR ({label} rewrite unexpected): {exc}")
+                    if self.text_cb:
+                        self.text_cb(f"✗ {msg}")
+                    return
+
+                # Sanity-check: reject responses that are >80 % whitespace —
+                # a model that's cold-starting or misconfigured sometimes streams
+                # spaces or blank lines instead of real output.
+                non_ws = sum(1 for c in text if not c.isspace())
+                if non_ws < max(1, len(text) * 0.20):
+                    msg = "LLM returned mostly whitespace — discarded"
+                    self._emit("error", label, msg)
+                    log(f"ERROR ({label}): {msg} (len={len(text)})")
+                    if self.text_cb:
+                        self.text_cb(f"✗ {msg}")
                     return
 
             if not text:
