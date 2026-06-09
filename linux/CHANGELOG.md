@@ -9,6 +9,29 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [1.9.3] - 2026-06-09
+
+### Added
+- **ⓘ info buttons on every settings field.** Each field in every tab now has a
+  small information icon that opens a plain-language help popover when clicked —
+  so non-technical users can understand what each setting does without hovering
+  or reading the manual.
+- **Manual tab in Settings.** A new "Manual" tab shows the full `MANUAL.md`
+  reference doc directly inside the Settings window.
+- **Quickstart templates for engines.** A "Quickstart ▾" button in the STT and
+  LLM engine toolbars opens a menu of common services (OpenAI, Groq, OpenRouter,
+  Ollama, LM Studio, vLLM, llama-swap, faster-whisper-server, NVIDIA Riva) and
+  pre-fills the form — one click to configure a provider.
+
+### Changed
+- **Engine type names are now human-readable.** STT types now read "Internal —
+  faster-whisper, runs inside the app", "Server — OpenAI-compatible API (LAN or
+  cloud)", and "Realtime — NVIDIA Riva / NIM streaming" instead of the raw
+  identifiers. LLM types read "LAN server — runs on your machine or local
+  network" and "Cloud service — OpenAI, Groq, OpenRouter, …".
+- **Device selector now shows "GPU (CUDA)" instead of "cuda"**, and compute
+  types have plain-language descriptions (e.g. "int8 — fast, less memory").
+
 ## [1.9.2] - 2026-06-09
 
 ### Added

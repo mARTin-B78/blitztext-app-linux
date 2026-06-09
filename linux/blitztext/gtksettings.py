@@ -34,6 +34,45 @@ RESP_SAVE = 1
 RESP_SAVE_RESTART = 2
 GREEN, RED, GREY = "#34c759", "#ff3b30", "#b8b8be"
 
+# (stored_value, display_label) pairs used by _type_combo / _type_key
+_STT_TYPES: list[tuple[str, str]] = [
+    ("local",         "Internal  —  faster-whisper, runs inside the app"),
+    ("openai",        "Server  —  OpenAI-compatible API (LAN or cloud)"),
+    ("riva_realtime", "Realtime  —  NVIDIA Riva / NIM streaming"),
+]
+_LLM_TYPES: list[tuple[str, str]] = [
+    ("local", "LAN server  —  runs on your machine or local network"),
+    ("cloud", "Cloud service  —  OpenAI, Groq, OpenRouter, …"),
+]
+_DEVICE_OPTIONS: list[tuple[str, str]] = [
+    ("auto", "Auto  (try GPU / CUDA first, fall back to CPU)"),
+    ("cpu",  "CPU"),
+    ("cuda", "GPU  (CUDA)"),
+]
+_COMPUTE_OPTIONS: list[tuple[str, str]] = [
+    ("auto",         "Auto"),
+    ("int8",         "int8  —  fast, less memory"),
+    ("float16",      "float16  —  accurate, needs more VRAM"),
+    ("int8_float16", "int8_float16  —  balanced"),
+]
+
+# (name, url, api_key_env, type_key, default_model) — quickstart templates
+_LLM_TEMPLATES: list[tuple[str, str, str, str, str]] = [
+    ("OpenAI",       "https://api.openai.com/v1",          "OPENAI_API_KEY",     "cloud", "gpt-4o-mini"),
+    ("Groq",         "https://api.groq.com/openai/v1",     "GROQ_API_KEY",       "cloud", "llama3-8b-8192"),
+    ("OpenRouter",   "https://openrouter.ai/api/v1",       "OPENROUTER_API_KEY", "cloud", "openai/gpt-4o-mini"),
+    ("Ollama",       "http://localhost:11434/v1",           "",                   "local", ""),
+    ("LM Studio",    "http://localhost:1234/v1",            "",                   "local", ""),
+    ("vLLM",         "http://localhost:8000/v1",            "",                   "local", ""),
+    ("llama-swap",   "http://localhost:28080/v1",           "",                   "local", ""),
+]
+_STT_TEMPLATES: list[tuple[str, str, str, str, str]] = [
+    ("OpenAI Whisper",        "https://api.openai.com/v1",      "OPENAI_API_KEY", "openai",        "whisper-1"),
+    ("Groq Whisper",          "https://api.groq.com/openai/v1", "GROQ_API_KEY",   "openai",        "whisper-large-v3-turbo"),
+    ("faster-whisper-server", "http://localhost:8010/v1",        "",               "openai",        ""),
+    ("Realtime (Riva / NIM)", "http://localhost:8006/v1",        "",               "riva_realtime", ""),
+]
+
 # (cat_emoji, label, [emojis]) — standard Unicode categories, WhatsApp-style
 _EMOJI_CATEGORIES: list[tuple[str, str, list[str]]] = [
     ("😀", "Smileys", [
@@ -172,6 +211,8 @@ def _labeled(parent: Gtk.Box, label: str, widget: Gtk.Widget, width: int = 130, 
             
     row.pack_start(lbl, False, False, 0)
     row.pack_start(widget, True, True, 0)
+    if tooltip:
+        row.pack_start(_info_btn(tooltip), False, False, 0)
     parent.pack_start(row, False, False, 0)
     return widget
 
@@ -196,6 +237,8 @@ def _switch_row(parent: Gtk.Box, label: str, switch: Gtk.Switch, description: st
     switch.set_halign(Gtk.Align.END)
     switch.set_valign(Gtk.Align.CENTER)
     row.pack_end(switch, False, False, 0)
+    if description:
+        row.pack_end(_info_btn(description), False, False, 0)
 
     # ATK accessibility + tooltips
     if hasattr(lbl, "set_mnemonic_widget"):
@@ -248,6 +291,42 @@ def _combo(options, active=None) -> Gtk.ComboBoxText:
     elif options:
         c.set_active(0)
     return c
+
+
+def _info_btn(text: str) -> Gtk.Button:
+    """Small ⓘ button that shows a help popover when clicked."""
+    btn = Gtk.Button()
+    icon = Gtk.Image.new_from_icon_name("dialog-information-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
+    btn.add(icon)
+    btn.set_relief(Gtk.ReliefStyle.NONE)
+    btn.set_tooltip_text(text)
+    def _show(_b):
+        pop = Gtk.Popover(relative_to=btn)
+        lbl = Gtk.Label(label=text, xalign=0.0)
+        lbl.set_line_wrap(True)
+        lbl.set_max_width_chars(46)
+        lbl.set_margin_top(10); lbl.set_margin_bottom(10)
+        lbl.set_margin_start(12); lbl.set_margin_end(12)
+        pop.add(lbl)
+        pop.show_all()
+    btn.connect("clicked", _show)
+    return btn
+
+
+def _type_combo(types: list[tuple[str, str]], stored: str = "") -> Gtk.ComboBoxText:
+    """Combo that shows human-readable labels but maps to/from internal key values via index."""
+    c = Gtk.ComboBoxText()
+    for _, label in types:
+        c.append_text(label)
+    idx = next((i for i, (k, _) in enumerate(types) if k == stored), 0)
+    c.set_active(idx)
+    return c
+
+
+def _type_key(combo: Gtk.ComboBoxText, types: list[tuple[str, str]], fallback: str = "") -> str:
+    """Read the stored key for a combo built with _type_combo."""
+    i = combo.get_active()
+    return types[i][0] if 0 <= i < len(types) else fallback
 
 
 class ModelPicker(Gtk.Box):
@@ -387,6 +466,7 @@ def _app_paths() -> dict[str, list[Path]]:
     return {
         "changelog": [linux_dir / "CHANGELOG.md", Path("/opt/blitztext/CHANGELOG.md")],
         "license": [repo_dir / "LICENSE", Path("/usr/share/doc/blitztext/copyright")],
+        "manual": [repo_dir / "MANUAL.md", Path("/opt/blitztext/MANUAL.md")],
     }
 
 
@@ -436,6 +516,7 @@ class SettingsDialog:
                                ("General", self._build_general),
                                ("Benchmark", self._build_benchmark),
                                ("Log", self._build_log),
+                               ("Manual", self._build_manual),
                                ("About", self._build_about)):
             self._pending_tabs[_page(nb, title)] = builder
         self._build_tab(nb.get_nth_page(0))   # the visible tab, eagerly
@@ -666,7 +747,7 @@ class SettingsDialog:
 
     def _stt_section(self) -> Gtk.Box:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        box.pack_start(Gtk.Label(label="Speech-to-text engine", xalign=0.0), False, False, 2)
+        box.pack_start(Gtk.Label(label="STT Speech-to-text engine", xalign=0.0), False, False, 2)
         self._stt_idx = 0
         bar = Gtk.Box(spacing=8)
         self.stt_combo = Gtk.ComboBoxText()
@@ -681,23 +762,42 @@ class SettingsDialog:
                           ("Delete", self._stt_delete), ("Test", self._stt_test),
                           ("Refresh", lambda _b: self._refresh_status())):
             b = Gtk.Button(label=label); b.connect("clicked", cb); bar.pack_start(b, False, False, 0)
+        qs = Gtk.Button(label="Quickstart ▾")
+        qs.set_tooltip_text("Fill the form from a common service template")
+        qs.connect("clicked", self._show_stt_templates)
+        bar.pack_start(qs, False, False, 0)
         box.pack_start(bar, False, False, 2)
 
         form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL); box.pack_start(form, False, False, 2)
-        self.stt_name = _labeled(form, "Name", _entry(placeholder="e.g. faster-whisper GPU"))
-        self.stt_type = _labeled(form, "Type", _combo(["local", "openai", "riva_realtime"]))
+        self.stt_name = _labeled(form, "Name", _entry(placeholder="e.g. faster-whisper GPU"),
+                                 tooltip="A label for this engine, shown in the dropdown.")
+        self.stt_type = _labeled(form, "Type", _type_combo(_STT_TYPES, "local"),
+                                 tooltip="Internal: faster-whisper runs inside Blitztext, no server needed. "
+                                         "Server: any OpenAI-compatible /v1 endpoint on your LAN or a cloud API. "
+                                         "Realtime: live streaming via NVIDIA Riva or NIM.")
         self.stt_url = _url_field(form, "URL", "http://localhost:8010/v1  ·  realtime: http://localhost:8006/v1",
                                   lambda: self._populate_models(self.stt_model, self.stt_url.get_text().strip(), self.stt_key.get_text().strip()))
-        self.stt_model = _labeled(form, "Model", _model_combo("blank = server default  ·  tiny/base/small… for local"))
-        self.stt_key = _labeled(form, "API key env", _entry(placeholder="env var name, e.g. GROQ_API_KEY   (optional)"))
+        self.stt_model = _labeled(form, "Model", _model_combo("blank = server default  ·  tiny/base/small… for local"),
+                                  tooltip="Which Whisper model to load. For Internal: tiny (fastest) → large-v3 (most accurate). "
+                                          "For a server, press ⟳ to fetch available models from its URL.")
+        self.stt_key = _labeled(form, "API key env", _entry(placeholder="env var name, e.g. GROQ_API_KEY   (optional)"),
+                                tooltip="Name of the environment variable that holds your API key "
+                                        "(e.g. GROQ_API_KEY). Leave blank for local servers that don't need one.")
         self.stt_url.connect("changed", lambda _e: self._schedule_models("stt"))
         self.stt_key.connect("changed", lambda _e: self._schedule_models("stt"))
         self.stt_type.connect("changed", self._stt_type_changed)
 
         sep = Gtk.Separator(); sep.set_margin_top(4); form.pack_start(sep, False, False, 4)
         form.pack_start(Gtk.Label(label="Local engine (faster-whisper) — device & precision", xalign=0.0), False, False, 0)
-        self.stt_device = _labeled(form, "Device", _combo(["auto", "cpu", "cuda"], self.cfg.device))
-        self.stt_compute = _labeled(form, "Compute type", _combo(["auto", "int8", "float16", "int8_float16"], self.cfg.compute_type))
+        self.stt_device = _labeled(form, "Device", _type_combo(_DEVICE_OPTIONS, self.cfg.device),
+                                   tooltip="Which processor runs the speech model. "
+                                           "Auto tries your GPU first and falls back to CPU. "
+                                           "GPU (CUDA) requires an NVIDIA GPU and CUDA toolkit — much faster than CPU.")
+        self.stt_compute = _labeled(form, "Compute type", _type_combo(_COMPUTE_OPTIONS, self.cfg.compute_type),
+                                    tooltip="Numerical precision of the model. "
+                                            "int8 is fastest and uses least memory. "
+                                            "float16 is most accurate but needs more GPU memory. "
+                                            "Auto lets Blitztext choose based on your hardware.")
 
         self.stt_result = Gtk.Label(xalign=0.0); self.stt_result.set_line_wrap(True)
         box.pack_start(self.stt_result, False, False, 2)
@@ -706,7 +806,7 @@ class SettingsDialog:
 
     def _llm_section(self) -> Gtk.Box:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        box.pack_start(Gtk.Label(label="Language model (rewrite)", xalign=0.0), False, False, 2)
+        box.pack_start(Gtk.Label(label="LLM - Language model (rewrite)", xalign=0.0), False, False, 2)
         self._llm_idx = 0
         bar = Gtk.Box(spacing=8)
         self.llm_combo = Gtk.ComboBoxText()
@@ -720,16 +820,30 @@ class SettingsDialog:
         for label, cb in (("+ Add", self._llm_add), ("Delete", self._llm_delete),
                           ("Refresh", lambda _b: self._refresh_status())):
             b = Gtk.Button(label=label); b.connect("clicked", cb); bar.pack_start(b, False, False, 0)
+        qs = Gtk.Button(label="Quickstart ▾")
+        qs.set_tooltip_text("Fill the form from a common service template")
+        qs.connect("clicked", self._show_llm_templates)
+        bar.pack_start(qs, False, False, 0)
         box.pack_start(bar, False, False, 2)
 
         form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL); box.pack_start(form, False, False, 2)
-        self.llm_name = _labeled(form, "Name", _entry(placeholder="e.g. Local Qwen"))
-        self.llm_type = _labeled(form, "Type", _combo(["local", "cloud"]))
+        self.llm_name = _labeled(form, "Name", _entry(placeholder="e.g. Local Qwen"),
+                                 tooltip="A label for this language model engine, shown in the dropdown.")
+        self.llm_type = _labeled(form, "Type", _type_combo(_LLM_TYPES, "cloud"),
+                                 tooltip="LAN server: a model running on your own machine or network "
+                                         "(Ollama, vLLM, LM Studio, llama-swap, …). "
+                                         "Cloud service: a remote paid API like OpenAI or Groq.")
         self.llm_url = _url_field(form, "Base URL", "http://localhost:28080/v1  ·  https://api.openai.com/v1",
                                   lambda: self._populate_models(self.llm_model, self.llm_url.get_text().strip(), self.llm_key.get_text().strip()))
-        self.llm_model = _labeled(form, "Model", _model_combo("pick after entering URL"))
-        self.llm_key = _labeled(form, "API key env", _entry(placeholder="env var name, e.g. OPENAI_API_KEY   (blank for local)"))
-        self.llm_temp = _labeled(form, "Temperature", _entry(placeholder="0.3"))
+        self.llm_model = _labeled(form, "Model", _model_combo("pick after entering URL"),
+                                  tooltip="Which language model to use for rewriting. Press ⟳ on the URL field "
+                                          "to fetch available models from the server.")
+        self.llm_key = _labeled(form, "API key env", _entry(placeholder="env var name, e.g. OPENAI_API_KEY   (blank for local)"),
+                                tooltip="Name of the environment variable holding your API key "
+                                        "(e.g. OPENAI_API_KEY). Leave blank for local servers.")
+        self.llm_temp = _labeled(form, "Temperature", _entry(placeholder="0.3"),
+                                 tooltip="How creative the rewrite is, from 0.0 (very predictable) to 1.0 (more varied). "
+                                         "0.3 is a good default — lower for formal text, higher for creative writing.")
         self.llm_url.connect("changed", lambda _e: self._schedule_models("llm"))
         self.llm_key.connect("changed", lambda _e: self._schedule_models("llm"))
         self._llm_load(self.llm_combo.get_active())
@@ -741,7 +855,7 @@ class SettingsDialog:
             return
         e = self.cfg.stt_engines[idx]
         self.stt_name.set_text(e.name)
-        self.stt_type.set_active(["local", "openai", "riva_realtime"].index(e.type) if e.type in ("local", "openai", "riva_realtime") else 0)
+        self.stt_type.set_active(next((i for i, (k, _) in enumerate(_STT_TYPES) if k == e.type), 0))
         self.stt_url.set_text(e.url); self.stt_key.set_text(e.api_key_env)
         if e.type == "local":
             _fill_combo(self.stt_model, ["tiny", "base", "small", "medium", "large-v3"], e.model or self.cfg.model)
@@ -759,7 +873,7 @@ class SettingsDialog:
         e = self.cfg.stt_engines[idx]
         new_name = self.stt_name.get_text().strip() or e.name
         e.name = new_name
-        e.type = self.stt_type.get_active_text() or "local"
+        e.type = _type_key(self.stt_type, _STT_TYPES, "local")
         e.url = self.stt_url.get_text().strip().rstrip("/")
         e.model = _combo_text(self.stt_model)
         e.api_key_env = self.stt_key.get_text().strip()
@@ -842,7 +956,7 @@ class SettingsDialog:
             return
         e = self.cfg.llm_engines[idx]
         self.llm_name.set_text(e.name)
-        self.llm_type.set_active(["local", "cloud"].index(e.type) if e.type in ("local", "cloud") else 1)
+        self.llm_type.set_active(next((i for i, (k, _) in enumerate(_LLM_TYPES) if k == e.type), 0))
         self.llm_url.set_text(e.url)
         self.llm_key.set_text(e.api_key_env); self.llm_temp.set_text(str(e.temperature))
         _fill_combo(self.llm_model, [], e.model)
@@ -856,7 +970,7 @@ class SettingsDialog:
         e = self.cfg.llm_engines[idx]
         new_name = self.llm_name.get_text().strip() or e.name
         e.name = new_name
-        e.type = self.llm_type.get_active_text() or "cloud"
+        e.type = _type_key(self.llm_type, _LLM_TYPES, "cloud")
         e.url = self.llm_url.get_text().strip().rstrip("/")
         e.model = _combo_text(self.llm_model)
         e.api_key_env = self.llm_key.get_text().strip()
@@ -885,8 +999,48 @@ class SettingsDialog:
         self.llm_combo.remove(self._llm_idx); self._llm_idx = -1
         self.llm_combo.set_active(0); self._llm_load(0)
 
+    def _show_stt_templates(self, btn: Gtk.Button) -> None:
+        menu = Gtk.Menu()
+        for tpl in _STT_TEMPLATES:
+            item = Gtk.MenuItem(label=tpl[0])
+            item.connect("activate", lambda _i, t=tpl: self._stt_apply_template(t))
+            menu.append(item)
+        menu.show_all()
+        menu.popup_at_widget(btn, Gdk.Gravity.SOUTH_WEST, Gdk.Gravity.NORTH_WEST, None)
+
+    def _stt_apply_template(self, tpl: tuple) -> None:
+        name, url, key, type_key, model = tpl
+        self.stt_name.set_text(name)
+        self.stt_url.set_text(url)
+        self.stt_key.set_text(key)
+        self.stt_type.set_active(next((i for i, (k, _) in enumerate(_STT_TYPES) if k == type_key), 0))
+        if model:
+            _fill_combo(self.stt_model, [model], model)
+        elif url:
+            self._populate_models(self.stt_model, url, key)
+
+    def _show_llm_templates(self, btn: Gtk.Button) -> None:
+        menu = Gtk.Menu()
+        for tpl in _LLM_TEMPLATES:
+            item = Gtk.MenuItem(label=tpl[0])
+            item.connect("activate", lambda _i, t=tpl: self._llm_apply_template(t))
+            menu.append(item)
+        menu.show_all()
+        menu.popup_at_widget(btn, Gdk.Gravity.SOUTH_WEST, Gdk.Gravity.NORTH_WEST, None)
+
+    def _llm_apply_template(self, tpl: tuple) -> None:
+        name, url, key, type_key, model = tpl
+        self.llm_name.set_text(name)
+        self.llm_url.set_text(url)
+        self.llm_key.set_text(key)
+        self.llm_type.set_active(next((i for i, (k, _) in enumerate(_LLM_TYPES) if k == type_key), 0))
+        if model:
+            _fill_combo(self.llm_model, [model], model)
+        elif url:
+            self._populate_models(self.llm_model, url, key)
+
     def _stt_type_changed(self, _c) -> None:
-        typ = self.stt_type.get_active_text()
+        typ = _type_key(self.stt_type, _STT_TYPES, "local")
         if typ == "local":
             _fill_combo(self.stt_model, ["tiny", "base", "small", "medium", "large-v3"], _combo_text(self.stt_model))
         elif typ == "openai":
@@ -914,7 +1068,7 @@ class SettingsDialog:
 
         def fire():
             setattr(self, attr, 0)
-            if which == "stt" and self.stt_type.get_active_text() == "openai":
+            if which == "stt" and _type_key(self.stt_type, _STT_TYPES) == "openai":
                 self._populate_models(self.stt_model, self.stt_url.get_text().strip(),
                                       self.stt_key.get_text().strip())
             elif which == "llm":
@@ -1038,7 +1192,7 @@ class SettingsDialog:
         _labeled(page, "Strip trailing punctuation", self.q_strip, width=LW,
                  tooltip="Remove ending periods from pasted text, useful for code inserts.")
         page.pack_start(Gtk.Separator(), False, False, 8)
-        page.pack_start(Gtk.Label(label="Hands-free (Wakeword)", xalign=0.0), False, False, 2)
+        page.pack_start(Gtk.Label(label="WW - Wakeword (Hands-free)", xalign=0.0), False, False, 2)
         self.ww_enabled = Gtk.Switch(); self.ww_enabled.set_active(self.cfg.wakeword_enabled); self.ww_enabled.set_halign(Gtk.Align.START)
         _labeled(page, "Enable wakeword", self.ww_enabled, width=LW)
         self.ww_dot = Gtk.Label(); self.ww_dot.set_markup(_dot(GREY))
@@ -1049,7 +1203,7 @@ class SettingsDialog:
         self.ww_uri.set_text(self.cfg.wakeword_uri)
         self.ww_uri.connect("focus-out-event", self._on_ww_uri_leave)
         self._probe_dot(self.ww_dot, self.cfg.wakeword_uri, 10400)
-        self.ww_model = _labeled(page, "Model name", _model_combo("Search models…"), width=LW)
+        self.ww_model = _labeled(page, "Wakeword Model name", _model_combo("Search models…"), width=LW)
         _fill_combo(self.ww_model, [], self.cfg.wakeword_model)
 
         self.ww_mic_level = Gtk.LevelBar(); self.ww_mic_level.set_min_value(0); self.ww_mic_level.set_max_value(1)
@@ -1084,14 +1238,14 @@ class SettingsDialog:
                     "multi-word phrase (e.g. your wakeword + ‘send’). Empty = off.")
 
         self.ww_snd_detected = self._sound_field(
-            page, "Sound: detected", self.cfg.wakeword_sound_detected,
+            page, "Wakeword detected", self.cfg.wakeword_sound_detected,
             "HANDS-FREE ONLY. Plays the instant the wake word is recognised and recording starts "
             "— your ‘speak now’ cue. (Keyboard/hotkey dictation ignores this and uses ‘Play before’.)",
             empty_note="Leave empty for no sound. These wakeword cues are independent of the "
                        "’Play audio cues’ switch below.",
             clear_tip="Clear — no sound", width=LW)
         self.ww_snd_done = self._sound_field(
-            page, "Sound: captured", self.cfg.wakeword_sound_done,
+            page, "Speech captured", self.cfg.wakeword_sound_done,
             "HANDS-FREE ONLY. Plays when your spoken command is captured and recording stops "
             "(on silence or stop). (Keyboard/hotkey dictation ignores this and uses ‘Play after’.)",
             empty_note="Leave empty for no sound.",
@@ -1104,11 +1258,11 @@ class SettingsDialog:
                  tooltip="On/off for the MANUAL start/stop chimes below (keyboard/hotkey dictation). "
                          "The hands-free wakeword sounds above are separate and always play when set.")
         self.snd_before = self._sound_field(
-            page, "Play before", self.cfg.sound_before,
+            page, "Hotkey detected", self.cfg.sound_before,
             "MANUAL (keyboard/hotkey) dictation only. Plays when recording starts. "
             "(Hands-free sessions use ‘Sound: detected’ instead.)", width=LW)
         self.snd_after = self._sound_field(
-            page, "Play after", self.cfg.sound_after,
+            page, "Capture done", self.cfg.sound_after,
             "MANUAL (keyboard/hotkey) dictation only. Plays when recording stops "
             "(paste, paste+Enter, or auto-stop on silence). (Hands-free uses ‘Sound: captured’ instead.)",
             width=LW)
@@ -1174,7 +1328,7 @@ class SettingsDialog:
         _switch_row(page, "Notifications", self.gen_notify,
                     "Desktop pop-ups for recording, transcription, and errors (manual dictation).")
         self.gen_notify_routing = Gtk.Switch(); self.gen_notify_routing.set_active(self.cfg.notify_routing)
-        _switch_row(page, "Announce matched preset", self.gen_notify_routing,
+        _switch_row(page, "Announce preset", self.gen_notify_routing,
                     "After a voice command, show which preset and keyword matched — even hands-free.")
         self.gen_overlay = Gtk.Switch(); self.gen_overlay.set_active(self.cfg.overlay_enabled)
         _switch_row(page, "Visual overlay", self.gen_overlay,
@@ -1534,6 +1688,14 @@ class SettingsDialog:
             f"{res.seconds:.0f}s\n<small>per voice: {voice_bits}</small>")
         return False
 
+    # ===== Manual ===========================================================
+    def _build_manual(self, page: Gtk.Box) -> None:
+        text = _read_first(_app_paths()["manual"],
+                           fallback="Manual not available in this install.\n\n"
+                                    "See the online documentation at "
+                                    "github.com/mARTin-B78/blitztext-app-linux")
+        page.pack_start(_text_panel(text, monospace=False, height=420), True, True, 0)
+
     # ===== About ============================================================
     def _build_about(self, page: Gtk.Box) -> None:
         _infobox(page, "About Blitztext: version, source code, recent changes, and licence.")
@@ -1664,8 +1826,8 @@ class SettingsDialog:
             c.notify = self.gen_notify.get_active()
             c.notify_routing = self.gen_notify_routing.get_active()
             c.overlay_enabled = self.gen_overlay.get_active()
-            c.device = self.stt_device.get_active_text() or "auto"
-            c.compute_type = self.stt_compute.get_active_text() or "auto"
+            c.device = _type_key(self.stt_device, _DEVICE_OPTIONS, "auto")
+            c.compute_type = _type_key(self.stt_compute, _COMPUTE_OPTIONS, "auto")
             autostart.set_enabled(self.gen_boot.get_active())
             
             if c.wakeword_enabled:
