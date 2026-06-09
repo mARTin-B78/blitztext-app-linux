@@ -158,7 +158,7 @@ class Daemon:
         self._emit("idle", None, "Ready")
 
     def _install_freeze_diagnostic(self) -> None:
-        """Register SIGQUIT (Ctrl+\ or kill -QUIT) to dump all thread stacks.
+        """Register SIGQUIT (Ctrl+\\ or kill -QUIT) to dump all thread stacks.
 
         When the system appears frozen, run:
             kill -QUIT $(pgrep -f blitztext)
