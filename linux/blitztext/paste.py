@@ -41,6 +41,13 @@ def _focus(window_id: str | None) -> None:
         time.sleep(0.05)
 
 
+# Above this character count, or when the text contains newlines, xdotool type
+# sends thousands of synchronous X11 round-trips and can flood the X11 server's
+# per-client event buffer until the whole session freezes.  Auto-upgrade to a
+# single clipboard paste instead, which is instantaneous.
+_TYPE_THRESHOLD = 300
+
+
 def deliver(text: str, *, mode: str = "type", window_id: str | None = None, type_delay_ms: int = 4) -> None:
     if not text:
         return
@@ -54,6 +61,15 @@ def deliver(text: str, *, mode: str = "type", window_id: str | None = None, type
     _focus(window_id)
     # Give the user time to release the hotkey modifiers before we synthesize input.
     time.sleep(0.12)
+
+    # Long or multi-line text: force clipboard paste regardless of configured mode.
+    # xdotool type at 12ms/char for a 15 000-char code block takes ~3 minutes and
+    # sends so many synchronous X11 events that the server's per-client buffer
+    # overflows, freezing the entire X11 session.
+    if mode == "type" and (len(text) > _TYPE_THRESHOLD or "\n" in text):
+        if _set_clipboard(text):
+            mode = "paste"
+        # If clipboard isn't available we fall through to xdotool type as before.
 
     if mode == "paste" and _set_clipboard(text):
         if wayland:

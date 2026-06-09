@@ -555,33 +555,43 @@ class Daemon:
                 # the complete result, typed once the rewrite finishes.
                 on_token = None
                 if self.text_cb:
-                    acc: list[str] = []
-                    # Pulse "thinking" dots until the first token arrives.
+                    # Use a deque to stream the last ~400 chars to the overlay so
+                    # Pango never has to lay out a 15 000-char code block on each
+                    # token, and "".join() stays O(window) not O(total).
+                    from collections import deque
+                    _window: deque[str] = deque()
+                    _window_len: list[int] = [0]
+                    _OVERLAY_CHARS = 400
+
                     _thinking_frames = ["⏳ Thinking.", "⏳ Thinking..", "⏳ Thinking...", "⏳ Thinking"]
-                    _thinking_state: list[int] = [0]   # [frame_idx]  0 = still thinking
+                    _thinking_state: list[int] = [0]
                     _first_token: list[bool] = [False]
 
                     def _pulse_thinking(_s=_thinking_state, _f=_first_token) -> bool:
                         if _f[0]:
-                            return False  # first token arrived, stop pulsing
+                            return False
                         self.text_cb(_thinking_frames[_s[0] % len(_thinking_frames)])
                         _s[0] += 1
-                        return True  # keep timer running
+                        return True
 
                     try:
                         from gi.repository import GLib as _GLib
-                        # MUST be scheduled via idle_add so timeout_add is called
-                        # from the GTK main thread, not from _process's background
-                        # thread. GLib.timeout_add from non-main threads is not
-                        # thread-safe in PyGObject/GTK3 and can wedge the main loop.
+                        # idle_add ensures timeout_add runs on the GTK main thread —
+                        # calling timeout_add from a background thread is not safe.
                         _GLib.idle_add(lambda: _GLib.timeout_add(400, _pulse_thinking) and False)
-                    except Exception:  # noqa: BLE001 - headless mode, no GLib
+                    except Exception:  # noqa: BLE001
                         pass
 
-                    def on_token(delta: str, _acc=acc, _f=_first_token) -> None:
+                    def on_token(delta: str,
+                                 _w=_window, _wl=_window_len, _f=_first_token) -> None:
                         _f[0] = True
-                        _acc.append(delta)
-                        self.text_cb("".join(_acc))
+                        _w.append(delta)
+                        _wl[0] += len(delta)
+                        # Trim old tokens from the front to stay within the window.
+                        while _wl[0] > _OVERLAY_CHARS and len(_w) > 1:
+                            _wl[0] -= len(_w[0])
+                            _w.popleft()
+                        self.text_cb("".join(_w))
 
                 # Use the preset's pinned engine when set, else the active one.
                 engine_name = getattr(target, "llm_engine", "") or ""
