@@ -9,6 +9,15 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.15] - 2026-06-10
+
+### Added
+- **Wakeword engine CRUD.** The wakeword server section now has the same full
+  management UI as STT engines: a named-preset selector combo, + Add, Quickstart
+  (with 4 common wyoming-openwakeword templates), ⟳ reload, and Delete. Existing
+  users are migrated: their `wakeword_uri` / `wakeword_model` become the first
+  preset automatically.
+
 ## [2.03.14] - 2026-06-10
 
 ### Fixed

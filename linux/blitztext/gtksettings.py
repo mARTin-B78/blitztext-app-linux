@@ -87,6 +87,14 @@ _STT_TEMPLATES: list[tuple[str, str, str, str, str, int]] = [
     ("Local large-v3 — best,  ~1.5 GB", "", "", "local", "large-v3", 30),
 ]
 
+_WW_TEMPLATES: list[tuple[str, str, str]] = [
+    # (name, uri, model)
+    ("Local wyoming-openwakeword",     "tcp://127.0.0.1:10400",        "okay_computer"),
+    ("Local wyoming (port 10401)",     "tcp://127.0.0.1:10401",        "okay_computer"),
+    ("Home Assistant wyoming",         "tcp://homeassistant.local:10400", "okay_nabu"),
+    ("Docker wyoming-openwakeword",    "tcp://127.0.0.1:10400",        "hey_jarvis"),
+]
+
 # (cat_emoji, label, [emojis]) — standard Unicode categories, WhatsApp-style
 _EMOJI_CATEGORIES: list[tuple[str, str, list[str]]] = [
     ("😀", "Smileys", [
@@ -1706,29 +1714,41 @@ notebook.bt-nb tab:checked label {
         self.ww_enabled = Gtk.Switch(); self.ww_enabled.set_active(self.cfg.wakeword_enabled)
         _switch_row(ww_card, "Enable wakeword", self.ww_enabled, width=LW,
                     description="Start dictation with a spoken keyword via an external openWakeWord server.")
-        # ── Server preset dropdown ────────────────────────────────────────────
-        self.ww_combo = Gtk.ComboBoxText()
-        self.ww_combo.append_text("(custom)")
+
+        # ── Engine selector bar ───────────────────────────────────────────────
+        ww_bar = Gtk.Box(spacing=6); ww_bar.set_margin_top(6)
+        self.ww_combo = Gtk.ComboBoxText(); self.ww_combo.set_hexpand(True)
         for e in self.cfg.wakeword_engines:
             self.ww_combo.append_text(e.name)
-        active_idx = next((i + 1 for i, e in enumerate(self.cfg.wakeword_engines)
+        active_idx = next((i for i, e in enumerate(self.cfg.wakeword_engines)
                            if e.name == self.cfg.wakeword_active), 0)
         self.ww_combo.set_active(active_idx)
-        self.ww_combo.set_tooltip_text("Pick a saved wakeword server preset, or use (custom) to enter a URI manually.")
-        _labeled(ww_card, "Server preset", self.ww_combo, width=LW,
-                 tooltip="Select from wakeword server presets defined in the benchmark list, or (custom) to type a URI directly.")
+        ww_bar.pack_start(self.ww_combo, True, True, 0)
+        for label, cb in (("+ Add", self._ww_add),):
+            b = Gtk.Button(label=label); b.connect("clicked", cb); ww_bar.pack_start(b, False, False, 0)
+        qs = Gtk.Button(label="Quickstart ▾")
+        qs.set_tooltip_text("Fill the form from a common wakeword server template")
+        qs.connect("clicked", self._show_ww_templates); ww_bar.pack_start(qs, False, False, 0)
+        for label, cb, tip in (
+            ("Delete", self._ww_delete, "Remove this wakeword engine preset"),
+            ("⟳",      lambda _b: self._ww_reload(), "Re-check connection and reload models"),
+        ):
+            b = Gtk.Button(label=label); b.set_tooltip_text(tip); b.connect("clicked", cb)
+            ww_bar.pack_end(b, False, False, 0)
+        page.pack_start(ww_bar, False, False, 2)
 
+        # ── Engine config card ────────────────────────────────────────────────
+        ww_cfg_card = _card_section(page, "", margin_top=6)
+        self.ww_name = _labeled(ww_cfg_card, "Name", _entry(placeholder="e.g. Home server"),
+                                tooltip="A label for this wakeword server preset.", width=LW)
         self.ww_dot = Gtk.Label(); self.ww_dot.set_markup(_dot(GREY))
         self.ww_dot.set_tooltip_text("openWakeWord server: green = reachable, red = unreachable")
-        self.ww_uri = _url_field_lb(ww_card, "Wakeword server", "tcp://127.0.0.1:10400",
-                                    self._ww_load, dot=self.ww_dot, width=LW)
-        self.ww_uri.set_text(self.cfg.wakeword_uri)
+        self.ww_uri = _url_field_lb(ww_cfg_card, "Wakeword server", "tcp://127.0.0.1:10400",
+                                    self._ww_reload, dot=self.ww_dot, width=LW)
         self.ww_uri.connect("focus-out-event", self._on_ww_uri_leave)
-        self._probe_dot(self.ww_dot, self.cfg.wakeword_uri, 10400)
-        self.ww_model = _labeled(ww_card, "Model name", _model_combo("Search models…"), width=LW,
-                                 tooltip="Which wake model to listen for (e.g. computer, okay_computer). Press ⟳ on the URI field to load models from the server.")
-        _fill_combo(self.ww_model, [], self.cfg.wakeword_model)
-        self.ww_combo.connect("changed", self._ww_preset_changed)
+        self.ww_model = _labeled(ww_cfg_card, "Model name", _model_combo("Search models…"), width=LW,
+                                 tooltip="Which wake model to listen for (e.g. okay_computer, hey_jarvis). Press ⟳ on the URI field to load models from the server.")
+        self.ww_combo.connect("changed", self._ww_changed)
 
         self.ww_mic_level = Gtk.LevelBar()
         self.ww_mic_level.set_min_value(0); self.ww_mic_level.set_max_value(1)
@@ -1751,6 +1771,8 @@ notebook.bt-nb tab:checked label {
         self.send_keywords = _labeled(ww_card, "Send words", _entry(", ".join(self.cfg.send_keywords),
                                       placeholder="computer send, computer abschicken"), width=LW,
                                       tooltip="Say one of these to type AND press Enter (spoken ‘submit’). Use a distinctive multi-word phrase. Empty = off.")
+
+        self._ww_load_idx(active_idx)
 
         # ── Wakeword sound cues ───────────────────────────────────────────────
         ww_snd_card = _card_section(page, "Wakeword sound cues (hands-free only)", icon="audio-speakers-symbolic")
@@ -1876,21 +1898,86 @@ notebook.bt-nb tab:checked label {
         if self._meter is not None:
             self._meter.stop(); self._meter = None
 
-    def _ww_preset_changed(self, combo) -> None:
-        idx = combo.get_active()
-        if idx <= 0 or idx - 1 >= len(self.cfg.wakeword_engines):
-            return  # (custom) selected — leave fields as-is
-        e = self.cfg.wakeword_engines[idx - 1]
-        self.cfg.wakeword_active = e.name
+    # ── Wakeword engine CRUD ─────────────────────────────────────────────────
+
+    def _ww_load_idx(self, idx: int) -> None:
+        """Load engine at idx into the form fields and probe the server."""
+        if not (0 <= idx < len(self.cfg.wakeword_engines)):
+            return
+        e = self.cfg.wakeword_engines[idx]
+        self._ww_idx = idx
+        self.ww_name.set_text(e.name)
         self.ww_uri.set_text(e.uri)
         _fill_combo(self.ww_model, [], e.model)
         self._probe_dot(self.ww_dot, e.uri, 10400)
-        self._ww_load()
+        self._ww_fetch_models()
 
-    def _ww_load(self) -> None:
+    def _ww_commit(self) -> None:
+        """Save current form fields back to the active WakewordEngine."""
+        idx = getattr(self, "_ww_idx", 0)
+        if not (0 <= idx < len(self.cfg.wakeword_engines)):
+            return
+        e = self.cfg.wakeword_engines[idx]
+        new_name = self.ww_name.get_text().strip() or e.name
+        e.name = new_name
+        e.uri = self.ww_uri.get_text().strip()
+        e.model = _combo_text(self.ww_model)
+        if self.ww_combo.get_active_text() != new_name:
+            self.ww_combo.remove(idx)
+            self.ww_combo.insert_text(idx, new_name)
+            self.ww_combo.set_active(idx)
+
+    def _ww_changed(self, combo) -> None:
+        new = combo.get_active()
+        if new < 0 or new == getattr(self, "_ww_idx", -1):
+            return
+        self._ww_commit()
+        self._ww_load_idx(new)
+
+    def _ww_add(self, _b=None) -> None:
+        self._ww_commit()
+        from .config import WakewordEngine
+        e = WakewordEngine(name="New wakeword server", uri="tcp://127.0.0.1:10400", model="okay_computer")
+        self.cfg.wakeword_engines.append(e)
+        self.ww_combo.append_text(e.name)
+        new_idx = len(self.cfg.wakeword_engines) - 1
+        self.ww_combo.set_active(new_idx)
+        self._ww_load_idx(new_idx)
+
+    def _ww_delete(self, _b=None) -> None:
+        if len(self.cfg.wakeword_engines) <= 1:
+            return
+        idx = getattr(self, "_ww_idx", 0)
+        del self.cfg.wakeword_engines[idx]
+        self.ww_combo.remove(idx)
+        self._ww_idx = -1
+        self.ww_combo.set_active(0)
+        self._ww_load_idx(0)
+
+    def _show_ww_templates(self, btn: Gtk.Button) -> None:
+        menu = Gtk.Menu()
+        for tpl in _WW_TEMPLATES:
+            item = Gtk.MenuItem(label=tpl[0])
+            item.connect("activate", lambda _i, t=tpl: self._ww_apply_template(t))
+            menu.append(item)
+        menu.show_all()
+        menu.popup_at_widget(btn, Gdk.Gravity.SOUTH_WEST, Gdk.Gravity.NORTH_WEST, None)
+
+    def _ww_apply_template(self, tpl: tuple) -> None:
+        name, uri, model = tpl
+        self.ww_name.set_text(name)
+        self.ww_uri.set_text(uri)
+        _fill_combo(self.ww_model, [model], model)
+        self._probe_dot(self.ww_dot, uri, 10400)
+
+    def _ww_reload(self) -> None:
+        """Probe the dot and fetch models from the server (⟳ button)."""
         self._probe_dot(self.ww_dot, self.ww_uri.get_text(), 10400)
+        self._ww_fetch_models()
 
-        uri = self.ww_uri.get_text().strip()  # capture on GTK thread before spawning
+    def _ww_fetch_models(self) -> None:
+        """Background fetch of model list from wyoming server."""
+        uri = self.ww_uri.get_text().strip()  # capture on GTK thread
         def work():
             import socket, json
             from urllib.parse import urlparse
@@ -1902,9 +1989,9 @@ notebook.bt-nb tab:checked label {
                     s.sendall(json.dumps({"type": "describe"}).encode() + b"\n")
                     line = b""
                     while not line.endswith(b"\n"):
-                        b = s.recv(1)
-                        if not b: break
-                        line += b
+                        chunk = s.recv(1)
+                        if not chunk: break
+                        line += chunk
                     info = json.loads(line.decode("utf-8"))
                     payload_len = info.get("data_length", info.get("payload_length", 0))
                     payload = b""
@@ -1913,16 +2000,12 @@ notebook.bt-nb tab:checked label {
                         if not chunk: break
                         payload += chunk
                     data = json.loads(payload.decode("utf-8"))
-                    models = []
-                    for w in data.get("wake", []):
-                        for m in w.get("models", []):
-                            models.append(m.get("name"))
-                    def apply():
-                        _fill_combo(self.ww_model, models, models[0] if models else "")
-                        self._info("Loaded models successfully.")
-                    GLib.idle_add(apply)
-            except Exception as e:
-                GLib.idle_add(lambda e=e: self._error(f"Failed to load models:\n{e}"))
+                    models = [m.get("name") for w in data.get("wake", []) for m in w.get("models", [])]
+                    if models:
+                        cur = _combo_text(self.ww_model)
+                        GLib.idle_add(lambda: _fill_combo(self.ww_model, models, cur or models[0]))
+            except Exception:
+                pass  # offline — dot already shows red
         threading.Thread(target=work, daemon=True).start()
 
     def _ww_test(self, _b) -> None:
@@ -2616,12 +2699,16 @@ notebook.bt-nb tab:checked label {
             c.sound_before = self.snd_before.get_filename() or ""
             c.sound_after = self.snd_after.get_filename() or ""
             c.wakeword_enabled = self.ww_enabled.get_active()
-            preset_idx = self.ww_combo.get_active()
-            c.wakeword_active = (self.cfg.wakeword_engines[preset_idx - 1].name
-                                 if preset_idx > 0 and preset_idx - 1 < len(self.cfg.wakeword_engines)
-                                 else "")
-            c.wakeword_uri = self.ww_uri.get_text().strip()
-            c.wakeword_model = _combo_text(self.ww_model)
+            self._ww_commit()
+            idx = getattr(self, "_ww_idx", 0)
+            if 0 <= idx < len(self.cfg.wakeword_engines):
+                e = self.cfg.wakeword_engines[idx]
+                c.wakeword_active = e.name
+                c.wakeword_uri = e.uri
+                c.wakeword_model = e.model
+            else:
+                c.wakeword_uri = self.ww_uri.get_text().strip()
+                c.wakeword_model = _combo_text(self.ww_model)
             c.wakeword_sound_detected = self.ww_snd_detected.get_filename() or ""
             c.wakeword_sound_done = self.ww_snd_done.get_filename() or ""
             c.wakeword_silence_seconds = float(self.ww_silence.get_text())

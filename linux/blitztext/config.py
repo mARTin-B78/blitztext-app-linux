@@ -292,6 +292,13 @@ def load(path: Path = CONFIG_PATH) -> Config:
         )
         for e in data.get("wakeword_engine", [])
     ]
+    # Migration: ensure at least one engine exists so the CRUD UI always has a row.
+    if not cfg.wakeword_engines:
+        cfg.wakeword_engines = [WakewordEngine(
+            name=cfg.wakeword_active or "Local wyoming-openwakeword",
+            uri=cfg.wakeword_uri,
+            model=cfg.wakeword_model,
+        )]
 
     # LLM engines (default: synthesized from the legacy [rewrite] block).
     cfg.llm_engines = [
