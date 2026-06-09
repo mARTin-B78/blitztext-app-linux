@@ -7,8 +7,10 @@ routing: one hotkey records, then the spoken keyword selects the preset.
 
 from __future__ import annotations
 
+import signal
 import sys
 import threading
+import traceback
 from typing import Callable
 
 from . import llm, quality, stt
@@ -151,8 +153,29 @@ class Daemon:
             log(f"Using remote STT '{engine.name}' — no local model to load")
         self._prepared = True
         self._init_wakeword()
+        self._install_freeze_diagnostic()
         log("Ready.")
         self._emit("idle", None, "Ready")
+
+    def _install_freeze_diagnostic(self) -> None:
+        """Register SIGQUIT (Ctrl+\ or kill -QUIT) to dump all thread stacks.
+
+        When the system appears frozen, run:
+            kill -QUIT $(pgrep -f blitztext)
+        and the full thread dump appears in the Blitztext log window.
+        """
+        def _dump(_sig, _frame):
+            lines = ["\n=== FREEZE DIAGNOSTIC — all thread stacks ==="]
+            for tid, frame in sys._current_frames().items():
+                name = next((t.name for t in threading.enumerate() if t.ident == tid), str(tid))
+                lines.append(f"\n-- Thread: {name} (id={tid}) --")
+                lines.extend(traceback.format_stack(frame))
+            lines.append("=== END FREEZE DIAGNOSTIC ===")
+            log("\n".join(lines))
+        try:
+            signal.signal(signal.SIGQUIT, _dump)
+        except (OSError, ValueError):
+            pass  # not available on all platforms
 
     @property
     def ready(self) -> bool:
@@ -197,7 +220,21 @@ class Daemon:
                 self.countdown_cb(None, silence)
 
         self._vad_meter = audio.LevelMeter(self.cfg.mic, on_level=on_level, recorder=self.recorder_name)
-        self._vad_meter.start()
+        ok = self._vad_meter.start()
+
+        # Safety net: if the LevelMeter fails to open the mic (e.g. device busy
+        # because the wakeword listener already holds a pw-record stream), the
+        # on_level callback never fires and dictation hangs forever. Add a hard
+        # 30-second timeout so the session always terminates.
+        _MAX_WAKEWORD_SECONDS = 30
+        if not ok:
+            log("[vad] LevelMeter failed to start — scheduling 30s hard timeout")
+            GLib.timeout_add(_MAX_WAKEWORD_SECONDS * 1000,
+                             lambda: self.finish_dictation(send_enter=False) or False)
+        else:
+            # Even when the meter works, cap wakeword sessions at 60s.
+            GLib.timeout_add(60_000,
+                             lambda: self.is_recording and self.finish_dictation(send_enter=False) or False)
 
     def _vad_stop(self) -> None:
         if getattr(self, '_vad_meter', None) is not None:
@@ -533,7 +570,11 @@ class Daemon:
 
                     try:
                         from gi.repository import GLib as _GLib
-                        _GLib.timeout_add(400, _pulse_thinking)
+                        # MUST be scheduled via idle_add so timeout_add is called
+                        # from the GTK main thread, not from _process's background
+                        # thread. GLib.timeout_add from non-main threads is not
+                        # thread-safe in PyGObject/GTK3 and can wedge the main loop.
+                        _GLib.idle_add(lambda: _GLib.timeout_add(400, _pulse_thinking) and False)
                     except Exception:  # noqa: BLE001 - headless mode, no GLib
                         pass
 

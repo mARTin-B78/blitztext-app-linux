@@ -91,6 +91,8 @@ class Overlay:
         # have ONE idle_add pending — so the GTK main loop is never flooded.
         self._pending_text: str = ""
         self._text_flush_queued: bool = False
+        self._pending_level: float = 0.0
+        self._level_flush_queued: bool = False
 
         self._win = Gtk.Window(type=Gtk.WindowType.POPUP)
         self._win.set_app_paintable(True)
@@ -125,7 +127,15 @@ class Overlay:
         GLib.idle_add(self._show, state, window_id)
 
     def set_level(self, level: float) -> None:
-        GLib.idle_add(self._set_level, float(level))
+        self._pending_level = float(level)
+        if not self._level_flush_queued:
+            self._level_flush_queued = True
+            GLib.idle_add(self._flush_level)
+
+    def _flush_level(self) -> bool:
+        self._level_flush_queued = False
+        self._set_level(self._pending_level)
+        return False
 
     def set_text(self, text: str) -> None:
         self._pending_text = text or ""
