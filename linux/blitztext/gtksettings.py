@@ -2427,9 +2427,21 @@ notebook.bt-nb tab:checked label {
 
         # Results table: Engine | Wakeword | Voice | Detected | Total | Recall% | False fires | Time
         # Col indices:      0         1        2        3          4       5           6           7
+        # col 8 = foreground colour (not displayed)
         self.wwb_store = Gtk.ListStore(str, str, str, str, str, str, str, str, str)
-        ww_tree = Gtk.TreeView(model=self.wwb_store)
-        ww_tree.set_grid_lines(Gtk.TreeViewGridLines.HORIZONTAL)
+        wwb_sort = Gtk.TreeModelSort(model=self.wwb_store)
+
+        def _num_cmp_wwb(model, a, b, col):
+            def _f(v):
+                try:
+                    return float(str(v).rstrip("%"))
+                except (ValueError, AttributeError):
+                    return float("inf")
+            va, vb = _f(model.get_value(a, col)), _f(model.get_value(b, col))
+            return (va > vb) - (va < vb)
+
+        self.wwb_tree = Gtk.TreeView(model=wwb_sort)
+        self.wwb_tree.set_grid_lines(Gtk.TreeViewGridLines.HORIZONTAL)
         for title, i, expand in [
                 ("Engine",       0, False),
                 ("Wakeword",     1, False),
@@ -2443,12 +2455,29 @@ notebook.bt-nb tab:checked label {
             r.set_property("ellipsize", Pango.EllipsizeMode.END)
             col = Gtk.TreeViewColumn(title, r, text=i, foreground=8)
             col.set_resizable(True); col.set_expand(expand)
-            ww_tree.append_column(col)
+            col.set_sort_column_id(i)
+            self.wwb_tree.append_column(col)
+            if i in (3, 4, 5, 6, 7):
+                wwb_sort.set_sort_func(i, _num_cmp_wwb, i)
+
+        # Toolbar: Copy CSV + Save CSV
+        tb = Gtk.Box(spacing=6)
+        tb.set_margin_top(6)
+        _copy_btn = Gtk.Button(label="Copy as CSV")
+        _copy_btn.set_tooltip_text("Copy results to clipboard as comma-separated values")
+        _copy_btn.connect("clicked", self._wwbench_copy_csv)
+        _save_btn = Gtk.Button(label="Save CSV…")
+        _save_btn.set_tooltip_text("Save results to a .csv file")
+        _save_btn.connect("clicked", self._wwbench_save_csv)
+        tb.pack_start(_copy_btn, False, False, 0)
+        tb.pack_start(_save_btn, False, False, 0)
+        page.pack_start(tb, False, False, 0)
+
         ww_sw = Gtk.ScrolledWindow()
         ww_sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        ww_sw.set_min_content_height(120)
-        ww_sw.add(ww_tree)
-        page.pack_start(ww_sw, True, True, 4)
+        ww_sw.set_min_content_height(150)
+        ww_sw.add(self.wwb_tree)
+        page.pack_start(ww_sw, True, True, 2)
 
         self.wwb_summary = Gtk.Label(xalign=0.0); self.wwb_summary.set_line_wrap(True)
         self.wwb_summary.set_selectable(True)
@@ -2747,6 +2776,50 @@ notebook.bt-nb tab:checked label {
         self.wwb_summary.set_markup("  ·  ".join(
             GLib.markup_escape_text(p) for p in summary_parts))
         return False
+
+    _WWB_CSV_HEADERS = ["Engine", "Wakeword", "Voice", "Detected", "Total",
+                        "Recall %", "False fires", "Time (s)"]
+
+    def _wwbench_csv_text(self) -> str:
+        import csv, io
+        out = io.StringIO()
+        w = csv.writer(out)
+        w.writerow(self._WWB_CSV_HEADERS)
+        store = self.wwb_store
+        it = store.get_iter_first()
+        while it:
+            w.writerow([store.get_value(it, c) for c in range(8)])
+            it = store.iter_next(it)
+        return out.getvalue()
+
+    def _wwbench_copy_csv(self, _b) -> None:
+        if not self.wwb_store.get_iter_first():
+            return
+        Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(self._wwbench_csv_text(), -1)
+
+    def _wwbench_save_csv(self, _b) -> None:
+        if not self.wwb_store.get_iter_first():
+            return
+        dlg = Gtk.FileChooserDialog(
+            title="Save wakeword results as CSV",
+            transient_for=self.dlg,
+            action=Gtk.FileChooserAction.SAVE)
+        dlg.add_button("_Cancel", Gtk.ResponseType.CANCEL)
+        dlg.add_button("_Save",   Gtk.ResponseType.ACCEPT)
+        dlg.set_do_overwrite_confirmation(True)
+        dlg.set_current_name("wakeword_benchmark.csv")
+        f = Gtk.FileFilter(); f.set_name("CSV files (*.csv)"); f.add_pattern("*.csv")
+        dlg.add_filter(f)
+        if dlg.run() == Gtk.ResponseType.ACCEPT:
+            path = dlg.get_filename()
+            if path and not path.endswith(".csv"):
+                path += ".csv"
+            try:
+                with open(path, "w", encoding="utf-8", newline="") as fh:
+                    fh.write(self._wwbench_csv_text())
+            except OSError as exc:
+                self._error(f"Could not save: {exc}")
+        dlg.destroy()
 
     # ===== Manual ===========================================================
     def _build_manual(self, page: Gtk.Box) -> None:

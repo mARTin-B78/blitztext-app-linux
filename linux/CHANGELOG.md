@@ -9,6 +9,15 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.21] - 2026-06-10
+
+### Added
+- **Wakeword results table: sortable columns.** Click any column header to sort
+  ascending/descending. Numeric columns (Detected, Total, Recall %, False fires,
+  Time) sort numerically.
+- **Wakeword results table: CSV export.** "Copy as CSV" copies the table to the
+  clipboard; "Save CSV…" opens a file chooser to write a `.csv` file.
+
 ## [2.03.20] - 2026-06-10
 
 ### Added
