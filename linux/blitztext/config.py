@@ -104,6 +104,7 @@ class Config:
     llm_active: str = ""
     # wakeword
     wakeword_enabled: bool = False
+    wakeword_active: str = ""   # name of selected WakewordEngine preset, "" = custom
     wakeword_uri: str = "tcp://127.0.0.1:10400"
     wakeword_model: str = "okay_computer"
     wakeword_sound_detected: str = ""   # WAV played when the wakeword fires (speak now)
@@ -232,6 +233,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
         sound_before=snd.get("before", ""),
         sound_after=snd.get("after", ""),
         wakeword_enabled=bool(ww.get("enabled", False)),
+        wakeword_active=ww.get("active", ""),
         wakeword_uri=ww.get("uri", "tcp://127.0.0.1:10400"),
         wakeword_model=ww.get("model", "okay_computer"),
         wakeword_sound_detected=ww.get("sound_detected", ""),
@@ -368,6 +370,7 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
         },
         "wakeword": {
             "enabled": cfg.wakeword_enabled,
+            "active": cfg.wakeword_active,
             "uri": cfg.wakeword_uri,
             "model": cfg.wakeword_model,
             "sound_detected": cfg.wakeword_sound_detected,

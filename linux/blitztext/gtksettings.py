@@ -1641,6 +1641,18 @@ notebook.bt-nb tab:checked label {
         self.ww_enabled = Gtk.Switch(); self.ww_enabled.set_active(self.cfg.wakeword_enabled)
         _switch_row(ww_card, "Enable wakeword", self.ww_enabled, width=LW,
                     description="Start dictation with a spoken keyword via an external openWakeWord server.")
+        # ── Server preset dropdown ────────────────────────────────────────────
+        self.ww_combo = Gtk.ComboBoxText()
+        self.ww_combo.append_text("(custom)")
+        for e in self.cfg.wakeword_engines:
+            self.ww_combo.append_text(e.name)
+        active_idx = next((i + 1 for i, e in enumerate(self.cfg.wakeword_engines)
+                           if e.name == self.cfg.wakeword_active), 0)
+        self.ww_combo.set_active(active_idx)
+        self.ww_combo.set_tooltip_text("Pick a saved wakeword server preset, or use (custom) to enter a URI manually.")
+        _labeled(ww_card, "Server preset", self.ww_combo, width=LW,
+                 tooltip="Select from wakeword server presets defined in the benchmark list, or (custom) to type a URI directly.")
+
         self.ww_dot = Gtk.Label(); self.ww_dot.set_markup(_dot(GREY))
         self.ww_dot.set_tooltip_text("openWakeWord server: green = reachable, red = unreachable")
         self.ww_uri = _url_field_lb(ww_card, "Wakeword server", "tcp://127.0.0.1:10400",
@@ -1651,6 +1663,7 @@ notebook.bt-nb tab:checked label {
         self.ww_model = _labeled(ww_card, "Model name", _model_combo("Search models…"), width=LW,
                                  tooltip="Which wake model to listen for (e.g. computer, okay_computer). Press ⟳ on the URI field to load models from the server.")
         _fill_combo(self.ww_model, [], self.cfg.wakeword_model)
+        self.ww_combo.connect("changed", self._ww_preset_changed)
 
         self.ww_mic_level = Gtk.LevelBar()
         self.ww_mic_level.set_min_value(0); self.ww_mic_level.set_max_value(1)
@@ -1797,6 +1810,17 @@ notebook.bt-nb tab:checked label {
     def _stop_meter(self) -> None:
         if self._meter is not None:
             self._meter.stop(); self._meter = None
+
+    def _ww_preset_changed(self, combo) -> None:
+        idx = combo.get_active()
+        if idx <= 0 or idx - 1 >= len(self.cfg.wakeword_engines):
+            return  # (custom) selected — leave fields as-is
+        e = self.cfg.wakeword_engines[idx - 1]
+        self.cfg.wakeword_active = e.name
+        self.ww_uri.set_text(e.uri)
+        _fill_combo(self.ww_model, [], e.model)
+        self._probe_dot(self.ww_dot, e.uri, 10400)
+        self._ww_load()
 
     def _ww_load(self) -> None:
         self._probe_dot(self.ww_dot, self.ww_uri.get_text(), 10400)
@@ -2466,6 +2490,10 @@ notebook.bt-nb tab:checked label {
             c.sound_before = self.snd_before.get_filename() or ""
             c.sound_after = self.snd_after.get_filename() or ""
             c.wakeword_enabled = self.ww_enabled.get_active()
+            preset_idx = self.ww_combo.get_active()
+            c.wakeword_active = (self.cfg.wakeword_engines[preset_idx - 1].name
+                                 if preset_idx > 0 and preset_idx - 1 < len(self.cfg.wakeword_engines)
+                                 else "")
             c.wakeword_uri = self.ww_uri.get_text().strip()
             c.wakeword_model = _combo_text(self.ww_model)
             c.wakeword_sound_detected = self.ww_snd_detected.get_filename() or ""
