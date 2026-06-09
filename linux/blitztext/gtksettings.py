@@ -1880,12 +1880,14 @@ notebook.bt-nb tab:checked label {
                     reff.set_filename(str(cand))
                     self.cfg.bench_ref = str(cand)
                     break
+            save(self.cfg)
         wavf.connect("file-set", _on_wav_set)
 
         def _on_ref_set(_b):
             fn = reff.get_filename()
             if fn:
                 self.cfg.bench_ref = fn
+                save(self.cfg)
         reff.connect("file-set", _on_ref_set)
 
         # ── Engine / model selector ───────────────────────────────────────────
@@ -1907,13 +1909,11 @@ notebook.bt-nb tab:checked label {
 
         sel_sw = Gtk.ScrolledWindow()
         sel_sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        sel_sw.set_min_content_height(80)
-        sel_sw.set_max_content_height(180)
+        sel_sw.set_min_content_height(60)
         sel_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
         sel_list.set_margin_start(4); sel_list.set_margin_end(4)
         sel_list.set_margin_top(2); sel_list.set_margin_bottom(2)
         sel_sw.add(sel_list)
-        page.pack_start(sel_sw, False, False, 0)
 
         self._bench_checks: dict[str, Gtk.CheckButton] = {}
         self._bench_dots: dict[str, Gtk.Label] = {}
@@ -1951,9 +1951,9 @@ notebook.bt-nb tab:checked label {
                     GLib.idle_add(dot.set_markup, _dot(color))
         threading.Thread(target=_check_bench_status, daemon=True).start()
 
+        # ── Run controls ──────────────────────────────────────────────────────
         run_row = Gtk.Box(spacing=16)
-        run_row.set_margin_top(8)
-        run_row.set_margin_bottom(2)
+        run_row.set_margin_top(6); run_row.set_margin_bottom(4)
         run = Gtk.Button(label="Run benchmark"); run.connect("clicked", self._run_bench)
         run.set_halign(Gtk.Align.START)
         run_row.pack_start(run, False, False, 0)
@@ -1965,14 +1965,14 @@ notebook.bt-nb tab:checked label {
         self.bench_expand.connect("toggled",
             lambda cb: setattr(self.cfg, "bench_expand_models", cb.get_active()))
         run_row.pack_start(self.bench_expand, False, False, 0)
-        page.pack_start(run_row, False, False, 6)
+        page.pack_start(run_row, False, False, 0)
 
-        # cols: engine, url, model, device, best_for, time, accuracy, output_friendly, tooltip_full
+        # ── Resizable pane: engine list (top) ↕ results table (bottom) ───────
         self.bench_store = Gtk.ListStore(str, str, str, str, str, str, str, str, str)
         bench_sort = Gtk.TreeModelSort(model=self.bench_store)
         tree = Gtk.TreeView(model=bench_sort)
         tree.set_has_tooltip(True)
-        tree.set_tooltip_column(8)   # hover any row → full error / output text
+        tree.set_tooltip_column(8)
         for title, i, expand in [("Engine", 0, False), ("URL", 1, False),
                                  ("Model", 2, False), ("Device", 3, False),
                                  ("Best for", 4, False), ("Time (s)", 5, False),
@@ -1980,16 +1980,27 @@ notebook.bt-nb tab:checked label {
             r = Gtk.CellRendererText()
             r.set_property("ellipsize", Pango.EllipsizeMode.END)
             col = Gtk.TreeViewColumn(title, r, text=i); col.set_resizable(True)
-            col.set_sort_column_id(i)  # click header to sort
+            col.set_sort_column_id(i)
             col.set_expand(expand)
             if i == 1:
-                col.set_max_width(180)  # keep URL column from dominating
+                col.set_max_width(180)
             tree.append_column(col)
-        sw = Gtk.ScrolledWindow(); sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        sw.add(tree); page.pack_start(sw, True, True, 4)
+        tree_sw = Gtk.ScrolledWindow()
+        tree_sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        tree_sw.add(tree)
 
+        # Wrap tree + summary in a box so summary stays below the table inside the pane
+        results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        results_box.pack_start(tree_sw, True, True, 0)
         self.bench_summary = Gtk.Label(xalign=0.0); self.bench_summary.set_line_wrap(True)
-        page.pack_start(self.bench_summary, False, False, 4)
+        self.bench_summary.set_margin_top(4); self.bench_summary.set_margin_bottom(2)
+        results_box.pack_start(self.bench_summary, False, False, 0)
+
+        paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
+        paned.pack1(sel_sw, resize=True, shrink=True)
+        paned.pack2(results_box, resize=True, shrink=True)
+        paned.set_position(180)  # default: engine list gets ~180px, rest goes to results
+        page.pack_start(paned, True, True, 4)
 
         # --- Wakeword benchmark ---------------------------------------------
         page.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), False, False, 10)
@@ -2049,11 +2060,14 @@ notebook.bt-nb tab:checked label {
     def _run_bench(self, _b) -> None:
         wav = self.bench_wav.get_filename()
         refp = self.bench_ref.get_filename()
-        # Persist immediately so paths survive without clicking Save
-        if wav:
-            self.cfg.bench_wav = wav
-        if refp:
-            self.cfg.bench_ref = refp
+        # Persist to disk so paths survive without clicking Save
+        changed = False
+        if wav and wav != self.cfg.bench_wav:
+            self.cfg.bench_wav = wav; changed = True
+        if refp and refp != self.cfg.bench_ref:
+            self.cfg.bench_ref = refp; changed = True
+        if changed:
+            save(self.cfg)
         if not wav or not refp:
             self._error("Pick a .wav file and a matching reference .txt file.")
             return
