@@ -307,12 +307,15 @@ def _section_title(parent: Gtk.Box, text: str, margin_top: int = 16,
     """A small bold uppercase section header, with optional symbolic icon."""
     row = Gtk.Box(spacing=5)
     row.set_margin_top(margin_top); row.set_margin_bottom(3)
+    row.set_valign(Gtk.Align.CENTER)
     row.get_style_context().add_class("bt-section")
     if icon:
-        img = Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.MENU)
+        img = Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.SMALL_TOOLBAR)
+        img.set_valign(Gtk.Align.CENTER)
         img.get_style_context().add_class("bt-section")
         row.pack_start(img, False, False, 0)
     lbl = Gtk.Label(xalign=0.0)
+    lbl.set_valign(Gtk.Align.CENTER)
     lbl.set_markup(f"<b><small>{GLib.markup_escape_text(text.upper())}</small></b>")
     row.pack_start(lbl, False, False, 0)
     parent.pack_start(row, False, False, 0)
@@ -735,11 +738,21 @@ class SettingsDialog:
         self._tr_cache: dict = {}
         self._wf_idx = self._stt_idx = self._llm_idx = 0
 
-        self.dlg = Gtk.Dialog(title="Blitztext — Settings", transient_for=parent, modal=True)
+        self.dlg = Gtk.Dialog(transient_for=parent, modal=True)
         self.dlg.set_default_size(740, 700)
-        self.dlg.add_button("Close", Gtk.ResponseType.CLOSE)
-        self.dlg.add_button("Save", RESP_SAVE)
-        self.dlg.add_button("Save & Restart", RESP_SAVE_RESTART)
+
+        _header = Gtk.HeaderBar()
+        _header.set_show_close_button(True)
+        _header.set_title("Blitztext — Settings")
+        _save_restart = Gtk.Button(label="Save & Restart")
+        _save_restart.get_style_context().add_class("suggested-action")
+        _save_restart.connect("clicked", lambda _b: self.dlg.response(RESP_SAVE_RESTART))
+        _header.pack_end(_save_restart)
+        _save = Gtk.Button(label="Save")
+        _save.connect("clicked", lambda _b: self.dlg.response(RESP_SAVE))
+        _header.pack_end(_save)
+        _header.show_all()
+        self.dlg.set_titlebar(_header)
 
         _prov = Gtk.CssProvider()
         _prov.load_from_data(b"""
@@ -2672,6 +2685,7 @@ notebook.bt-nb tab:checked label {
                 self._cleanup()
                 os.execv(sys.executable, [sys.executable, "-m", "blitztext", "tray"])
             return
+        # X button / window close
         self._cleanup()
         dlg.destroy()
 

@@ -9,6 +9,15 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.13] - 2026-06-10
+
+### Changed
+- **Settings header bar.** Save and Save & Restart moved from the bottom button
+  bar into the title bar (GTK HeaderBar). The X button closes without saving.
+  Bottom button row removed.
+- **Section icon alignment.** Icons in section headers are now vertically
+  centred with the label text (`SMALL_TOOLBAR` size, `valign=CENTER`).
+
 ## [2.03.12] - 2026-06-10
 
 ### Added
