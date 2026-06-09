@@ -750,13 +750,15 @@ class SettingsDialog:
     color: @theme_fg_color;
 }
 notebook.bt-nb tab {
-    padding: 7px 16px;
+    padding: 8px 18px;
     border-radius: 4px 4px 0 0;
 }
 notebook.bt-nb tab label {
-    font-size: 12px;
+    font-size: 14px;
+    color: mix(@theme_fg_color, @theme_bg_color, 0.35);
 }
 notebook.bt-nb tab:checked label {
+    font-size: 14px;
     font-weight: bold;
     color: #1a73e8;
 }
