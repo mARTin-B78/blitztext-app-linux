@@ -2355,26 +2355,27 @@ notebook.bt-nb tab:checked label {
                        "TTS server (Kokoro, XTTS, OpenAI …) — set its URL, model and voices, then "
                        "Connect to test it.")
 
-        # URL with a ⟳ reload that loads models + voices from the server (like the
-        # Engines tab). Set the saved URL after building the field.
+        # ---- Controls pane (top half of the Paned) ----
+        ctrl = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        # URL with a ⟳ reload that loads models + voices from the server
         self.tts_dot = Gtk.Label(); self.tts_dot.set_markup(_dot(GREY))
         self.tts_dot.set_tooltip_text("TTS server: green = reachable, red = unreachable")
-        self.wwb_url = _url_field(page, "TTS URL", "http://localhost:8880/v1",
+        self.wwb_url = _url_field(ctrl, "TTS URL", "http://localhost:8880/v1",
                                   self._tts_reload, dot=self.tts_dot)
         self.wwb_url.set_text(self.cfg.tts_url)
         self.wwb_url.connect("focus-out-event", self._on_tts_url_leave)
         self._probe_dot(self.tts_dot, self.cfg.tts_url, 80)
         self.wwb_key = _labeled(
-            page, "API key env", _entry(self.cfg.tts_api_key_env, placeholder="(optional, e.g. OPENAI_API_KEY)"),
+            ctrl, "API key env", _entry(self.cfg.tts_api_key_env, placeholder="(optional, e.g. OPENAI_API_KEY)"),
             tooltip="Name of an environment variable holding a bearer token. Leave empty for "
                     "no-auth local servers. The key itself is never stored in the config.")
         self.wwb_model = _model_combo("press ⟳ to load, or type a model id")
         self.wwb_model.set_text(self.cfg.tts_model)
-        _labeled(page, "TTS model", self.wwb_model,
+        _labeled(ctrl, "TTS model", self.wwb_model,
                  tooltip="The TTS model id your endpoint serves (from {url}/models). Required.")
         self.wwb_voices = MultiPicker("press ⟳ to load voices, or type names")
         self.wwb_voices.set_text(", ".join(self.cfg.tts_voices))
-        _labeled(page, "Voices (comma)", self.wwb_voices,
+        _labeled(ctrl, "Voices (comma)", self.wwb_voices,
                  tooltip="Voices to cycle through at random so the test covers different timbres. "
                          "⟳ fills these from the server; the ▾ dropdown appends one at a time.")
 
@@ -2385,10 +2386,10 @@ notebook.bt-nb tab:checked label {
         connect_box = Gtk.Box(spacing=10)
         connect_box.pack_start(self.wwb_test_btn, False, False, 0)
         connect_box.pack_start(self.wwb_test_lbl, False, False, 0)
-        _labeled(page, "", connect_box)
+        _labeled(ctrl, "", connect_box)
 
         # ---- Wakeword engine checkboxes ----
-        _section_title(page, "Engines to test", margin_top=10,
+        _section_title(ctrl, "Engines to test", margin_top=10,
                        icon="audio-input-microphone-symbolic")
         self._wwb_checks: dict[str, Gtk.CheckButton] = {}
         eng_row = Gtk.Box(spacing=16)
@@ -2401,14 +2402,14 @@ notebook.bt-nb tab:checked label {
         if not self.cfg.wakeword_engines:
             eng_row.pack_start(Gtk.Label(label="(no wakeword engines configured — add one in the Input tab)"),
                                False, False, 0)
-        page.pack_start(eng_row, False, False, 0)
+        ctrl.pack_start(eng_row, False, False, 0)
 
         # ---- Wakeword model selector ----
         all_ww_models = list(dict.fromkeys(
             e.model for e in self.cfg.wakeword_engines if e.model))
         self.wwb_wakeword = _model_combo("auto — each engine's own model")
         self.wwb_wakeword.set_models(all_ww_models)
-        _labeled(page, "Wakeword", self.wwb_wakeword,
+        _labeled(ctrl, "Wakeword", self.wwb_wakeword,
                  tooltip="Which wakeword model to test. Leave empty to use each engine's own "
                          "configured model. Select a specific model to override all engines "
                          "and test that phrase (e.g. okay_computer on all servers).")
@@ -2417,16 +2418,15 @@ notebook.bt-nb tab:checked label {
         adj = Gtk.Adjustment(value=12, lower=1, upper=200, step_increment=1, page_increment=10)
         self.wwb_count = Gtk.SpinButton(adjustment=adj, climb_rate=1, digits=0)
         self.wwb_count.set_halign(Gtk.Align.START); self.wwb_count.set_size_request(90, -1)
-        _labeled(page, "Wakeword samples", self.wwb_count,
+        _labeled(ctrl, "Wakeword samples", self.wwb_count,
                  tooltip="How many wakeword utterances to synthesize and test (filler-only "
                          "utterances for false-fire checking are added on top).")
 
         wrun = Gtk.Button(label="Run wakeword benchmark"); wrun.connect("clicked", self._run_wakeword_bench)
         wrun.set_halign(Gtk.Align.START)
-        page.pack_start(wrun, False, False, 6)
+        ctrl.pack_start(wrun, False, False, 6)
 
-        # Results table: Engine | Wakeword | Voice | Detected | Total | Recall% | False fires | Time
-        # Col indices:      0         1        2        3          4       5           6           7
+        # ---- Results pane (bottom half of the Paned) ----
         # col 8 = foreground colour (not displayed)
         self.wwb_store = Gtk.ListStore(str, str, str, str, str, str, str, str, str)
         wwb_sort = Gtk.TreeModelSort(model=self.wwb_store)
@@ -2460,9 +2460,17 @@ notebook.bt-nb tab:checked label {
             if i in (3, 4, 5, 6, 7):
                 wwb_sort.set_sort_func(i, _num_cmp_wwb, i)
 
+        ww_sw = Gtk.ScrolledWindow()
+        ww_sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        ww_sw.add(self.wwb_tree)
+
+        self.wwb_summary = Gtk.Label(xalign=0.0); self.wwb_summary.set_line_wrap(True)
+        self.wwb_summary.set_selectable(True)
+        self.wwb_summary.set_margin_top(4); self.wwb_summary.set_margin_bottom(2)
+
         # Toolbar: Copy CSV + Save CSV
         tb = Gtk.Box(spacing=6)
-        tb.set_margin_top(6)
+        tb.set_margin_bottom(4)
         _copy_btn = Gtk.Button(label="Copy as CSV")
         _copy_btn.set_tooltip_text("Copy results to clipboard as comma-separated values")
         _copy_btn.connect("clicked", self._wwbench_copy_csv)
@@ -2471,17 +2479,19 @@ notebook.bt-nb tab:checked label {
         _save_btn.connect("clicked", self._wwbench_save_csv)
         tb.pack_start(_copy_btn, False, False, 0)
         tb.pack_start(_save_btn, False, False, 0)
-        page.pack_start(tb, False, False, 0)
 
-        ww_sw = Gtk.ScrolledWindow()
-        ww_sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        ww_sw.set_min_content_height(150)
-        ww_sw.add(self.wwb_tree)
-        page.pack_start(ww_sw, True, True, 2)
+        results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        results_box.pack_start(tb, False, False, 0)
+        results_box.pack_start(ww_sw, True, True, 0)
+        results_box.pack_start(self.wwb_summary, False, False, 0)
 
-        self.wwb_summary = Gtk.Label(xalign=0.0); self.wwb_summary.set_line_wrap(True)
-        self.wwb_summary.set_selectable(True)
-        page.pack_start(self.wwb_summary, False, False, 4)
+        # ---- Paned: drag the divider to give more space to the table ----
+        ww_paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
+        ww_paned.pack1(ctrl, resize=False, shrink=False)
+        ww_paned.pack2(results_box, resize=True, shrink=False)
+        ww_paned.set_position(340)
+        ww_paned.set_size_request(-1, 260)
+        page.pack_start(ww_paned, True, True, 4)
 
     def _run_bench(self, _b) -> None:
         wav = self.bench_wav.get_filename()

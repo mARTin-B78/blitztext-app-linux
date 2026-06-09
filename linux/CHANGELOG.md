@@ -9,6 +9,13 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.22] - 2026-06-10
+
+### Changed
+- **Wakeword benchmark uses a split pane.** The TTS config / engine selector
+  controls sit in the top pane; the results table sits in the bottom pane.
+  Drag the divider to give the table as much vertical space as needed.
+
 ## [2.03.21] - 2026-06-10
 
 ### Added
