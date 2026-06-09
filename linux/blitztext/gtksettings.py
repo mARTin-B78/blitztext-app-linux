@@ -23,7 +23,7 @@ import gi
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
-from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402  # type: ignore[import-untyped]
 
 from . import __version__, audio, autostart, benchmark, llm, logbuffer, stt, wakeword_bench  # noqa: E402
 from .config import Config, save  # noqa: E402
@@ -663,9 +663,10 @@ def _md_panel(text: str, height: int = 420) -> Gtk.ScrolledWindow:
             _insert_inline(raw[2:], end)
         elif re.match(r'^\d+\. ', raw):
             m = re.match(r'^(\d+\. )(.*)', raw)
-            buf.insert(end, "  " + m.group(1))
-            end = buf.get_end_iter()
-            _insert_inline(m.group(2), end)
+            if m:
+                buf.insert(end, "  " + m.group(1))
+                end = buf.get_end_iter()
+                _insert_inline(m.group(2), end)
         else:
             _insert_inline(raw, end)
 
@@ -1576,9 +1577,9 @@ notebook.bt-nb tab:checked label {
 
         # ── Quality gate card ─────────────────────────────────────────────────
         q_card = _card_section(page, "Quality gate")
-        self.q_min = _labeled(q_card, "Min seconds", _entry(self.cfg.min_speech_seconds), width=LW,
+        self.q_min = _labeled(q_card, "Min seconds", _entry(str(self.cfg.min_speech_seconds)), width=LW,
                               tooltip="Minimum audio length. Shorter clips are silently ignored (avoids pasting nothing).")
-        self.q_rms = _labeled(q_card, "Silence RMS", _entry(self.cfg.silence_rms), width=LW,
+        self.q_rms = _labeled(q_card, "Silence RMS", _entry(str(self.cfg.silence_rms)), width=LW,
                               tooltip="Microphone volume threshold below which a clip is considered silent and dropped.")
         self.q_halluc = Gtk.Switch(); self.q_halluc.set_active(self.cfg.reject_hallucinations)
         _switch_row(q_card, "Reject hallucinations", self.q_halluc, width=LW,
@@ -1616,7 +1617,7 @@ notebook.bt-nb tab:checked label {
         test_box.pack_start(self.ww_test_lbl, False, False, 0)
         _labeled(ww_card, "", test_box, width=LW)
 
-        self.ww_silence = _labeled(ww_card, "Silence to stop (s)", _entry(self.cfg.wakeword_silence_seconds), width=LW,
+        self.ww_silence = _labeled(ww_card, "Silence to stop (s)", _entry(str(self.cfg.wakeword_silence_seconds)), width=LW,
                                    tooltip="After the wakeword fires, stop recording this many seconds after you stop speaking. Default 2.0.")
         self.cancel_keywords = _labeled(ww_card, "Cancel words", _entry(", ".join(self.cfg.cancel_keywords),
                                         placeholder="abbrechen, cancel"), width=LW,
@@ -1952,7 +1953,7 @@ notebook.bt-nb tab:checked label {
 
     def _bench_done(self, rows) -> bool:
         fastest, acc = benchmark.best(rows)
-        if not fastest:
+        if not fastest or not acc:
             self.bench_summary.set_markup('<span foreground="#ff3b30">All engines failed — check the Log tab.</span>')
             return False
         self.bench_summary.set_markup(
@@ -2038,8 +2039,8 @@ notebook.bt-nb tab:checked label {
                 GLib.idle_add(self._wwbench_progress, done, total, u)
             try:
                 res = wakeword_bench.run(
+                    self.cfg.wakeword_engines,
                     tts_url=url, tts_api_key_env=key, tts_model=model, voices=voices,
-                    wakeword_model=self.cfg.wakeword_model, wakeword_uri=self.cfg.wakeword_uri,
                     language=self.cfg.language, count=count, progress=prog)
             except Exception as exc:  # noqa: BLE001 - surface setup errors
                 GLib.idle_add(self._wwbench_error, str(exc))

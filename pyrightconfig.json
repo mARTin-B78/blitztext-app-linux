@@ -1,5 +1,8 @@
 {
   "extraPaths": [
     "/usr/lib/python3/dist-packages"
-  ]
+  ],
+  "venvPath": "linux",
+  "venv": ".venv",
+  "reportMissingModuleSource": "none"
 }
