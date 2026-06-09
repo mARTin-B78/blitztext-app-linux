@@ -16,6 +16,7 @@ import os
 import sys
 import threading
 import time
+import unicodedata
 from pathlib import Path
 
 import gi
@@ -531,7 +532,7 @@ def _app_paths() -> dict[str, list[Path]]:
     return {
         "changelog": [linux_dir / "CHANGELOG.md", Path("/opt/blitztext/CHANGELOG.md")],
         "license": [repo_dir / "LICENSE", Path("/usr/share/doc/blitztext/copyright")],
-        "manual": [repo_dir / "MANUAL.md", Path("/opt/blitztext/MANUAL.md")],
+        "manual": [pkg_dir / "MANUAL.md", repo_dir / "MANUAL.md", Path("/opt/blitztext/MANUAL.md")],
     }
 
 
@@ -588,8 +589,8 @@ class SettingsDialog:
 }
 .bt-infobox {
     border-radius: 6px;
-    border: 1px solid mix(@theme_selected_bg_color, @theme_bg_color, 0.55);
-    background-color: mix(@theme_selected_bg_color, @theme_base_color, 0.07);
+    border: 1px solid mix(@theme_fg_color, @theme_bg_color, 0.75);
+    background-color: mix(@theme_fg_color, @theme_bg_color, 0.05);
     padding: 4px;
     margin-bottom: 10px;
 }
@@ -819,7 +820,26 @@ class SettingsDialog:
         pop = Gtk.Popover(relative_to=anchor)
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
-        # -- category tab bar ------------------------------------------------
+        # -- Search bar -------------------------------------------------------
+        search = Gtk.SearchEntry()
+        search.set_placeholder_text("Search emoji…")
+        search.set_margin_top(6); search.set_margin_bottom(4)
+        search.set_margin_start(6); search.set_margin_end(6)
+        vbox.pack_start(search, False, False, 0)
+        vbox.pack_start(Gtk.Separator(), False, False, 0)
+
+        # Flat emoji list (all categories) used by search
+        all_emojis: list[str] = [e for _, _, es in _EMOJI_CATEGORIES for e in es]
+
+        def _keywords(e: str) -> str:
+            try:
+                return unicodedata.name(e[0], "").lower()
+            except Exception:
+                return ""
+
+        # -- Category view ----------------------------------------------------
+        cat_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+
         stack = Gtk.Stack()
         stack.set_transition_type(Gtk.StackTransitionType.NONE)
         stack.set_size_request(420, 230)
@@ -829,7 +849,7 @@ class SettingsDialog:
         cat_bar.set_margin_start(4); cat_bar.set_margin_end(4)
 
         first_name: str | None = None
-        active_btn: list[Gtk.Button] = [None]  # mutable cell
+        active_btn: list[Gtk.Button] = [None]
 
         def _select(name: str, btn: Gtk.Button) -> None:
             stack.set_visible_child_name(name)
@@ -839,7 +859,6 @@ class SettingsDialog:
             active_btn[0] = btn
 
         for cat_emoji, cat_name, emojis in _EMOJI_CATEGORIES:
-            # Build scrollable emoji grid for this category
             flow = Gtk.FlowBox()
             flow.set_max_children_per_line(10)
             flow.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -855,7 +874,6 @@ class SettingsDialog:
             sw.add(flow)
             stack.add_named(sw, cat_name)
 
-            # Category tab button
             cb = Gtk.Button(label=cat_emoji)
             cb.set_relief(Gtk.ReliefStyle.NONE)
             cb.set_tooltip_text(cat_name)
@@ -874,12 +892,46 @@ class SettingsDialog:
         cat_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
         cat_scroll.set_min_content_height(44)
         cat_scroll.add(cat_bar)
+        cat_container.pack_start(cat_scroll, False, False, 0)
+        cat_container.pack_start(Gtk.Separator(), False, False, 0)
+        cat_container.pack_start(stack, True, True, 0)
 
-        vbox.pack_start(cat_scroll, False, False, 0)
-        vbox.pack_start(Gtk.Separator(), False, False, 0)
-        vbox.pack_start(stack, True, True, 0)
+        # -- Search results view ----------------------------------------------
+        search_sw = Gtk.ScrolledWindow()
+        search_sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        search_sw.set_size_request(420, 274)
+        search_flow = Gtk.FlowBox()
+        search_flow.set_max_children_per_line(10)
+        search_flow.set_selection_mode(Gtk.SelectionMode.NONE)
+        search_flow.set_margin_top(4); search_flow.set_margin_bottom(4)
+        search_flow.set_margin_start(4); search_flow.set_margin_end(4)
+        search_sw.add(search_flow)
+
+        def _on_search(_e: Gtk.SearchEntry) -> None:
+            query = search.get_text().strip().lower()
+            for child in search_flow.get_children():
+                search_flow.remove(child)
+            if query:
+                cat_container.set_visible(False)
+                search_sw.set_visible(True)
+                for emoji in all_emojis:
+                    if query in _keywords(emoji) or query in emoji:
+                        btn = Gtk.Button(label=emoji)
+                        btn.set_relief(Gtk.ReliefStyle.NONE)
+                        btn.connect("clicked", lambda _b, e=emoji: (entry.set_text(e), pop.popdown()))
+                        search_flow.add(btn)
+                search_flow.show_all()
+            else:
+                search_sw.set_visible(False)
+                cat_container.set_visible(True)
+
+        search.connect("search-changed", _on_search)
+
+        vbox.pack_start(cat_container, True, True, 0)
+        vbox.pack_start(search_sw, True, True, 0)
         pop.add(vbox)
         pop.show_all()
+        search_sw.set_visible(False)  # hide search results until user types
 
     # ===== Engines ==========================================================
     def _build_engines(self, page: Gtk.Box) -> None:

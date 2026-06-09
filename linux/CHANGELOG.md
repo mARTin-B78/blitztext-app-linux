@@ -9,6 +9,21 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [1.9.5] - 2026-06-09
+
+### Added
+- **Emoji picker search.** A search field at the top of the emoji picker filters
+  all categories in real time using Unicode character names (e.g. "fire", "dog",
+  "heart"). Typing hides the category bar and shows matching results; clearing
+  restores the category view.
+
+### Fixed
+- **Manual tab now shows content.** `MANUAL.md` is copied next to the package
+  module so the Manual tab finds it in both venv and deb installs.
+- **Info banner no longer bright blue.** The `.bt-infobox` background now uses
+  a neutral 5 % tint of the foreground colour instead of the theme accent
+  colour, so text stays readable on any theme.
+
 ## [1.9.4] - 2026-06-09
 
 ### Changed
