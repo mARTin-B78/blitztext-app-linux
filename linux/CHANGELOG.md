@@ -9,6 +9,17 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.16] - 2026-06-10
+
+### Added
+- **MP3/OGG/FLAC support for sound cues.** The sound file picker now accepts
+  WAV, MP3, OGG, FLAC, M4A, AAC, AIFF, and Opus. Playback uses `ffplay` or
+  `gst-play-1.0` as a universal fallback when the native `pw-play`/`paplay`
+  can't handle the format.
+- **Browse dialog with auto-preview.** The 📁 browse button opens a
+  `FileChooserDialog`; selecting a file auto-plays it so you can hear it before
+  confirming. The ▶ play button still works on the current selection.
+
 ## [2.03.15] - 2026-06-10
 
 ### Added

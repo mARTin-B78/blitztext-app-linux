@@ -1791,47 +1791,101 @@ notebook.bt-nb tab:checked label {
         self.snd_after  = self._sound_field(snd_card, "Stop sound", self.cfg.sound_after,
             "Plays when manual recording stops (paste, paste+Enter, or auto-stop).", width=LW)
 
-    def _sound_field(self, page: Gtk.Box, label: str, value: str, tooltip: str = "",
+    def _sound_field(self, page, label: str, value: str, tooltip: str = "",
                      empty_note: str = "Leave empty to use the built-in system sound.",
                      clear_tip: str = "Clear — use the built-in system sound",
-                     width: int = 150) -> Gtk.FileChooserButton:
-        row = Gtk.Box(spacing=10); row.set_margin_top(3); row.set_margin_bottom(3)
+                     width: int = 150):
+        """Sound file picker row. Returns an object with get_filename()."""
+        row = Gtk.Box(spacing=6); row.set_margin_top(3); row.set_margin_bottom(3)
         lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(width, -1)
         if tooltip:
-            lbl.set_tooltip_text(tooltip)
+            lbl.set_tooltip_text(f"{tooltip} {empty_note}")
         row.pack_start(lbl, False, False, 0)
-        chooser = Gtk.FileChooserButton(title=label, action=Gtk.FileChooserAction.OPEN)
-        af = Gtk.FileFilter(); af.set_name("Audio")
-        for pat in ("*.wav", "*.oga", "*.ogg", "*.flac"):
-            af.add_pattern(pat)
-        chooser.add_filter(af)
+
+        path_entry = Gtk.Entry()
+        path_entry.set_hexpand(True)
+        path_entry.set_editable(False)
+        path_entry.set_placeholder_text(empty_note)
         if value:
-            chooser.set_filename(value)
-        chooser.set_hexpand(True)
-        if tooltip:
-            chooser.set_tooltip_text(f"{tooltip} {empty_note}")
-        row.pack_start(chooser, True, True, 0)
-        play = Gtk.Button.new_from_icon_name("media-playback-start-symbolic", Gtk.IconSize.BUTTON)
-        play.set_tooltip_text("Play this sound now")
-        play.connect("clicked", lambda _b, c=chooser: self._play_sound_file(c.get_filename()))
-        row.pack_start(play, False, False, 0)
+            path_entry.set_text(value)
+        row.pack_start(path_entry, True, True, 0)
+
+        browse = Gtk.Button.new_from_icon_name("document-open-symbolic", Gtk.IconSize.BUTTON)
+        browse.set_tooltip_text("Browse for audio file (WAV, MP3, OGG, FLAC, …)")
+        browse.connect("clicked", lambda _b, e=path_entry, t=label: self._browse_sound(e, t))
+        row.pack_start(browse, False, False, 0)
+
+        play_btn = Gtk.Button.new_from_icon_name("media-playback-start-symbolic", Gtk.IconSize.BUTTON)
+        play_btn.set_tooltip_text("Play this sound now")
+        play_btn.connect("clicked", lambda _b, e=path_entry: self._play_sound_file(e.get_text()))
+        row.pack_start(play_btn, False, False, 0)
+
         clr = Gtk.Button.new_from_icon_name("edit-clear-symbolic", Gtk.IconSize.BUTTON)
         clr.set_tooltip_text(clear_tip)
-        clr.connect("clicked", lambda _b, c=chooser: c.unselect_all())
+        clr.connect("clicked", lambda _b, e=path_entry: e.set_text(""))
         row.pack_start(clr, False, False, 0)
+
         if isinstance(page, Gtk.ListBox):
-            if not row.get_margin_start():
-                row.set_margin_start(12); row.set_margin_end(8)
-                row.set_margin_top(6); row.set_margin_bottom(6)
+            row.set_margin_start(12); row.set_margin_end(8)
+            row.set_margin_top(6); row.set_margin_bottom(6)
             _lb_add(page, row)
         else:
             page.pack_start(row, False, False, 0)
-        return chooser
+
+        # Return a thin wrapper so callers use .get_filename() as before.
+        class _Picker:
+            def get_filename(self_):
+                t = path_entry.get_text().strip()
+                return t if t else None
+        return _Picker()
+
+    def _browse_sound(self, entry: Gtk.Entry, title: str) -> None:
+        dlg = Gtk.FileChooserDialog(
+            title=f"Choose sound — {title}",
+            parent=self.dlg,
+            action=Gtk.FileChooserAction.OPEN,
+        )
+        dlg.add_buttons("_Cancel", Gtk.ResponseType.CANCEL,
+                        "_Select", Gtk.ResponseType.OK)
+        af = Gtk.FileFilter(); af.set_name("Audio files (WAV, MP3, OGG, FLAC, …)")
+        for pat in ("*.wav", "*.mp3", "*.ogg", "*.oga", "*.flac", "*.m4a", "*.aac",
+                    "*.aif", "*.aiff", "*.opus"):
+            af.add_pattern(pat)
+        dlg.add_filter(af)
+        af_all = Gtk.FileFilter(); af_all.set_name("All files"); af_all.add_pattern("*")
+        dlg.add_filter(af_all)
+        cur = entry.get_text().strip()
+        if cur:
+            dlg.set_filename(cur)
+
+        # Auto-preview each file as the selection changes.
+        def _on_selection(d):
+            fn = d.get_filename()
+            if fn and os.path.isfile(fn):
+                self._play_sound_file(fn)
+        dlg.connect("selection-changed", _on_selection)
+
+        if dlg.run() == Gtk.ResponseType.OK:
+            fn = dlg.get_filename()
+            if fn:
+                entry.set_text(fn)
+        self._stop_preview()
+        dlg.destroy()
 
     def _play_sound_file(self, path) -> None:
         from . import sound
-        if path:
-            sound.play(path)
+        self._stop_preview()
+        if path and os.path.isfile(os.path.expanduser(path)):
+            self._preview_proc = sound.play(path)
+
+    def _stop_preview(self) -> None:
+        proc = getattr(self, "_preview_proc", None)
+        if proc is not None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            self._preview_proc = None
 
     # ===== General ==========================================================
     def _build_general(self, page: Gtk.Box) -> None:
@@ -2052,8 +2106,11 @@ notebook.bt-nb tab:checked label {
                        "and names the fastest and most accurate. Add an engine preset for "
                        "each model you want in the comparison.")
 
-        wavf = Gtk.FileChooserButton(title="WAV file", action=Gtk.FileChooserAction.OPEN)
-        fa = Gtk.FileFilter(); fa.set_name("Audio (.wav)"); fa.add_pattern("*.wav"); wavf.add_filter(fa)
+        wavf = Gtk.FileChooserButton(title="Audio file", action=Gtk.FileChooserAction.OPEN)
+        fa = Gtk.FileFilter(); fa.set_name("Audio (WAV, MP3, OGG, FLAC, …)")
+        for _p in ("*.wav", "*.mp3", "*.ogg", "*.oga", "*.flac", "*.m4a", "*.opus"):
+            fa.add_pattern(_p)
+        wavf.add_filter(fa)
         self.bench_wav = _labeled(page, "Audio (.wav)", wavf)
         reff = Gtk.FileChooserButton(title="Reference transcript", action=Gtk.FileChooserAction.OPEN)
         ft = Gtk.FileFilter(); ft.set_name("Text (.txt)"); ft.add_pattern("*.txt"); reff.add_filter(ft)
