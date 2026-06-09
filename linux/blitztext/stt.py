@@ -138,7 +138,9 @@ def _transcribe_remote(engine: STTEngine, audio_path: Path, *, language: str, pr
 
     base = engine.url.rstrip("/")
     endpoint = base + "/audio/transcriptions"
-    fields = {"model": engine.model or "whisper-1", "response_format": "json"}
+    fields: dict[str, str] = {"response_format": "json"}
+    if engine.model:
+        fields["model"] = engine.model
     if language:
         fields["language"] = language
     if prompt:

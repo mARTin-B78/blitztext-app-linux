@@ -505,7 +505,8 @@ def _page(nb: Gtk.Notebook, title: str) -> Gtk.Box:
     outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
     nb.append_page(outer, Gtk.Label(label=title))
     sw = Gtk.ScrolledWindow()
-    sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+    sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.ALWAYS)
+    sw.set_overlay_scrolling(False)  # always-visible scrollbar, not the overlay kind
     outer.pack_start(sw, True, True, 0)
     inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
     for m in ("top", "bottom", "start", "end"):
