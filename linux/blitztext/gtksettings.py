@@ -2228,7 +2228,12 @@ notebook.bt-nb tab:checked label {
         # Strip scheme from URL for display brevity (http://192.168.1.1:8080 → 192.168.1.1:8080)
         url_display = row.url.removeprefix("https://").removeprefix("http://").rstrip("/")
         lang_display = stt.fmt_languages(row.languages)
-        ram_display = f"{row.ram_mb:.0f}" if row.ram_mb >= 1.0 else "—"
+        if row.ram_mb >= 1.0:
+            ram_display = f"{row.ram_mb:.0f}"
+        elif row.url:
+            ram_display = "server"  # model runs remotely — RAM not measurable here
+        else:
+            ram_display = "—"       # local model already loaded, no delta
         self.bench_store.append([row.engine, url_display, row.model, row.device, row.best_for,
                                  lang_display, f"{row.seconds:.2f}", acc, ram_display, out_friendly, tooltip])
         # Persist result so Engines tab can show it
