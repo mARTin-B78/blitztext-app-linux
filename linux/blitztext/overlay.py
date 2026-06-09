@@ -86,6 +86,11 @@ class Overlay:
         self._tick_id: int | None = None
         self._hide_id: int | None = None
         self._t0 = time.time()
+        # Coalescing text updates: background LLM streaming can fire dozens of
+        # set_text() calls per second. We buffer the latest text and only ever
+        # have ONE idle_add pending — so the GTK main loop is never flooded.
+        self._pending_text: str = ""
+        self._text_flush_queued: bool = False
 
         self._win = Gtk.Window(type=Gtk.WindowType.POPUP)
         self._win.set_app_paintable(True)
@@ -123,7 +128,18 @@ class Overlay:
         GLib.idle_add(self._set_level, float(level))
 
     def set_text(self, text: str) -> None:
-        GLib.idle_add(self._set_text, text or "")
+        self._pending_text = text or ""
+        # Only schedule a flush if none is already queued; this collapses a burst
+        # of token callbacks (e.g. 50/s from LLM streaming) into a single GTK
+        # redraw, preventing main-loop flooding and session freezes.
+        if not self._text_flush_queued:
+            self._text_flush_queued = True
+            GLib.idle_add(self._flush_text)
+
+    def _flush_text(self) -> bool:
+        self._text_flush_queued = False
+        self._set_text(self._pending_text)
+        return False
 
     def set_preset(self, icon: str, name: str, keyword: str | None) -> None:
         """Show the matched voice-routing preset on the overlay (emoji + name +

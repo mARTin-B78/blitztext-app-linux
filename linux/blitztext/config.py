@@ -25,6 +25,9 @@ class Workflow:
     # Optional per-workflow overrides of the [rewrite] defaults.
     model: str | None = None
     temperature: float | None = None
+    # Which LLM engine to use for this preset's rewrite step.
+    # "" (empty) = use whichever engine is currently active in the Engines tab.
+    llm_engine: str = ""
     # Cosmetic, used by the GUI.
     description: str = ""
     icon: str = "⚡"
@@ -245,6 +248,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
                 keywords=list(entry.get("keywords", [])),
                 model=entry.get("model"),
                 temperature=entry.get("temperature"),
+                llm_engine=entry.get("llm_engine", ""),
                 description=entry.get("description", ""),
                 icon=entry.get("icon", "⚡"),
             )
@@ -396,6 +400,8 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             entry["model"] = wf.model
         if wf.temperature is not None:
             entry["temperature"] = wf.temperature
+        if wf.llm_engine:
+            entry["llm_engine"] = wf.llm_engine
         if wf.description:
             entry["description"] = wf.description
         if wf.icon and wf.icon != "⚡":

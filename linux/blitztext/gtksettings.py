@@ -846,8 +846,13 @@ notebook.bt-nb tab:checked label {
         beh_card = _card_section(page, "Behaviour")
         self.wf_mode = _labeled(beh_card, "Mode", _combo(["transcribe", "rewrite", "stream"]),
                                 tooltip="’transcribe’ types your words as-is. ‘rewrite’ sends them to the language model first. ‘stream’ shows live text from a realtime engine.")
-        self.wf_model = _labeled(beh_card, "LLM model (opt.)", _entry(placeholder="blank = active LLM engine model"),
-                                 tooltip="Override the language model just for this preset. Leave blank to use the active LLM engine.")
+        # Engine dropdown — "(active engine)" + one entry per configured LLM engine.
+        llm_names = [e.name for e in self.cfg.llm_engines]
+        self.wf_llm_engine = _labeled(
+            beh_card, "LLM engine",
+            _combo(["(active engine)"] + llm_names),
+            tooltip="Which LLM engine to use for the rewrite step. ‘(active engine)’ follows whatever is selected in the Engines tab.",
+        )
         self.wf_temp  = _labeled(beh_card, "Temperature (opt.)", _entry(placeholder="blank = engine default (e.g. 0.3)"),
                                  tooltip="Creativity of the rewrite, 0–1. Lower is more predictable. Blank uses the engine default.")
 
@@ -872,7 +877,10 @@ notebook.bt-nb tab:checked label {
         self.wf_keywords.set_text(", ".join(wf.keywords))
         self.wf_hotkey.set_text(wf.hotkey)
         self.wf_mode.set_active(["transcribe", "rewrite", "stream"].index(wf.mode) if wf.mode in ("transcribe", "rewrite", "stream") else 0)
-        self.wf_model.set_text(wf.model or "")
+        llm_names = [e.name for e in self.cfg.llm_engines]
+        engine = getattr(wf, "llm_engine", "") or ""
+        idx_e = (llm_names.index(engine) + 1) if engine in llm_names else 0
+        self.wf_llm_engine.set_active(idx_e)
         self.wf_temp.set_text("" if wf.temperature is None else str(wf.temperature))
         self.wf_prompt.get_buffer().set_text(wf.prompt)
         self._wf_idx = idx
@@ -888,7 +896,8 @@ notebook.bt-nb tab:checked label {
         wf.keywords = [k.strip() for k in self.wf_keywords.get_text().split(",") if k.strip()]
         wf.hotkey = self.wf_hotkey.get_text().strip()
         wf.mode = self.wf_mode.get_active_text() or "transcribe"
-        wf.model = self.wf_model.get_text().strip() or None
+        engine_text = self.wf_llm_engine.get_active_text() or ""
+        wf.llm_engine = "" if engine_text == "(active engine)" else engine_text
         t = self.wf_temp.get_text().strip()
         wf.temperature = float(t) if _isfloat(t) else None
         b = self.wf_prompt.get_buffer()

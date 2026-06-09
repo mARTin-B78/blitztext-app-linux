@@ -520,9 +520,15 @@ class Daemon:
                         _acc.append(delta)
                         self.text_cb("".join(_acc))
 
+                # Use the preset's pinned engine when set, else the active one.
+                engine_name = getattr(target, "llm_engine", "") or ""
+                llm_engine = (
+                    next((e for e in self.cfg.llm_engines if e.name == engine_name), None)
+                    or self.cfg.active_llm
+                )
                 try:
                     text = llm.chat(
-                        self.cfg.active_llm,
+                        llm_engine,
                         target.prompt,
                         text,
                         model=target.model or None,
