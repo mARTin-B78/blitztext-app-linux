@@ -9,6 +9,29 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [1.9.4] - 2026-06-09
+
+### Changed
+- **Settings UI completely redesigned.** All six settings tabs (Presets, Engines,
+  Input, General, Input, General) now use a card-based layout following GTK3 best
+  practices: related fields are grouped inside visually distinct cards with bold
+  section titles. CSS is injected at start-up to give cards a consistent rounded
+  border (`boxed-list` + `bt-card`) and a styled info banner at the top of each
+  tab.
+- **Dialog is larger (740×700 px) and every tab scrolls.** The notebook pages
+  now wrap their content in a `Gtk.ScrolledWindow` so no fields are ever clipped,
+  even on small screens.
+- **Engines toolbar reorganised.** Creation actions (+ Add, + Stream, Quickstart)
+  are left-aligned; destructive/status actions (Delete, Test, ⟳) are
+  right-aligned via `pack_end`, making the bar scannable at a glance.
+- **Section titles replace plain separators.** The old `Gtk.Separator` +
+  unstyled `Gtk.Label` pattern is gone; every section now has a small, dimmed,
+  bold all-caps header rendered with markup.
+- **Cleaner section names.** "WW - Wakeword (Hands-free)" → "Hands-free
+  wakeword"; "Audio cues (manual dictation)" → "Audio cues (keyboard / hotkey
+  dictation)"; "Local engine … device & precision" → "Internal engine — device &
+  precision".
+
 ## [1.9.3] - 2026-06-09
 
 ### Added
