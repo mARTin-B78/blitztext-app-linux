@@ -276,6 +276,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
             url=e.get("url", "").rstrip("/"),
             model=e.get("model", ""),
             api_key_env=e.get("api_key_env", ""),
+            timeout=int(e.get("timeout", 30)),
         )
         for e in data.get("stt_engine", [])
     ] or [STTEngine("Local faster-whisper", "local", model=cfg.model)]
@@ -397,7 +398,8 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             {k: v for k, v in {
                 "name": e.name, "type": e.type, "url": e.url,
                 "model": e.model, "api_key_env": e.api_key_env,
-            }.items() if v or k in ("name", "type")}
+                "timeout": e.timeout if e.timeout != 30 else None,
+            }.items() if v is not None and (v or k in ("name", "type"))}
             for e in cfg.stt_engines
         ],
         "llm": {"active": cfg.llm_active},

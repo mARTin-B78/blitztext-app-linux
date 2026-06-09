@@ -27,6 +27,7 @@ class STTEngine:
     url: str = ""              # base URL incl. /v1 for remote, e.g. http://localhost:8010/v1
     model: str = ""            # remote model id, or local whisper size override
     api_key_env: str = ""      # env var holding a bearer key (optional)
+    timeout: int = 30          # HTTP timeout in seconds; raise for slow servers (WhisperX, etc.)
 
     @property
     def is_local(self) -> bool:
@@ -204,7 +205,8 @@ def transcribe(
         return local_transcriber.transcribe(audio_path, language=language, hotwords=hotwords)
     if engine.is_streaming:
         raise STTError("Streaming STT engines are live-only. Use a workflow with mode = \"stream\".")
-    return _transcribe_remote(engine, audio_path, language=language, prompt=hotwords, timeout=timeout)
+    return _transcribe_remote(engine, audio_path, language=language, prompt=hotwords,
+                              timeout=engine.timeout if engine.timeout > 0 else timeout)
 
 
 def _transcribe_remote(engine: STTEngine, audio_path: Path, *, language: str, prompt: str, timeout: int) -> str:

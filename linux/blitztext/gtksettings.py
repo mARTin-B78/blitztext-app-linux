@@ -67,23 +67,24 @@ _LLM_TEMPLATES: list[tuple[str, str, str, str, str]] = [
     ("vLLM",         "http://localhost:8000/v1",            "",                   "local", ""),
     ("llama-swap",   "http://localhost:28080/v1",           "",                   "local", ""),
 ]
-_STT_TEMPLATES: list[tuple[str, str, str, str, str]] = [
+_STT_TEMPLATES: list[tuple[str, str, str, str, str, int]] = [
+    # (name, url, api_key_env, type, model, timeout_s)
     # ── Cloud / API services ──────────────────────────────────────────────────
-    ("OpenAI Whisper",          "https://api.openai.com/v1",      "OPENAI_API_KEY", "openai",        "whisper-1"),
-    ("Groq Whisper (free tier)","https://api.groq.com/openai/v1", "GROQ_API_KEY",   "openai",        "whisper-large-v3-turbo"),
+    ("OpenAI Whisper",          "https://api.openai.com/v1",      "OPENAI_API_KEY", "openai",        "whisper-1",              30),
+    ("Groq Whisper (free tier)","https://api.groq.com/openai/v1", "GROQ_API_KEY",   "openai",        "whisper-large-v3-turbo", 30),
     # ── Local servers ─────────────────────────────────────────────────────────
-    ("faster-whisper-server",   "http://localhost:8010/v1",        "",               "openai",        ""),
-    ("Speaches (docker)",       "http://localhost:8080/v1",        "",               "openai",        ""),
-    ("whisper.cpp server",      "http://localhost:8081/v1",        "",               "openai",        ""),
-    ("WhisperX server",         "http://localhost:8081/transcribe","",               "openai",        "whisper-large-v3"),
-    ("NVIDIA NIM / Parakeet",   "http://localhost:8007/v1",        "",               "openai",        ""),
-    ("Realtime (Riva / NIM)",   "http://localhost:8006/v1",        "",               "riva_realtime", ""),
+    ("faster-whisper-server",   "http://localhost:8010/v1",        "",               "openai",        "",                       30),
+    ("Speaches (docker)",       "http://localhost:8080/v1",        "",               "openai",        "",                       30),
+    ("whisper.cpp server",      "http://localhost:8081/v1",        "",               "openai",        "",                       30),
+    ("WhisperX server",         "http://localhost:8081/transcribe","",               "openai",        "whisper-large-v3",      120),
+    ("NVIDIA NIM / Parakeet",   "http://localhost:8007/v1",        "",               "openai",        "",                       30),
+    ("Realtime (Riva / NIM)",   "http://localhost:8006/v1",        "",               "riva_realtime", "",                       30),
     # ── Built-in local models (no server needed) ──────────────────────────────
-    ("Local tiny  — fastest, ~39 MB",   "", "", "local", "tiny"),
-    ("Local base  — fast,    ~74 MB",   "", "", "local", "base"),
-    ("Local small — balanced, ~244 MB", "", "", "local", "small"),
-    ("Local medium — accurate, ~769 MB","", "", "local", "medium"),
-    ("Local large-v3 — best,  ~1.5 GB", "", "", "local", "large-v3"),
+    ("Local tiny  — fastest, ~39 MB",   "", "", "local", "tiny",     30),
+    ("Local base  — fast,    ~74 MB",   "", "", "local", "base",     30),
+    ("Local small — balanced, ~244 MB", "", "", "local", "small",    30),
+    ("Local medium — accurate, ~769 MB","", "", "local", "medium",   30),
+    ("Local large-v3 — best,  ~1.5 GB", "", "", "local", "large-v3", 30),
 ]
 
 # (cat_emoji, label, [emojis]) — standard Unicode categories, WhatsApp-style
@@ -1192,6 +1193,10 @@ notebook.bt-nb tab:checked label {
                                           "For a server, press ⟳ to fetch available models from its URL.")
         self.stt_key  = _labeled(cfg_card, "API key env", _entry(placeholder="e.g. GROQ_API_KEY   (optional)"),
                                  tooltip="Name of the environment variable that holds your API key. Leave blank for local servers.")
+        self.stt_timeout = _labeled(cfg_card, "Timeout (s)", _entry(placeholder="30"),
+                                    tooltip="Seconds to wait for a transcription response. "
+                                            "Increase for slow servers (e.g. WhisperX with diarization can take 60–120 s). "
+                                            "Default: 30.")
         self.stt_url.connect("changed", lambda _e: self._schedule_models("stt"))
         self.stt_key.connect("changed", lambda _e: self._schedule_models("stt"))
         self.stt_type.connect("changed", self._stt_type_changed)
@@ -1284,6 +1289,7 @@ notebook.bt-nb tab:checked label {
         self.stt_name.set_text(e.name)
         self.stt_type.set_active(next((i for i, (k, _) in enumerate(_STT_TYPES) if k == e.type), 0))
         self.stt_url.set_text(e.url); self.stt_key.set_text(e.api_key_env)
+        self.stt_timeout.set_text("" if e.timeout == 30 else str(e.timeout))
         if e.type == "local":
             _fill_combo(self.stt_model, ["tiny", "base", "small", "medium", "large-v3"], e.model or self.cfg.model)
         elif e.type == "openai":
@@ -1320,6 +1326,10 @@ notebook.bt-nb tab:checked label {
         e.url = self.stt_url.get_text().strip().rstrip("/")
         e.model = _combo_text(self.stt_model)
         e.api_key_env = self.stt_key.get_text().strip()
+        try:
+            e.timeout = max(5, int(self.stt_timeout.get_text().strip() or "30"))
+        except ValueError:
+            e.timeout = 30
         if self.stt_combo.get_active_text() != new_name:
             self.stt_combo.remove(idx); self.stt_combo.insert_text(idx, new_name); self.stt_combo.set_active(idx)
 
@@ -1452,11 +1462,12 @@ notebook.bt-nb tab:checked label {
         menu.popup_at_widget(btn, Gdk.Gravity.SOUTH_WEST, Gdk.Gravity.NORTH_WEST, None)
 
     def _stt_apply_template(self, tpl: tuple) -> None:
-        name, url, key, type_key, model = tpl
+        name, url, key, type_key, model, timeout = tpl
         self.stt_name.set_text(name)
         self.stt_url.set_text(url)
         self.stt_key.set_text(key)
         self.stt_type.set_active(next((i for i, (k, _) in enumerate(_STT_TYPES) if k == type_key), 0))
+        self.stt_timeout.set_text("" if timeout == 30 else str(timeout))
         if model:
             _fill_combo(self.stt_model, [model], model)
         elif url:
@@ -2087,6 +2098,12 @@ notebook.bt-nb tab:checked label {
             col.set_expand(expand)
             if max_w:
                 col.set_max_width(max_w)
+            if i == 8:
+                col.set_widget(Gtk.Label(label="RAM (MB)", tooltip_text=
+                    "RAM loaded by this engine during the benchmark run (local engines only).\n"
+                    "'server' = model runs in a container or remote server — memory is not visible here.\n"
+                    "'—' = local model was already loaded, no delta to measure."))
+                col.get_widget().show()
             tree.append_column(col)
             if i in (6, 7, 8):  # Time, Accuracy, RAM — sort numerically
                 bench_sort.set_sort_func(i, _num_cmp, i)
