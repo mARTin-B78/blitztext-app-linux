@@ -91,7 +91,7 @@ screen-reader (ATK) support. Click any image to open it full size.
 
 <p align="center">
   <a href="../Screenshots/settings-benchmark.png"><img src="../Screenshots/settings-benchmark.png" alt="Benchmark settings tab" width="100%"></a><br>
-  <em><b>Benchmark</b> — compare every configured STT engine against a reference WAV + transcript to find the fastest and most accurate, with a Device column (CPU / GPU / remote). Also includes a <b>wakeword benchmark</b>: point it at any OpenAI-compatible TTS server (Kokoro, XTTS, …), and it synthesizes your wake phrase in random voices, streams it to your wyoming-openwakeword server, and reports recall + false-fires per voice.</em>
+  <em><b>Benchmark</b> — compare every configured STT engine against a reference WAV + transcript. The results table shows <b>time</b>, <b>accuracy</b> (WER), <b>device</b> (CPU / GPU / remote), <b>language support</b>, and <b>RAM usage</b> (MB loaded during first run — useful for sizing local models). Also includes a <b>wakeword benchmark</b>: point it at any OpenAI-compatible TTS server (Kokoro, XTTS, …), and it synthesizes your wake phrase in random voices, streams it to your wyoming-openwakeword server, and reports recall + false-fires per voice.</em>
 </p>
 
 <p align="center">

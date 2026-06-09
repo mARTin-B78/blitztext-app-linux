@@ -16,6 +16,18 @@ from . import stt
 from .routing import normalize
 
 
+def _rss_mb() -> float:
+    """Current process RSS in MB via /proc/self/status (Linux only)."""
+    try:
+        with open("/proc/self/status") as fh:
+            for line in fh:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) / 1024.0  # kB → MB
+    except OSError:
+        pass
+    return 0.0
+
+
 @dataclass
 class BenchRow:
     engine: str
@@ -29,6 +41,7 @@ class BenchRow:
     wer: float
     accuracy: float   # percent, max(0, 1-wer)*100
     text: str
+    ram_mb: float = 0.0  # RSS delta in MB; >0 means model loaded during this run
     error: str = ""
 
 
@@ -128,7 +141,10 @@ def run(engines, wav_path: Path, reference: str, *, language: str = "",
     rows: list[BenchRow] = []
     for e in run_list:
         tr = get_local_transcriber(e) if (e.is_local and get_local_transcriber) else None
+        rss_before = _rss_mb()
         res = stt.benchmark(e, wav_path, language=language, local_transcriber=tr)
+        rss_after = _rss_mb()
+        ram_delta = max(0.0, rss_after - rss_before)
         w = wer(reference, res.text, case_sensitive=case_sensitive) if res.ok else 1.0
         row = BenchRow(
             engine=e.name,
@@ -142,6 +158,7 @@ def run(engines, wav_path: Path, reference: str, *, language: str = "",
             wer=w,
             accuracy=max(0.0, 1.0 - w) * 100.0,
             text=res.text,
+            ram_mb=ram_delta,
             error=res.error,
         )
         rows.append(row)

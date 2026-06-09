@@ -9,6 +9,71 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.01] - 2026-06-09
+
+### Added
+- **RAM usage column in benchmark.** The results table now shows a **RAM (MB)**
+  column — the increase in process RSS while the transcription ran. For local
+  models this captures the memory cost of loading the model on first use; for
+  remote engines it shows `—` (work happens server-side). Values are measured via
+  `/proc/self/status` (VmRSS), so they reflect actual resident memory, not
+  virtual address space.
+
+## [2.03.00] - 2026-06-09
+
+### Fixed
+- **"Not responding" / system instability on Save.** `_collect()` was calling
+  `socket.create_connection()` *synchronously* on the GTK main thread when
+  wakeword is enabled — freezing the UI for up to 1.5 s (longer if DNS is slow).
+  The check is now done on a daemon thread and the result is logged instead of
+  blocking the save path.
+- **GTK thread-safety crash in wakeword model load.** `_ww_load()` read
+  `self.ww_uri.get_text()` from inside a background thread — unsafe. The URI is
+  now captured on the main thread before the thread is spawned.
+- **HTTP 404 with WhisperX and other non-standard endpoints.** The remote
+  transcription call always appended `/audio/transcriptions` to the base URL, but
+  services like WhisperX use `/transcribe` as the full path. The URL path is now
+  inspected: if it is anything other than empty / `/v1` / `/v1.0`, the URL is
+  used as the complete endpoint with nothing appended — so
+  `http://host:8081/transcribe` works out of the box.
+- **Log levels.** `logbuffer` now stores `(timestamp, level, message)` tuples and
+  accepts a `level=` keyword (`DEBUG` / `INFO` / `WARNING` / `ERROR`). The Log
+  tab gains a **Level** dropdown (Verbose · Info · Warning · Error) that filters
+  the displayed entries live. Wakeword and socket errors are now tagged
+  `WARNING`; library records are forwarded at their native level.
+
+### Added
+- **Wakeword server preset dropdown** (Input → Hands-free wakeword). A
+  **Server preset** combo lists all configured wakeword server engines by name.
+  Picking one auto-fills the URI and model fields and re-probes reachability.
+  The selection is persisted as `wakeword_active` in config.
+
+## [2.02.03] - 2026-06-09
+
+### Added
+- Wakeword server preset dropdown in Input tab.
+
+## [2.02.02] - 2026-06-09
+
+### Fixed
+- License tab now renders with markdown styling.
+- Benchmark pane minimum height (320 px, `shrink=False`) prevents the engine
+  list or results table from collapsing to zero when the window is small.
+
+## [2.02.01] - 2026-06-09
+
+### Added
+- Last benchmark time and accuracy shown on the selected STT engine in the
+  Engines tab. Persisted to config so it survives restarts.
+
+## [2.02.00] - 2026-06-09
+
+### Added
+- **Language metadata in benchmark.** The engine checkbox list shows supported
+  language codes next to each engine (fetched async). Filter box searches by
+  language code. Results table has a **Lang** column. Data comes from the
+  `/v1/models` `language` field (faster-whisper-server) or NVIDIA NIM `/metadata`.
+
 ## [1.9.5] - 2026-06-09
 
 ### Added

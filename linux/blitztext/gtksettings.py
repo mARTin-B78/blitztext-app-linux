@@ -2044,12 +2044,12 @@ notebook.bt-nb tab:checked label {
         page.pack_start(run_row, False, False, 0)
 
         # ── Resizable pane: engine list (top) ↕ results table (bottom) ───────
-        # engine, url, model, device, best_for, lang, time, accuracy, output, tooltip
-        self.bench_store = Gtk.ListStore(str, str, str, str, str, str, str, str, str, str)
+        # engine, url, model, device, best_for, lang, time, accuracy, ram, output, tooltip
+        self.bench_store = Gtk.ListStore(str, str, str, str, str, str, str, str, str, str, str)
         bench_sort = Gtk.TreeModelSort(model=self.bench_store)
         tree = Gtk.TreeView(model=bench_sort)
         tree.set_has_tooltip(True)
-        tree.set_tooltip_column(9)
+        tree.set_tooltip_column(10)
         for title, i, expand, max_w in [
                 ("Engine",   0, False, 0),
                 ("URL",      1, False, 180),
@@ -2059,7 +2059,8 @@ notebook.bt-nb tab:checked label {
                 ("Lang",     5, False, 160),
                 ("Time (s)", 6, False, 0),
                 ("Accuracy", 7, False, 0),
-                ("Output",   8, True,  0)]:
+                ("RAM (MB)", 8, False, 0),
+                ("Output",   9, True,  0)]:
             r = Gtk.CellRendererText()
             r.set_property("ellipsize", Pango.EllipsizeMode.END)
             col = Gtk.TreeViewColumn(title, r, text=i); col.set_resizable(True)
@@ -2219,8 +2220,9 @@ notebook.bt-nb tab:checked label {
         # Strip scheme from URL for display brevity (http://192.168.1.1:8080 → 192.168.1.1:8080)
         url_display = row.url.removeprefix("https://").removeprefix("http://").rstrip("/")
         lang_display = stt.fmt_languages(row.languages)
+        ram_display = f"{row.ram_mb:.0f}" if row.ram_mb >= 1.0 else "—"
         self.bench_store.append([row.engine, url_display, row.model, row.device, row.best_for,
-                                 lang_display, f"{row.seconds:.2f}", acc, out_friendly, tooltip])
+                                 lang_display, f"{row.seconds:.2f}", acc, ram_display, out_friendly, tooltip])
         # Persist result so Engines tab can show it
         self.cfg.bench_last[row.engine] = {
             "seconds": row.seconds, "accuracy": row.accuracy, "ok": row.ok,

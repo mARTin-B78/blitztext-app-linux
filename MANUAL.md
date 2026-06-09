@@ -194,8 +194,22 @@ settings — it's a one-off tool.
    a matching `*.txt` / `*.reference.txt` sits next to the WAV.)
 3. **Run benchmark** — fills the table with one row per engine.
 
-Result columns: **Engine · Model · Device · Time (s) · Accuracy · Output**. A
-summary line names the **fastest** and **most accurate** engine.
+Result columns:
+
+| Column | Description |
+|---|---|
+| **Engine** | Engine preset name |
+| **URL** | Server address (blank for local) |
+| **Model** | Model name used |
+| **Device** | `CPU`, `CUDA`, or `remote` |
+| **Best for** | `Short clips` · `Short / medium` · `Long / batch` · `Streaming` |
+| **Lang** | Supported languages from the server's `/v1/models` (`—` if unknown) |
+| **Time (s)** | Wall-clock seconds for this transcription |
+| **Accuracy** | `1 − WER` × 100 %. 100 % = word-perfect, case-sensitive |
+| **RAM (MB)** | RSS increase while the engine ran. Captures model load cost on first run. Remote engines show `—`. |
+| **Output** | Transcribed text (hover for full error on failure) |
+
+A summary line names the **fastest** and **most accurate** engine. Click any column header to sort.
 
 ---
 
@@ -203,8 +217,13 @@ summary line names the **fastest** and **most accurate** engine.
 
 A live activity log — useful to watch a model load/download or to diagnose a
 problem (recording, transcription, routing, and wakeword events all appear here).
-Press **Copy** to put the log on the clipboard when reporting an issue. No
-settings.
+
+| Control | Description |
+|---|---|
+| **Level** dropdown | Filter by severity: **Verbose** (all), **Info** (default), **Warning**, **Error**. Switch to Warning or Error to cut noise when troubleshooting. |
+| **Copy** | Put the log on the clipboard when reporting an issue. |
+| **Clear** | Discard all current log entries. |
+| **Auto-scroll** | Keep the view scrolled to the latest entry. |
 
 ---
 
