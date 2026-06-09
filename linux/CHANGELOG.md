@@ -9,6 +9,15 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.09] - 2026-06-09
+
+### Added
+- **Server RAM in benchmark.** For remote/Docker STT engines the benchmark now
+  probes the server's Prometheus `/metrics` endpoint for
+  `process_resident_memory_bytes` (standard Python/Go exporter) or
+  `container_memory_rss` (cAdvisor) and shows the server-side RSS in MB in the
+  RAM column. Falls back to `server` when the endpoint is not exposed.
+
 ## [2.03.08] - 2026-06-09
 
 ### Fixed

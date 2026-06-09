@@ -148,6 +148,42 @@ def list_models_meta(base_url: str, api_key_env: str = "", timeout: float = 5.0)
     return []
 
 
+def probe_server_ram_mb(base_url: str, timeout: float = 3.0) -> float | None:
+    """Probe a remote server's Prometheus /metrics endpoint for RSS memory.
+
+    Returns RSS in MB if the server exposes Prometheus metrics with either
+    ``process_resident_memory_bytes`` (standard Python/Go exporter) or
+    ``container_memory_rss`` (cAdvisor). Returns None if not available.
+    """
+    if not base_url:
+        return None
+    base = _api_base(base_url)
+    try:
+        req = urllib.request.Request(base + "/metrics")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            text = resp.read().decode("utf-8", "replace")
+    except Exception:
+        return None
+
+    # Parse Prometheus text format — we only need two specific metric names.
+    # Lines look like:  process_resident_memory_bytes 1.23456e+08
+    best: float | None = None
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("#"):
+            continue
+        for metric in ("process_resident_memory_bytes", "container_memory_rss"):
+            if line.startswith(metric):
+                parts = line.split()
+                if len(parts) >= 2:
+                    try:
+                        best = float(parts[-1]) / (1024 * 1024)  # bytes → MB
+                        return best
+                    except ValueError:
+                        pass
+    return best
+
+
 def detect_remote_device(base_url: str, timeout: float = 3.0) -> str:
     """Best-effort GPU/CPU detection for a remote STT server.
 

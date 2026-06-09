@@ -41,7 +41,8 @@ class BenchRow:
     wer: float
     accuracy: float   # percent, max(0, 1-wer)*100
     text: str
-    ram_mb: float = 0.0  # RSS delta in MB; >0 means model loaded during this run
+    ram_mb: float = 0.0          # local RSS delta in MB
+    srv_ram_mb: float | None = None  # server /metrics RSS in MB, None = not available
     error: str = ""
 
 
@@ -126,6 +127,7 @@ def run(engines, wav_path: Path, reference: str, *, language: str = "",
 
     device_cache: dict = {}
     meta_cache: dict = {}   # url → list[ModelMeta]
+    server_ram_cache: dict = {}   # url → float | None (MB from /metrics)
 
     def _get_langs(e) -> list[str]:
         if e.is_local:
@@ -141,10 +143,21 @@ def run(engines, wav_path: Path, reference: str, *, language: str = "",
     rows: list[BenchRow] = []
     for e in run_list:
         tr = get_local_transcriber(e) if (e.is_local and get_local_transcriber) else None
+        # Snapshot server RAM before (if Prometheus metrics available)
+        if not e.is_local and e.url not in server_ram_cache:
+            server_ram_cache[e.url] = None  # sentinel — probe once per URL
+        srv_before: float | None = None
+        if not e.is_local:
+            srv_before = stt.probe_server_ram_mb(e.url)
         rss_before = _rss_mb()
         res = stt.benchmark(e, wav_path, language=language, local_transcriber=tr)
         rss_after = _rss_mb()
         ram_delta = max(0.0, rss_after - rss_before)
+        srv_ram: float | None = None
+        if not e.is_local:
+            srv_after = stt.probe_server_ram_mb(e.url)
+            if srv_before is not None and srv_after is not None:
+                srv_ram = srv_after  # report current RSS, not delta (server may not unload)
         w = wer(reference, res.text, case_sensitive=case_sensitive) if res.ok else 1.0
         row = BenchRow(
             engine=e.name,
@@ -159,6 +172,7 @@ def run(engines, wav_path: Path, reference: str, *, language: str = "",
             accuracy=max(0.0, 1.0 - w) * 100.0,
             text=res.text,
             ram_mb=ram_delta,
+            srv_ram_mb=srv_ram,
             error=res.error,
         )
         rows.append(row)

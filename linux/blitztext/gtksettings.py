@@ -2104,8 +2104,10 @@ notebook.bt-nb tab:checked label {
                 col.set_max_width(max_w)
             if i == 8:
                 col.set_widget(Gtk.Label(label="RAM (MB)", tooltip_text=
-                    "RAM loaded by this engine during the benchmark run (local engines only).\n"
-                    "'server' = model runs in a container or remote server — memory is not visible here.\n"
+                    "RAM used by the engine during the benchmark.\n"
+                    "Local engines: RSS delta measured on this machine.\n"
+                    "Remote engines: current RSS read from the server's Prometheus /metrics endpoint.\n"
+                    "'server' = server does not expose /metrics — RAM not measurable.\n"
                     "'—' = local model was already loaded, no delta to measure."))
                 col.get_widget().show()
             tree.append_column(col)
@@ -2265,9 +2267,12 @@ notebook.bt-nb tab:checked label {
         if row.ram_mb >= 1.0:
             ram_display = f"{row.ram_mb:.0f}"
         elif row.url:
-            ram_display = "server"  # model runs remotely — RAM not measurable here
+            if row.srv_ram_mb is not None:
+                ram_display = f"{row.srv_ram_mb:.0f}"  # from server /metrics
+            else:
+                ram_display = "server"  # metrics not exposed
         else:
-            ram_display = "—"       # local model already loaded, no delta
+            ram_display = "—"  # local model already loaded, no delta
         self.bench_store.append([row.engine, url_display, row.model, row.device, row.best_for,
                                  lang_display, f"{row.seconds:.2f}", acc, ram_display, out_friendly, tooltip])
         # Persist result so Engines tab can show it
