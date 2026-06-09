@@ -1857,8 +1857,11 @@ notebook.bt-nb tab:checked label {
         run.set_halign(Gtk.Align.START)
         page.pack_start(run, False, False, 6)
 
-        self.bench_store = Gtk.ListStore(str, str, str, str, str, str, str)
+        # cols: engine, model, device, best_for, time, accuracy, output_friendly, tooltip_full
+        self.bench_store = Gtk.ListStore(str, str, str, str, str, str, str, str)
         tree = Gtk.TreeView(model=self.bench_store)
+        tree.set_has_tooltip(True)
+        tree.set_tooltip_column(7)   # hover any row → full error text
         for title, i, expand in [("Engine", 0, False), ("Model", 1, False), ("Device", 2, False),
                                  ("Best for", 3, False), ("Time (s)", 4, False),
                                  ("Accuracy", 5, False), ("Output", 6, True)]:
@@ -1937,9 +1940,24 @@ notebook.bt-nb tab:checked label {
             return
         reference = Path(refp).read_text(errors="replace")
         self.bench_store.clear()
-        self.bench_summary.set_markup("<i>Running… (local models load on first use)</i>")
         self._stt_commit()
-        engines = list(self.cfg.stt_engines)
+
+        # Deduplicate by name — show warning if any were skipped
+        seen: set[str] = set()
+        engines: list = []
+        skipped: list[str] = []
+        for e in self.cfg.stt_engines:
+            if e.name in seen:
+                skipped.append(e.name)
+            else:
+                seen.add(e.name)
+                engines.append(e)
+        if skipped:
+            names = ", ".join(skipped)
+            self.bench_summary.set_markup(
+                f"<i>Running… </i><span foreground='#e67e00'>⚠ Skipped duplicate engines: {GLib.markup_escape_text(names)}</span>")
+        else:
+            self.bench_summary.set_markup("<i>Running… (local models load on first use)</i>")
 
         def work():
             def prog(row):
@@ -1949,11 +1967,36 @@ notebook.bt-nb tab:checked label {
             GLib.idle_add(self._bench_done, rows)
         threading.Thread(target=work, daemon=True).start()
 
+    @staticmethod
+    def _bench_friendly_error(err: str) -> str:
+        """Short human-readable reason from a raw STT error string."""
+        e = err.lower()
+        if "bad model" in e or ("400" in e and "model" in e):
+            return "Wrong model name — clear the model field to use server default"
+        if "connection refused" in e or "errno 111" in e:
+            return "Server offline — check the URL and that the service is running"
+        if "timed out" in e or "time out" in e:
+            return "Timed out — server too slow or not responding (>60 s)"
+        if "500" in e or "internal server error" in e:
+            return "Server-side error — check the server logs"
+        if "401" in e or "unauthorized" in e:
+            return "Authentication failed — check the API key environment variable"
+        if "404" in e or "not found" in e:
+            return "Endpoint not found — check the URL (needs /v1 suffix?)"
+        if "cannot reach" in e:
+            return "Unreachable — check URL / firewall"
+        return err[:120]
+
     def _bench_add_row(self, row) -> bool:
         acc = f"{row.accuracy:.1f}%" if row.ok else "—"
-        out = row.text if row.ok else f"⚠ {row.error}"
+        if row.ok:
+            out_friendly = row.text
+            tooltip = row.text
+        else:
+            out_friendly = f"⚠ {self._bench_friendly_error(row.error)}"
+            tooltip = row.error
         self.bench_store.append([row.engine, row.model, row.device, row.best_for,
-                                 f"{row.seconds:.2f}", acc, out])
+                                 f"{row.seconds:.2f}", acc, out_friendly, tooltip])
         return False
 
     def _bench_done(self, rows) -> bool:
