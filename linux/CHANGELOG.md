@@ -9,6 +9,13 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.10] - 2026-06-09
+
+### Fixed
+- **Server RAM probe.** Prometheus `/metrics` is almost always at the server
+  root (`http://host:port/metrics`), not under `/v1`. Now tries the root URL
+  first before falling back to the API base path.
+
 ## [2.03.09] - 2026-06-09
 
 ### Added

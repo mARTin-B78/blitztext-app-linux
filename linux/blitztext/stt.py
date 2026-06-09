@@ -154,34 +154,45 @@ def probe_server_ram_mb(base_url: str, timeout: float = 3.0) -> float | None:
     Returns RSS in MB if the server exposes Prometheus metrics with either
     ``process_resident_memory_bytes`` (standard Python/Go exporter) or
     ``container_memory_rss`` (cAdvisor). Returns None if not available.
+
+    Tries the server root first (http://host:port/metrics) then the api base
+    path (http://host:port/v1/metrics), because Prometheus endpoints are almost
+    always mounted at root even when the API lives under /v1.
     """
     if not base_url:
         return None
-    base = _api_base(base_url)
-    try:
-        req = urllib.request.Request(base + "/metrics")
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            text = resp.read().decode("utf-8", "replace")
-    except Exception:
+    p = urlparse(base_url.rstrip("/"))
+    root = f"{p.scheme}://{p.netloc}"
+    candidates = [root + "/metrics"]
+    api_base_metrics = _api_base(base_url) + "/metrics"
+    if api_base_metrics != candidates[0]:
+        candidates.append(api_base_metrics)
+
+    def _parse(text: str) -> float | None:
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("#"):
+                continue
+            for metric in ("process_resident_memory_bytes", "container_memory_rss"):
+                if line.startswith(metric):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        try:
+                            return float(parts[-1]) / (1024 * 1024)  # bytes → MB
+                        except ValueError:
+                            pass
         return None
 
-    # Parse Prometheus text format — we only need two specific metric names.
-    # Lines look like:  process_resident_memory_bytes 1.23456e+08
-    best: float | None = None
-    for line in text.splitlines():
-        line = line.strip()
-        if line.startswith("#"):
+    for url in candidates:
+        try:
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                result = _parse(resp.read().decode("utf-8", "replace"))
+                if result is not None:
+                    return result
+        except Exception:
             continue
-        for metric in ("process_resident_memory_bytes", "container_memory_rss"):
-            if line.startswith(metric):
-                parts = line.split()
-                if len(parts) >= 2:
-                    try:
-                        best = float(parts[-1]) / (1024 * 1024)  # bytes → MB
-                        return best
-                    except ValueError:
-                        pass
-    return best
+    return None
 
 
 def detect_remote_device(base_url: str, timeout: float = 3.0) -> str:
