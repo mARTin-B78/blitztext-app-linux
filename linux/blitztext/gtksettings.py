@@ -34,20 +34,89 @@ RESP_SAVE = 1
 RESP_SAVE_RESTART = 2
 GREEN, RED, GREY = "#34c759", "#ff3b30", "#b8b8be"
 
-_PICKER_EMOJIS = (
-    # Lightning / common defaults
-    "⚡", "🎤", "📝", "✉️", "📋", "💬", "📢", "🔔", "💡", "🔍",
-    # Status / actions
-    "✅", "❌", "🔄", "▶️", "⏺️", "🚀", "⭐", "✨", "🎯", "🏆",
-    # Tech / tools
-    "💻", "⌨️", "🔧", "⚙️", "🛠️", "💾", "📱", "🌐", "📊", "📈",
-    # People / reactions
-    "😀", "😊", "👍", "🤖", "🙌", "👋", "🎓", "🎵", "📖", "🔐",
-    # Writing / documents
-    "📧", "🗨️", "📨", "🗒️", "✏️", "🖊️", "📑", "🖋️", "📃", "📄",
-    # Misc useful
-    "🌟", "💫", "🔁", "🔀", "⏸️", "⏹️", "🏠", "💰", "🎶", "🌈",
-)
+# (cat_emoji, label, [emojis]) — standard Unicode categories, WhatsApp-style
+_EMOJI_CATEGORIES: list[tuple[str, str, list[str]]] = [
+    ("😀", "Smileys", [
+        "😀","😃","😄","😁","😆","😅","🤣","😂","🙂","🙃","😉","😊","😇",
+        "🥰","😍","🤩","😘","😗","😚","😙","🥲","😋","😛","😜","🤪","😝",
+        "🤑","🤗","🤭","🤫","🤔","🤐","🤨","😐","😑","😶","😏","😒","🙄",
+        "😬","🤥","😌","😔","😪","🤤","😴","😷","🤒","🤕","🤢","🤮","🤧",
+        "🥵","🥶","🥴","😵","🤯","🤠","🥳","🥸","😎","🤓","🧐","😕","😟",
+        "🙁","😮","😯","😲","😳","🥺","😦","😧","😨","😰","😥","😢","😭",
+        "😱","😖","😣","😞","😓","😩","😫","🥱","😤","😡","😠","🤬","😈",
+        "👿","💀","☠️","💩","🤡","👹","👺","👻","👽","👾","🤖",
+    ]),
+    ("👋", "People", [
+        "👋","🤚","🖐️","✋","🖖","👌","🤌","🤏","✌️","🤞","🤟","🤘","🤙",
+        "👈","👉","👆","🖕","👇","☝️","👍","👎","✊","👊","🤛","🤜","👏",
+        "🙌","👐","🤲","🤝","🙏","✍️","💅","💪","🦾","👂","👃","👀","👅",
+        "👄","💋","👶","🧒","👦","👧","🧑","👱","👨","🧔","👩","🧓","👴",
+        "👵","🙍","🙎","🙅","🙆","💁","🙋","🧏","🙇","🤦","🤷","💆","💇",
+        "🚶","🏃","💃","🕺","🧖","🧗","🤸","⛹️","🏋️","🤼","🧘","🛀","🛌",
+        "👮","🕵️","💂","🥷","👷","🫅","🤴","👸","🧙","🧝","🧛","🧟","🧞",
+        "🧜","🧚","👼","🤶","🎅","🦸","🦹","🧑‍🍳","🧑‍🎓","🧑‍🏫","🧑‍⚕️","🧑‍💼","🧑‍🔧","🧑‍💻",
+    ]),
+    ("🐶", "Animals", [
+        "🐶","🐱","🐭","🐹","🐰","🦊","🐻","🐼","🐨","🐯","🦁","🐮","🐷",
+        "🐸","🐵","🙈","🙉","🙊","🐒","🐔","🐧","🐦","🐤","🦆","🦅","🦉",
+        "🦇","🐺","🐗","🐴","🦄","🐝","🐛","🦋","🐌","🐞","🐜","🦟","🦗",
+        "🕷️","🦂","🐢","🐍","🦎","🐙","🦑","🦐","🦀","🐡","🐠","🐟","🐬",
+        "🐳","🐋","🦈","🐊","🐅","🐆","🦓","🦍","🐘","🦏","🐪","🦒","🦘",
+        "🐃","🐄","🐎","🐖","🐏","🐑","🦙","🐐","🦌","🐕","🐩","🦮","🐈",
+        "🐓","🦃","🦚","🦜","🦢","🦩","🕊️","🐇","🦝","🦨","🦡","🦦","🦥",
+        "🐁","🐀","🐿️","🦔","🐉","🐲","🌵","🌲","🌳","🌴","🌿","☘️","🍀",
+        "🎋","🎍","🍃","🍂","🍁","🌾","🌺","🌸","🌼","🌻","🌹","🥀","🌷",
+    ]),
+    ("🍎", "Food", [
+        "🍏","🍎","🍐","🍊","🍋","🍌","🍉","🍇","🍓","🫐","🍒","🍑","🥭",
+        "🍍","🥥","🥝","🍅","🍆","🥑","🥦","🥬","🥒","🌶️","🧄","🧅","🥔",
+        "🌽","🥕","🍞","🥐","🥖","🥨","🧀","🥚","🍳","🧈","🥞","🥓","🥩",
+        "🍗","🍖","🌭","🍔","🍟","🍕","🌮","🌯","🥙","🥚","🍲","🥗","🍿",
+        "🧂","🍱","🍣","🍛","🍜","🍝","🍢","🥟","🥠","🥡","🍦","🍧","🍨",
+        "🍩","🍪","🎂","🍰","🧁","🍫","🍬","🍭","🍮","🍯","🥛","☕","🍵",
+        "🧃","🥤","🧋","🍺","🍻","🥂","🍷","🥃","🍸","🍹","🍾","🧊","🍴",
+    ]),
+    ("🏠", "Travel", [
+        "🚗","🚕","🚙","🚌","🏎️","🚓","🚑","🚒","🚐","🛻","🚚","🚛","🚜",
+        "🏍️","🛵","🚲","🛴","🛹","⚓","⛵","🚤","🛥️","🚢","✈️","🛩️","🚁",
+        "🚀","🛸","🪐","🌍","🌎","🌏","🗺️","🧭","🏔️","⛰️","🌋","🏕️","🏖️",
+        "🏜️","🏝️","🏟️","🏛️","🏗️","🏘️","🏠","🏡","🏢","🏣","🏤","🏥","🏦",
+        "🏨","🏪","🏫","🏬","🏭","🏯","🏰","💒","🗼","🗽","⛪","🕌","⛩️",
+        "🕋","⛲","⛺","🌁","🌃","🏙️","🌄","🌅","🌆","🌇","🌉","🌌","🌠",
+        "🎇","🎆","🎑","🗾",
+    ]),
+    ("⚽", "Activities", [
+        "⚽","🏀","🏈","⚾","🥎","🎾","🏐","🏉","🥏","🎱","🏓","🏸","🏒",
+        "🥍","🏑","🏏","⛳","🎣","🤿","🎽","🎿","🛷","🥌","🎯","🎮","🎰",
+        "🎲","♟️","🧩","🪄","🎭","🎨","🎪","🎤","🎧","🎼","🎹","🥁","🎷",
+        "🎺","🎸","🎻","🎬","🎥","📽️","🎞️","🎠","🎡","🎢","🎟️","🎫","🏆",
+        "🥇","🥈","🥉","🏅","🎖️","🎗️","🎀","🎁","🎊","🎉",
+    ]),
+    ("💡", "Objects", [
+        "📱","📲","💻","⌨️","🖥️","🖨️","🖱️","💾","💿","📀","🧮","🎥","📷",
+        "📹","📼","🔍","🔎","💡","🔦","🏮","🪔","📔","📒","📓","📕","📗",
+        "📘","📙","📚","📖","🔖","🏷️","💰","💳","🪙","📈","📉","📊","📋",
+        "📌","📍","✂️","🔒","🔓","🔏","🔐","🔑","🗝️","🔨","⛏️","⚒️","🛠️",
+        "🔧","🪛","🔩","⚙️","⚖️","🔗","🧲","🪜","🧪","🔭","🔬","💊","💉",
+        "🩹","🩺","🧴","🧷","🧹","🧺","🧻","🪣","🧼","🪒","🛒","🚪","🪞",
+        "🛏️","🛋️","🪑","🚽","🚿","🛁","🧸","🪆","👓","🕶️","🥽","👒","🎩",
+        "🧢","⛑️","📿","💍","💎","🌂","🧵","🧶","🪢","🎒","👜","👝","👛",
+        "💼","🧳","🌂","☂️","🛡️","🗡️","⚔️","🪃","🏹","🪤","🪬","🧿","🔮",
+    ]),
+    ("🔣", "Symbols", [
+        "❤️","🧡","💛","💚","💙","💜","🖤","🤍","🤎","💔","❣️","💕","💞",
+        "💓","💗","💖","💘","💝","☮️","✝️","☪️","🕉️","☸️","✡️","☯️","☦️","🛐",
+        "♈","♉","♊","♋","♌","♍","♎","♏","♐","♑","♒","♓","⛎",
+        "🔀","🔁","🔂","▶️","⏩","⏭️","⏯️","◀️","⏪","⏮️","🔼","⏫","🔽",
+        "⏬","⏸️","⏹️","⏺️","🎦","🔅","🔆","📶","🔇","🔈","🔉","🔊","📢",
+        "📣","🔔","🔕","⚠️","🚸","⛔","🚫","🚳","🚭","🚯","🚱","🚷","📵",
+        "🔞","💯","♻️","✅","❌","❎","➕","➖","➗","✖️","💲","™️","©️","®️",
+        "〰️","➰","➿","🔚","🔙","🔛","🔜","🔝","🔴","🟠","🟡","🟢","🔵",
+        "🟣","⚫","⚪","🟤","🔶","🔷","🔸","🔹","🔺","🔻","💠","🔘","⭕",
+        "⭐","🌟","💫","✨","🔥","💧","🌊","🌀","⚡","❄️","🌈","🎵","🎶",
+        "💬","💭","💤","❓","❗","⁉️","🔑","🎯","🏁","🚩","🎌","🏴","🏳️",
+    ]),
+]
 
 
 def _dot(color: str) -> str:
@@ -520,22 +589,68 @@ class SettingsDialog:
 
     def _show_emoji_picker(self, anchor: Gtk.Widget, entry: Gtk.Entry) -> None:
         pop = Gtk.Popover(relative_to=anchor)
-        flow = Gtk.FlowBox()
-        flow.set_max_children_per_line(10)
-        flow.set_selection_mode(Gtk.SelectionMode.NONE)
-        flow.set_margin_top(6); flow.set_margin_bottom(6)
-        flow.set_margin_start(6); flow.set_margin_end(6)
-        for emoji in _PICKER_EMOJIS:
-            eb = Gtk.Button(label=emoji)
-            eb.set_relief(Gtk.ReliefStyle.NONE)
-            eb.connect("clicked", lambda _b, e=emoji: (entry.set_text(e), pop.popdown()))
-            flow.add(eb)
-        sw = Gtk.ScrolledWindow()
-        sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        sw.set_min_content_height(210)
-        sw.set_min_content_width(370)
-        sw.add(flow)
-        pop.add(sw)
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+
+        # -- category tab bar ------------------------------------------------
+        stack = Gtk.Stack()
+        stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        stack.set_size_request(420, 230)
+
+        cat_bar = Gtk.Box(spacing=0)
+        cat_bar.set_margin_top(4); cat_bar.set_margin_bottom(4)
+        cat_bar.set_margin_start(4); cat_bar.set_margin_end(4)
+
+        first_name: str | None = None
+        active_btn: list[Gtk.Button] = [None]  # mutable cell
+
+        def _select(name: str, btn: Gtk.Button) -> None:
+            stack.set_visible_child_name(name)
+            if active_btn[0]:
+                active_btn[0].get_style_context().remove_class("suggested-action")
+            btn.get_style_context().add_class("suggested-action")
+            active_btn[0] = btn
+
+        for cat_emoji, cat_name, emojis in _EMOJI_CATEGORIES:
+            # Build scrollable emoji grid for this category
+            flow = Gtk.FlowBox()
+            flow.set_max_children_per_line(10)
+            flow.set_selection_mode(Gtk.SelectionMode.NONE)
+            flow.set_margin_top(4); flow.set_margin_bottom(4)
+            flow.set_margin_start(4); flow.set_margin_end(4)
+            for emoji in emojis:
+                eb = Gtk.Button(label=emoji)
+                eb.set_relief(Gtk.ReliefStyle.NONE)
+                eb.connect("clicked", lambda _b, e=emoji: (entry.set_text(e), pop.popdown()))
+                flow.add(eb)
+            sw = Gtk.ScrolledWindow()
+            sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+            sw.add(flow)
+            stack.add_named(sw, cat_name)
+
+            # Category tab button
+            cb = Gtk.Button(label=cat_emoji)
+            cb.set_relief(Gtk.ReliefStyle.NONE)
+            cb.set_tooltip_text(cat_name)
+            cb.connect("clicked", lambda _b, n=cat_name, b=cb: _select(n, b))
+            cat_bar.pack_start(cb, True, True, 0)
+
+            if first_name is None:
+                first_name = cat_name
+                active_btn[0] = cb
+                cb.get_style_context().add_class("suggested-action")
+
+        if first_name:
+            stack.set_visible_child_name(first_name)
+
+        cat_scroll = Gtk.ScrolledWindow()
+        cat_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        cat_scroll.set_min_content_height(44)
+        cat_scroll.add(cat_bar)
+
+        vbox.pack_start(cat_scroll, False, False, 0)
+        vbox.pack_start(Gtk.Separator(), False, False, 0)
+        vbox.pack_start(stack, True, True, 0)
+        pop.add(vbox)
         pop.show_all()
 
     # ===== Engines ==========================================================
