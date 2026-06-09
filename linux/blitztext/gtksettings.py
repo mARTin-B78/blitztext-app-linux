@@ -1919,7 +1919,8 @@ notebook.bt-nb tab:checked label {
 
         self._bench_checks: dict[str, Gtk.CheckButton] = {}
         self._bench_dots: dict[str, Gtk.Label] = {}
-        self._bench_sel_rows: list[tuple[Gtk.Box, str, str]] = []  # (row, name, search_text)
+        self._bench_lang_labels: dict[str, Gtk.Label] = {}
+        self._bench_sel_rows: list[tuple[Gtk.Box, str, list[str]]] = []  # (row, name, mutable_search)
 
         for e in self.cfg.stt_engines:
             row = Gtk.Box(spacing=6)
@@ -1933,24 +1934,51 @@ notebook.bt-nb tab:checked label {
             cb.set_active(True)
             self._bench_checks[e.name] = cb
             row.pack_start(cb, True, True, 0)
+            lang_lbl = Gtk.Label(xalign=1.0)
+            lang_lbl.set_markup(f"<small><span foreground='{GREY}'>—</span></small>")
+            lang_lbl.set_margin_end(4)
+            self._bench_lang_labels[e.name] = lang_lbl
+            row.pack_end(lang_lbl, False, False, 0)
             sel_list.pack_start(row, False, False, 2)
-            search_text = f"{e.name} {e.model} {e.url}".lower()
-            self._bench_sel_rows.append((row, e.name, search_text))
+            search_parts = [e.name, e.model, e.url]
+            self._bench_sel_rows.append((row, e.name, search_parts))
 
         def _filter_bench(_e=None):
             q = self._bench_filter.get_text().lower()
-            for row, _name, stext in self._bench_sel_rows:
-                row.set_visible(not q or q in stext)
+            for row, _name, parts in self._bench_sel_rows:
+                row.set_visible(not q or any(q in p.lower() for p in parts))
         self._bench_filter.connect("changed", _filter_bench)
 
-        # Background reachability check for all engines
+        # Background: reachability + language metadata
         def _check_bench_status():
+            meta_cache: dict[str, list] = {}
             for e in self.cfg.stt_engines:
                 ok = stt.status(e, timeout=2.0)
                 color = GREEN if ok else RED
                 dot = self._bench_dots.get(e.name)
                 if dot:
                     GLib.idle_add(dot.set_markup, _dot(color))
+                # Fetch language metadata for remote engines
+                if not e.is_local and e.url:
+                    if e.url not in meta_cache:
+                        meta_cache[e.url] = stt.list_models_meta(e.url, e.api_key_env, timeout=4.0)
+                    langs: list[str] = []
+                    for m in meta_cache[e.url]:
+                        if not e.model or m.id == e.model or m.id.endswith("/" + e.model):
+                            langs = m.languages
+                            break
+                    if not langs and meta_cache[e.url]:
+                        langs = meta_cache[e.url][0].languages
+                    if langs:
+                        # Update search parts so filter works on language codes
+                        for row, name, parts in self._bench_sel_rows:
+                            if name == e.name:
+                                parts.extend(langs)
+                        lang_str = stt.fmt_languages(langs)
+                        lbl = self._bench_lang_labels.get(e.name)
+                        if lbl:
+                            GLib.idle_add(lbl.set_markup,
+                                f"<small><span foreground='{GREY}'>{GLib.markup_escape_text(lang_str)}</span></small>")
         threading.Thread(target=_check_bench_status, daemon=True).start()
 
         # ── Run controls ──────────────────────────────────────────────────────
@@ -1970,22 +1998,29 @@ notebook.bt-nb tab:checked label {
         page.pack_start(run_row, False, False, 0)
 
         # ── Resizable pane: engine list (top) ↕ results table (bottom) ───────
-        self.bench_store = Gtk.ListStore(str, str, str, str, str, str, str, str, str)
+        # engine, url, model, device, best_for, lang, time, accuracy, output, tooltip
+        self.bench_store = Gtk.ListStore(str, str, str, str, str, str, str, str, str, str)
         bench_sort = Gtk.TreeModelSort(model=self.bench_store)
         tree = Gtk.TreeView(model=bench_sort)
         tree.set_has_tooltip(True)
-        tree.set_tooltip_column(8)
-        for title, i, expand in [("Engine", 0, False), ("URL", 1, False),
-                                 ("Model", 2, False), ("Device", 3, False),
-                                 ("Best for", 4, False), ("Time (s)", 5, False),
-                                 ("Accuracy", 6, False), ("Output", 7, True)]:
+        tree.set_tooltip_column(9)
+        for title, i, expand, max_w in [
+                ("Engine",   0, False, 0),
+                ("URL",      1, False, 180),
+                ("Model",    2, False, 0),
+                ("Device",   3, False, 0),
+                ("Best for", 4, False, 0),
+                ("Lang",     5, False, 160),
+                ("Time (s)", 6, False, 0),
+                ("Accuracy", 7, False, 0),
+                ("Output",   8, True,  0)]:
             r = Gtk.CellRendererText()
             r.set_property("ellipsize", Pango.EllipsizeMode.END)
             col = Gtk.TreeViewColumn(title, r, text=i); col.set_resizable(True)
             col.set_sort_column_id(i)
             col.set_expand(expand)
-            if i == 1:
-                col.set_max_width(180)
+            if max_w:
+                col.set_max_width(max_w)
             tree.append_column(col)
         tree_sw = Gtk.ScrolledWindow()
         tree_sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
@@ -2136,8 +2171,9 @@ notebook.bt-nb tab:checked label {
             tooltip = row.error
         # Strip scheme from URL for display brevity (http://192.168.1.1:8080 → 192.168.1.1:8080)
         url_display = row.url.removeprefix("https://").removeprefix("http://").rstrip("/")
+        lang_display = stt.fmt_languages(row.languages)
         self.bench_store.append([row.engine, url_display, row.model, row.device, row.best_for,
-                                 f"{row.seconds:.2f}", acc, out_friendly, tooltip])
+                                 lang_display, f"{row.seconds:.2f}", acc, out_friendly, tooltip])
         return False
 
     def _bench_done(self, rows) -> bool:

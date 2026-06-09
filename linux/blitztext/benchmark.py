@@ -23,6 +23,7 @@ class BenchRow:
     model: str
     device: str       # "CPU" | "CUDA" | "remote"
     best_for: str     # "Short clips" | "Short / medium" | "Long / batch" | "Streaming"
+    languages: list[str]  # ISO 639-1 codes from /v1/models, empty if unknown
     ok: bool
     seconds: float
     wer: float
@@ -111,6 +112,19 @@ def run(engines, wav_path: Path, reference: str, *, language: str = "",
         run_list.append(e)
 
     device_cache: dict = {}
+    meta_cache: dict = {}   # url → list[ModelMeta]
+
+    def _get_langs(e) -> list[str]:
+        if e.is_local:
+            return []
+        url = e.url
+        if url not in meta_cache:
+            meta_cache[url] = stt.list_models_meta(url, e.api_key_env)
+        for m in meta_cache[url]:
+            if not e.model or m.id == e.model or m.id.endswith("/" + e.model):
+                return m.languages
+        return meta_cache[url][0].languages if meta_cache[url] else []
+
     rows: list[BenchRow] = []
     for e in run_list:
         tr = get_local_transcriber(e) if (e.is_local and get_local_transcriber) else None
@@ -122,6 +136,7 @@ def run(engines, wav_path: Path, reference: str, *, language: str = "",
             model=e.model or ("local" if e.is_local else "(default)"),
             device=_engine_device(e, tr, device_cache),
             best_for=_engine_best_for(e),
+            languages=_get_langs(e),
             ok=res.ok,
             seconds=res.seconds,
             wer=w,

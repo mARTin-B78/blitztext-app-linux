@@ -61,8 +61,31 @@ def status(engine: STTEngine, timeout: float = 2.0) -> bool:
     return reachable(engine.url, timeout)
 
 
+@dataclass
+class ModelMeta:
+    """Model id plus optional metadata (languages, etc.) from the server."""
+    id: str
+    languages: list[str] = field(default_factory=list)
+
+
+def fmt_languages(langs: list[str]) -> str:
+    """Compact display string for a language list, e.g. 'en, de, fr +45'."""
+    if not langs:
+        return "—"
+    if len(langs) >= 50:
+        return f"multilingual ({len(langs)})"
+    if len(langs) > 5:
+        return f"{', '.join(langs[:5])} +{len(langs) - 5}"
+    return ", ".join(langs)
+
+
 def list_models(base_url: str, api_key_env: str = "", timeout: float = 5.0) -> list[str]:
     """Fetch model ids from an OpenAI-compatible, Ollama-style, or Riva/NIM /models endpoint."""
+    return [m.id for m in list_models_meta(base_url, api_key_env, timeout)]
+
+
+def list_models_meta(base_url: str, api_key_env: str = "", timeout: float = 5.0) -> list[ModelMeta]:
+    """Like list_models() but returns ModelMeta with language info when available."""
     import os
 
     if not base_url:
@@ -81,26 +104,27 @@ def list_models(base_url: str, api_key_env: str = "", timeout: float = 5.0) -> l
         except (urllib.error.URLError, json.JSONDecodeError, OSError):
             return None
 
-    # 1. Standard OpenAI /models
+    # 1. Standard OpenAI /models — faster-whisper-server also returns "language"
     data = _get(base + "/models")
     if isinstance(data, dict):
         items = data.get("data")
-        if isinstance(items, list):  # OpenAI shape: {"data":[{"id":...}]}
-            return [m["id"] for m in items if isinstance(m, dict) and m.get("id")]
+        if isinstance(items, list):
+            result = [ModelMeta(id=m["id"], languages=m.get("language") or [])
+                      for m in items if isinstance(m, dict) and m.get("id")]
+            if result:
+                return result
         items = data.get("models")
-        if isinstance(items, list):  # Ollama shape: {"models":[{"name"/"model":...}]}
-            return [m.get("name") or m.get("model") for m in items
-                    if (m.get("name") or m.get("model"))]
+        if isinstance(items, list):  # Ollama shape
+            return [ModelMeta(id=m.get("name") or m.get("model", ""))
+                    for m in items if m.get("name") or m.get("model")]
 
-    # 2. NVIDIA Riva / NIM — exposes model info at /metadata
+    # 2. NVIDIA Riva / NIM
     data = _get(base + "/metadata")
     if isinstance(data, dict):
         for info in data.get("modelInfo") or []:
             name = info.get("shortName") or info.get("modelUrl") or ""
             if name:
-                # Strip the long tag suffix: keep everything before the first ':'
-                short = name.split(":")[0]
-                return [short]
+                return [ModelMeta(id=name.split(":")[0])]
 
     return []
 
