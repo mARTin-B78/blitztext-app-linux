@@ -196,7 +196,7 @@ def transcribe(
     language: str = "",
     hotwords: str = "",
     local_transcriber=None,
-    timeout: int = 300,
+    timeout: int = 30,
 ) -> str:
     if engine.is_local:
         if local_transcriber is None:
