@@ -316,14 +316,13 @@ def _infobox(parent: Gtk.Box, text: str) -> Gtk.Box:
 def _section_title(parent: Gtk.Box, text: str, margin_top: int = 16,
                    icon: str = "") -> None:
     """A small bold uppercase section header, with optional symbolic icon."""
-    row = Gtk.Box(spacing=5)
+    row = Gtk.Box(spacing=4)
     row.set_margin_top(margin_top); row.set_margin_bottom(3)
-    row.set_valign(Gtk.Align.CENTER)
     row.get_style_context().add_class("bt-section")
     if icon:
-        img = Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.SMALL_TOOLBAR)
+        img = Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.MENU)
+        img.set_pixel_size(14)
         img.set_valign(Gtk.Align.CENTER)
-        img.get_style_context().add_class("bt-section")
         row.pack_start(img, False, False, 0)
     lbl = Gtk.Label(xalign=0.0)
     lbl.set_valign(Gtk.Align.CENTER)
@@ -772,8 +771,9 @@ class SettingsDialog:
     font-size: small;
     letter-spacing: 1px;
     color: mix(@theme_fg_color, @theme_bg_color, 0.45);
-    margin-top: 14px;
-    margin-bottom: 2px;
+}
+.bt-section image {
+    margin: 0;
 }
 .bt-card {
     border-radius: 8px;
@@ -2424,6 +2424,32 @@ notebook.bt-nb tab:checked label {
         wrun = Gtk.Button(label="Run wakeword benchmark"); wrun.connect("clicked", self._run_wakeword_bench)
         wrun.set_halign(Gtk.Align.START)
         page.pack_start(wrun, False, False, 6)
+
+        # Results table: Engine | Wakeword | Voice | Detected | Total | Recall% | False fires | Time
+        # Col indices:      0         1        2        3          4       5           6           7
+        self.wwb_store = Gtk.ListStore(str, str, str, str, str, str, str, str, str)
+        ww_tree = Gtk.TreeView(model=self.wwb_store)
+        ww_tree.set_grid_lines(Gtk.TreeViewGridLines.HORIZONTAL)
+        for title, i, expand in [
+                ("Engine",       0, False),
+                ("Wakeword",     1, False),
+                ("Voice",        2, True),
+                ("Detected",     3, False),
+                ("Total",        4, False),
+                ("Recall %",     5, False),
+                ("False fires",  6, False),
+                ("Time (s)",     7, False)]:
+            r = Gtk.CellRendererText()
+            r.set_property("ellipsize", Pango.EllipsizeMode.END)
+            col = Gtk.TreeViewColumn(title, r, text=i, foreground=8)
+            col.set_resizable(True); col.set_expand(expand)
+            ww_tree.append_column(col)
+        ww_sw = Gtk.ScrolledWindow()
+        ww_sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        ww_sw.set_min_content_height(120)
+        ww_sw.add(ww_tree)
+        page.pack_start(ww_sw, True, True, 4)
+
         self.wwb_summary = Gtk.Label(xalign=0.0); self.wwb_summary.set_line_wrap(True)
         self.wwb_summary.set_selectable(True)
         page.pack_start(self.wwb_summary, False, False, 4)
@@ -2633,6 +2659,8 @@ notebook.bt-nb tab:checked label {
             for e in engines:
                 e.model = ww_override
 
+        if hasattr(self, "wwb_store"):
+            self.wwb_store.clear()
         self.wwb_summary.set_markup("<i>Synthesizing and streaming… this talks to your TTS "
                                     "and wyoming-openwakeword servers.</i>")
 
@@ -2666,35 +2694,58 @@ notebook.bt-nb tab:checked label {
         return False
 
     def _wwbench_done(self, runs: list) -> bool:
+        self.wwb_store.clear()
         if not runs:
             self.wwb_summary.set_markup(
                 '<span foreground="#ff3b30">No engines configured — add one in the Input tab.</span>')
             return False
-        # Check if all engines failed to synthesize
         if all(er.result.expected == 0 for er in runs):
             errs = {u.error for er in runs for u in er.result.utterances if u.error}
             hint = ("  " + GLib.markup_escape_text(next(iter(errs)))) if errs else ""
             self.wwb_summary.set_markup(
                 f"<span foreground='#ff3b30'>No utterances synthesized — check the TTS model/endpoint.</span>{hint}")
             return False
-        lines = []
+
+        GREEN, ORANGE, RED_C = "#34c759", "#ff9f0a", "#ff3b30"
+        summary_parts = []
         for er in runs:
             r = er.result
-            name_esc = GLib.markup_escape_text(er.name)
+            phrase = wakeword_bench.wakeword_phrase(er.model)
             if r.expected == 0:
-                lines.append(f"<b>{name_esc}</b>: no samples synthesized")
+                self.wwb_store.append([er.name, phrase, "—", "—", "—", "—", "—", "—", RED_C])
+                summary_parts.append(f"{er.name}: no samples")
                 continue
-            colour = "#34c759" if r.recall >= 0.9 and r.false_fires == 0 else (
-                "#ff9f0a" if r.recall >= 0.6 else "#ff3b30")
+            # Per-voice rows
             by_voice = r.recall_by_voice()
-            voice_bits = "  ".join(
-                f"{GLib.markup_escape_text(v)} {d}/{t}" for v, (d, t) in sorted(by_voice.items()))
-            lines.append(
-                f"<b>{name_esc}</b>  "
-                f"<span foreground='{colour}'><b>Recall {r.recall * 100:.0f}%</b></span> "
-                f"({r.detected}/{r.expected})  ·  False fires: {r.false_fires}  ·  {r.seconds:.0f}s"
-                + (f"\n<small>  per voice: {voice_bits}</small>" if len(by_voice) > 1 else ""))
-        self.wwb_summary.set_markup("\n".join(lines))
+            filler_fires = {v: sum(u.detections for u in r.filler
+                                   if u.ok and u.voice == v)
+                            for v in by_voice}
+            for voice, (det, tot) in sorted(by_voice.items()):
+                recall_pct = det / tot * 100 if tot else 0.0
+                col = GREEN if recall_pct >= 90 else (ORANGE if recall_pct >= 60 else RED_C)
+                ff = filler_fires.get(voice, 0)
+                self.wwb_store.append([
+                    er.name, phrase, voice,
+                    str(det), str(tot),
+                    f"{recall_pct:.0f}%",
+                    str(ff),
+                    f"{r.seconds:.1f}",
+                    col])
+            # Engine summary row (bold aggregates via colour only)
+            overall_col = GREEN if r.recall >= 0.9 and r.false_fires == 0 else (
+                ORANGE if r.recall >= 0.6 else RED_C)
+            self.wwb_store.append([
+                er.name, phrase, f"ALL ({len(by_voice)} voices)",
+                str(r.detected), str(r.expected),
+                f"{r.recall * 100:.0f}%",
+                str(r.false_fires),
+                f"{r.seconds:.1f}",
+                overall_col])
+            summary_parts.append(
+                f"{er.name}: {r.recall*100:.0f}% recall, {r.false_fires} false fires")
+
+        self.wwb_summary.set_markup("  ·  ".join(
+            GLib.markup_escape_text(p) for p in summary_parts))
         return False
 
     # ===== Manual ===========================================================

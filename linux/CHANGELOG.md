@@ -9,6 +9,20 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.20] - 2026-06-10
+
+### Added
+- **Wakeword benchmark results table.** Results are now shown in a TreeView
+  with one row per engine per voice: Engine | Wakeword | Voice | Detected |
+  Total | Recall % | False fires | Time. Rows are colour-coded green/orange/red
+  by recall. An aggregate "ALL (N voices)" row is appended per engine.
+
+### Fixed
+- **Section header icons now vertically centred with the headline text.**
+  The `.bt-section` CSS class was inadvertently applied to the icon widget,
+  giving it a 14 px top margin and pushing it down. The image no longer
+  receives that class; a `set_pixel_size(14)` pin ensures consistent sizing.
+
 ## [2.03.19] - 2026-06-10
 
 ### Added
