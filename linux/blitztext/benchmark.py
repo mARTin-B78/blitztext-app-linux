@@ -7,6 +7,7 @@ Benchmark tab to find the fastest and most accurate engine/model.
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,7 @@ from .routing import normalize
 @dataclass
 class BenchRow:
     engine: str
+    url: str          # base URL of the engine (empty for local)
     model: str
     device: str       # "CPU" | "CUDA" | "remote"
     best_for: str     # "Short clips" | "Short / medium" | "Long / batch" | "Streaming"
@@ -59,10 +61,13 @@ def wer(reference: str, hypothesis: str, *, case_sensitive: bool = False) -> flo
     return _edit_distance(ref, hyp) / len(ref)
 
 
-def _engine_device(engine, transcriber) -> str:
+def _engine_device(engine, transcriber, _cache: dict) -> str:
     if engine.is_local:
         return "CUDA" if getattr(transcriber, "device", "cpu") == "cuda" else "CPU"
-    return "remote"
+    url = engine.url
+    if url not in _cache:
+        _cache[url] = stt.detect_remote_device(url)
+    return _cache[url]
 
 
 def _engine_best_for(engine) -> str:
@@ -85,20 +90,37 @@ def _engine_best_for(engine) -> str:
 
 
 def run(engines, wav_path: Path, reference: str, *, language: str = "",
-        case_sensitive: bool = True, get_local_transcriber=None, progress=None) -> list[BenchRow]:
+        case_sensitive: bool = True, get_local_transcriber=None, progress=None,
+        expand_models: bool = False) -> list[BenchRow]:
     """Benchmark each engine; calls progress(row) as each finishes.
 
+    expand_models=True fetches available models for each remote engine and
+    runs one benchmark row per model instead of just the configured one.
     Accuracy is case-sensitive by default so wrong capitalisation counts.
     """
-    rows: list[BenchRow] = []
+    # Build the run list, optionally expanding remote engines by their models
+    run_list: list = []
     for e in engines:
+        if expand_models and not e.is_local and not e.is_streaming:
+            models = stt.list_models(e.url, e.api_key_env)
+            if len(models) > 1:
+                for m in models:
+                    run_list.append(dataclasses.replace(e, model=m,
+                                                        name=f"{e.name} [{m}]"))
+                continue
+        run_list.append(e)
+
+    device_cache: dict = {}
+    rows: list[BenchRow] = []
+    for e in run_list:
         tr = get_local_transcriber(e) if (e.is_local and get_local_transcriber) else None
         res = stt.benchmark(e, wav_path, language=language, local_transcriber=tr)
         w = wer(reference, res.text, case_sensitive=case_sensitive) if res.ok else 1.0
         row = BenchRow(
             engine=e.name,
+            url=e.url,
             model=e.model or ("local" if e.is_local else "(default)"),
-            device=_engine_device(e, tr),
+            device=_engine_device(e, tr, device_cache),
             best_for=_engine_best_for(e),
             ok=res.ok,
             seconds=res.seconds,

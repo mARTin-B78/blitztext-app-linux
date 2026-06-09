@@ -105,6 +105,38 @@ def list_models(base_url: str, api_key_env: str = "", timeout: float = 5.0) -> l
     return []
 
 
+def detect_remote_device(base_url: str, timeout: float = 3.0) -> str:
+    """Best-effort GPU/CPU detection for a remote STT server.
+
+    Tries faster-whisper-server's /info endpoint (returns {"device":"cuda",...}),
+    then NVIDIA NIM /metadata (GPU-only service). Falls back to "remote".
+    """
+    if not base_url:
+        return "remote"
+    base = base_url.rstrip("/")
+    try:
+        req = urllib.request.Request(base + "/info")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        if isinstance(data, dict):
+            dev = str(data.get("device") or data.get("compute_type") or "")
+            if "cuda" in dev.lower():
+                return "CUDA"
+            if dev:
+                return dev.upper()[:16]
+    except Exception:
+        pass
+    try:
+        req = urllib.request.Request(base + "/metadata")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        if isinstance(data, dict) and data.get("modelInfo"):
+            return "CUDA"  # NVIDIA NIM is always GPU
+    except Exception:
+        pass
+    return "remote"
+
+
 def _host_port(url: str) -> tuple[str | None, int]:
     try:
         u = urlparse(url if "://" in url else "http://" + url)

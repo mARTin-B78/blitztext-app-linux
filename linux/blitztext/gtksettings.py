@@ -1853,23 +1853,33 @@ notebook.bt-nb tab:checked label {
                     break
         wavf.connect("file-set", _on_wav_set)
 
+        run_row = Gtk.Box(spacing=16)
+        run_row.set_margin_bottom(2)
         run = Gtk.Button(label="Run benchmark"); run.connect("clicked", self._run_bench)
         run.set_halign(Gtk.Align.START)
-        page.pack_start(run, False, False, 6)
+        run_row.pack_start(run, False, False, 0)
+        self.bench_expand = Gtk.CheckButton(label="Test all models per engine")
+        self.bench_expand.set_tooltip_text(
+            "Fetch every available model from each remote engine and run a separate "
+            "benchmark row per model — useful to compare models on the same server.")
+        run_row.pack_start(self.bench_expand, False, False, 0)
+        page.pack_start(run_row, False, False, 6)
 
-        # cols: engine, model, device, best_for, time, accuracy, output_friendly, tooltip_full
-        self.bench_store = Gtk.ListStore(str, str, str, str, str, str, str, str)
+        # cols: engine, url, model, device, best_for, time, accuracy, output_friendly, tooltip_full
+        self.bench_store = Gtk.ListStore(str, str, str, str, str, str, str, str, str)
         tree = Gtk.TreeView(model=self.bench_store)
         tree.set_has_tooltip(True)
-        tree.set_tooltip_column(7)   # hover any row → full error text
-        for title, i, expand in [("Engine", 0, False), ("Model", 1, False), ("Device", 2, False),
-                                 ("Best for", 3, False), ("Time (s)", 4, False),
-                                 ("Accuracy", 5, False), ("Output", 6, True)]:
+        tree.set_tooltip_column(8)   # hover any row → full error / output text
+        for title, i, expand in [("Engine", 0, False), ("URL", 1, False),
+                                 ("Model", 2, False), ("Device", 3, False),
+                                 ("Best for", 4, False), ("Time (s)", 5, False),
+                                 ("Accuracy", 6, False), ("Output", 7, True)]:
             r = Gtk.CellRendererText()
-            if i == 6:
-                r.set_property("ellipsize", Pango.EllipsizeMode.END)
+            r.set_property("ellipsize", Pango.EllipsizeMode.END)
             col = Gtk.TreeViewColumn(title, r, text=i); col.set_resizable(True)
             col.set_expand(expand)
+            if i == 1:
+                col.set_max_width(180)  # keep URL column from dominating
             tree.append_column(col)
         sw = Gtk.ScrolledWindow(); sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         sw.add(tree); page.pack_start(sw, True, True, 4)
@@ -1959,11 +1969,14 @@ notebook.bt-nb tab:checked label {
         else:
             self.bench_summary.set_markup("<i>Running… (local models load on first use)</i>")
 
+        expand = self.bench_expand.get_active()
+
         def work():
             def prog(row):
                 GLib.idle_add(self._bench_add_row, row)
             rows = benchmark.run(engines, Path(wav), reference, language=self.cfg.language,
-                                 get_local_transcriber=self._transcriber_for, progress=prog)
+                                 get_local_transcriber=self._transcriber_for, progress=prog,
+                                 expand_models=expand)
             GLib.idle_add(self._bench_done, rows)
         threading.Thread(target=work, daemon=True).start()
 
@@ -1995,7 +2008,9 @@ notebook.bt-nb tab:checked label {
         else:
             out_friendly = f"⚠ {self._bench_friendly_error(row.error)}"
             tooltip = row.error
-        self.bench_store.append([row.engine, row.model, row.device, row.best_for,
+        # Strip scheme from URL for display brevity (http://192.168.1.1:8080 → 192.168.1.1:8080)
+        url_display = row.url.removeprefix("https://").removeprefix("http://").rstrip("/")
+        self.bench_store.append([row.engine, url_display, row.model, row.device, row.best_for,
                                  f"{row.seconds:.2f}", acc, out_friendly, tooltip])
         return False
 
