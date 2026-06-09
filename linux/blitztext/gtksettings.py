@@ -34,6 +34,21 @@ RESP_SAVE = 1
 RESP_SAVE_RESTART = 2
 GREEN, RED, GREY = "#34c759", "#ff3b30", "#b8b8be"
 
+_PICKER_EMOJIS = (
+    # Lightning / common defaults
+    "⚡", "🎤", "📝", "✉️", "📋", "💬", "📢", "🔔", "💡", "🔍",
+    # Status / actions
+    "✅", "❌", "🔄", "▶️", "⏺️", "🚀", "⭐", "✨", "🎯", "🏆",
+    # Tech / tools
+    "💻", "⌨️", "🔧", "⚙️", "🛠️", "💾", "📱", "🌐", "📊", "📈",
+    # People / reactions
+    "😀", "😊", "👍", "🤖", "🙌", "👋", "🎓", "🎵", "📖", "🔐",
+    # Writing / documents
+    "📧", "🗨️", "📨", "🗒️", "✏️", "🖊️", "📑", "🖋️", "📃", "📄",
+    # Misc useful
+    "🌟", "💫", "🔁", "🔀", "⏸️", "⏹️", "🏠", "💰", "🎶", "🌈",
+)
+
 
 def _dot(color: str) -> str:
     return f'<span foreground="{color}">●</span>'
@@ -399,9 +414,7 @@ class SettingsDialog:
         page.pack_start(form, True, True, 6)
         self.wf_name = _labeled(form, "Name", _entry(placeholder="Preset name"),
                                 tooltip="A short name for this action, shown in the main panel.")
-        self.wf_icon = _labeled(form, "Icon (emoji)", _entry(placeholder="⚡  (shown in the ‘matched preset’ notification)"),
-                                tooltip="An emoji shown next to this preset when a voice command matches it — "
-                                        "give each preset a distinct one so you can tell at a glance which fired.")
+        self.wf_icon = self._icon_field(form, "Icon (emoji)")
         self.wf_desc = _labeled(form, "Description", _entry(placeholder="Short description shown in the panel"),
                                 tooltip="One line explaining what this preset does.")
         self.wf_keywords = _labeled(form, "Keywords (comma)", _entry(placeholder="nicer email, bessere email"),
@@ -482,6 +495,48 @@ class SettingsDialog:
         self._wf_idx = -1
         self.wf_combo.set_active(0)
         self._wf_load(0)
+
+    def _icon_field(self, page: Gtk.Box, label: str, width: int = 130) -> Gtk.Entry:
+        TOOLTIP = ("An emoji shown next to this preset when a voice command matches it — "
+                   "give each preset a distinct one so you can tell at a glance which fired.")
+        row = Gtk.Box(spacing=10); row.set_margin_top(3); row.set_margin_bottom(3)
+        lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(width, -1)
+        lbl.set_tooltip_text(TOOLTIP)
+        row.pack_start(lbl, False, False, 0)
+        entry = Gtk.Entry(); entry.set_hexpand(True)
+        entry.set_placeholder_text("⚡")
+        entry.set_tooltip_text(TOOLTIP)
+        atk = entry.get_accessible()
+        if atk:
+            atk.set_name(label.replace("_", ""))
+            atk.set_description(TOOLTIP)
+        row.pack_start(entry, True, True, 0)
+        btn = Gtk.Button(label="😀")
+        btn.set_tooltip_text("Pick an emoji")
+        btn.connect("clicked", lambda _b: self._show_emoji_picker(btn, entry))
+        row.pack_start(btn, False, False, 0)
+        page.pack_start(row, False, False, 0)
+        return entry
+
+    def _show_emoji_picker(self, anchor: Gtk.Widget, entry: Gtk.Entry) -> None:
+        pop = Gtk.Popover(relative_to=anchor)
+        flow = Gtk.FlowBox()
+        flow.set_max_children_per_line(10)
+        flow.set_selection_mode(Gtk.SelectionMode.NONE)
+        flow.set_margin_top(6); flow.set_margin_bottom(6)
+        flow.set_margin_start(6); flow.set_margin_end(6)
+        for emoji in _PICKER_EMOJIS:
+            eb = Gtk.Button(label=emoji)
+            eb.set_relief(Gtk.ReliefStyle.NONE)
+            eb.connect("clicked", lambda _b, e=emoji: (entry.set_text(e), pop.popdown()))
+            flow.add(eb)
+        sw = Gtk.ScrolledWindow()
+        sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        sw.set_min_content_height(210)
+        sw.set_min_content_width(370)
+        sw.add(flow)
+        pop.add(sw)
+        pop.show_all()
 
     # ===== Engines ==========================================================
     def _build_engines(self, page: Gtk.Box) -> None:

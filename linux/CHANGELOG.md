@@ -9,6 +9,14 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [1.9.2] - 2026-06-09
+
+### Added
+- **Emoji picker for preset icons.** The "Icon (emoji)" field in Settings →
+  Presets now has a 😀 button that opens a scrollable emoji grid (60 common
+  emojis across six categories). Click any emoji to insert it — or keep typing
+  directly into the field as before.
+
 ## [1.9.1] - 2026-06-08
 
 ### Changed
