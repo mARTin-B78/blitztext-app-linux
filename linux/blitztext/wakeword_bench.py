@@ -247,7 +247,7 @@ def probe(tts_url: str, *, model: str, voice: str, api_key_env: str = "",
 
 def _wav_to_pcm16k(wav_bytes: bytes) -> bytes:
     """Decode a WAV blob to 16 kHz mono signed-16 PCM (linear resample)."""
-    import numpy as np
+    import numpy as np  # type: ignore[import-untyped]
 
     with wave.open(io.BytesIO(wav_bytes), "rb") as w:
         ch, width, rate, n = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
