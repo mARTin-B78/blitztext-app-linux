@@ -1244,7 +1244,7 @@ notebook.bt-nb tab:checked label {
         self.stt_type.connect("changed", self._stt_type_changed)
 
         # ── Device & precision card (local engines only) ─────────────────────
-        self.stt_dev_card = _card_section(box, "Internal engine — device & precision", margin_top=4, icon="computer-symbolic")
+        self.stt_dev_card = _card_section(box, "", margin_top=4)
         self.stt_device  = _labeled(self.stt_dev_card, "Device", _type_combo(_DEVICE_OPTIONS, self.cfg.device),
                                     tooltip="Which processor runs the speech model. "
                                             "Auto tries your GPU first. GPU (CUDA) requires NVIDIA — much faster than CPU.")

@@ -9,6 +9,13 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.14] - 2026-06-10
+
+### Fixed
+- **Engines tab.** Removed the "Internal engine — device & precision" section
+  header. The Device and Compute type fields already only appear when a local
+  engine type is selected; the separate header was redundant.
+
 ## [2.03.13] - 2026-06-10
 
 ### Changed
