@@ -79,6 +79,24 @@ def fmt_languages(langs: list[str]) -> str:
     return ", ".join(langs)
 
 
+def _api_base(url: str) -> str:
+    """Strip endpoint-specific path suffixes so metadata/model probes hit the right root.
+
+    http://host:8081/v1/transcribe  →  http://host:8081/v1
+    http://host:8081/transcribe     →  http://host:8081
+    http://host:8081/v1             →  http://host:8081/v1  (unchanged)
+    """
+    from urllib.parse import urlparse, urlunparse
+    p = urlparse(url.rstrip("/"))
+    path = p.path.rstrip("/")
+    v1_idx = path.find("/v1")
+    if v1_idx >= 0:
+        path = path[:v1_idx + 3]   # keep up to and including /v1
+    elif path not in ("", "/"):
+        path = ""                   # strip unknown custom suffix entirely
+    return urlunparse((p.scheme, p.netloc, path, "", "", ""))
+
+
 def list_models(base_url: str, api_key_env: str = "", timeout: float = 5.0) -> list[str]:
     """Fetch model ids from an OpenAI-compatible, Ollama-style, or Riva/NIM /models endpoint."""
     return [m.id for m in list_models_meta(base_url, api_key_env, timeout)]
@@ -90,7 +108,7 @@ def list_models_meta(base_url: str, api_key_env: str = "", timeout: float = 5.0)
 
     if not base_url:
         return []
-    base = base_url.rstrip("/")
+    base = _api_base(base_url)
     headers: dict[str, str] = {}
     key = os.environ.get(api_key_env) if api_key_env else None
     if key:
@@ -137,7 +155,7 @@ def detect_remote_device(base_url: str, timeout: float = 3.0) -> str:
     """
     if not base_url:
         return "remote"
-    base = base_url.rstrip("/")
+    base = _api_base(base_url)
     try:
         req = urllib.request.Request(base + "/info")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -178,7 +196,7 @@ def transcribe(
     language: str = "",
     hotwords: str = "",
     local_transcriber=None,
-    timeout: int = 60,
+    timeout: int = 300,
 ) -> str:
     if engine.is_local:
         if local_transcriber is None:
