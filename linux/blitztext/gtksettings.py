@@ -1894,7 +1894,8 @@ notebook.bt-nb tab:checked label {
 
         # cols: engine, url, model, device, best_for, time, accuracy, output_friendly, tooltip_full
         self.bench_store = Gtk.ListStore(str, str, str, str, str, str, str, str, str)
-        tree = Gtk.TreeView(model=self.bench_store)
+        bench_sort = Gtk.TreeModelSort(model=self.bench_store)
+        tree = Gtk.TreeView(model=bench_sort)
         tree.set_has_tooltip(True)
         tree.set_tooltip_column(8)   # hover any row → full error / output text
         for title, i, expand in [("Engine", 0, False), ("URL", 1, False),
@@ -1904,6 +1905,7 @@ notebook.bt-nb tab:checked label {
             r = Gtk.CellRendererText()
             r.set_property("ellipsize", Pango.EllipsizeMode.END)
             col = Gtk.TreeViewColumn(title, r, text=i); col.set_resizable(True)
+            col.set_sort_column_id(i)  # click header to sort
             col.set_expand(expand)
             if i == 1:
                 col.set_max_width(180)  # keep URL column from dominating
