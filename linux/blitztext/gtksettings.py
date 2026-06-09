@@ -2058,6 +2058,17 @@ notebook.bt-nb tab:checked label {
         tree = Gtk.TreeView(model=bench_sort)
         tree.set_has_tooltip(True)
         tree.set_tooltip_column(10)
+
+        # Numeric sort: strip %, "server", "—" then compare as float (non-numeric → inf)
+        def _num_cmp(model, a, b, col):
+            def _f(v):
+                try:
+                    return float(v.rstrip("%"))
+                except (ValueError, AttributeError):
+                    return float("inf")
+            va, vb = _f(model.get_value(a, col)), _f(model.get_value(b, col))
+            return (va > vb) - (va < vb)
+
         for title, i, expand, max_w in [
                 ("Engine",   0, False, 0),
                 ("URL",      1, False, 180),
@@ -2077,6 +2088,8 @@ notebook.bt-nb tab:checked label {
             if max_w:
                 col.set_max_width(max_w)
             tree.append_column(col)
+            if i in (6, 7, 8):  # Time, Accuracy, RAM — sort numerically
+                bench_sort.set_sort_func(i, _num_cmp, i)
         tree_sw = Gtk.ScrolledWindow()
         tree_sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         tree_sw.add(tree)
