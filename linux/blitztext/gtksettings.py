@@ -89,10 +89,13 @@ _STT_TEMPLATES: list[tuple[str, str, str, str, str, int]] = [
 
 _WW_TEMPLATES: list[tuple[str, str, str]] = [
     # (name, uri, model)
-    ("Local wyoming-openwakeword",     "tcp://127.0.0.1:10400",        "okay_computer"),
-    ("Local wyoming (port 10401)",     "tcp://127.0.0.1:10401",        "okay_computer"),
+    ("Local :10400 — okay_computer",   "tcp://127.0.0.1:10400", "okay_computer"),
+    ("Local :10401 — okay_computer",   "tcp://127.0.0.1:10401", "okay_computer"),
+    ("Local :10402 — okay_computer",   "tcp://127.0.0.1:10402", "okay_computer"),
+    ("Local :10403 — okay_computer",   "tcp://127.0.0.1:10403", "okay_computer"),
+    ("Local :10400 — hey_jarvis",      "tcp://127.0.0.1:10400", "hey_jarvis"),
+    ("Local :10400 — alexa",           "tcp://127.0.0.1:10400", "alexa"),
     ("Home Assistant wyoming",         "tcp://homeassistant.local:10400", "okay_nabu"),
-    ("Docker wyoming-openwakeword",    "tcp://127.0.0.1:10400",        "hey_jarvis"),
 ]
 
 # (cat_emoji, label, [emojis]) — standard Unicode categories, WhatsApp-style
@@ -1715,6 +1718,15 @@ notebook.bt-nb tab:checked label {
         _switch_row(ww_card, "Enable wakeword", self.ww_enabled, width=LW,
                     description="Start dictation with a spoken keyword via an external openWakeWord server.")
 
+        _infobox(page,
+            "Each preset connects to one wyoming-openwakeword server instance. "
+            "Add one preset per server. Press ⟳ to auto-detect the available wakeword models "
+            "from that server.\n\n"
+            "To add new wakeword models: place your .onnx model files in the server's "
+            "model directory and restart it, e.g.:\n"
+            "  docker run … -v ~/wakewords:/data/models  homeassistant/wyoming-openwakeword\n"
+            "Common built-in models: okay_computer · hey_jarvis · alexa · hey_mycroft · computer")
+
         # ── Engine selector bar ───────────────────────────────────────────────
         ww_bar = Gtk.Box(spacing=6); ww_bar.set_margin_top(6)
         self.ww_combo = Gtk.ComboBoxText(); self.ww_combo.set_hexpand(True)
@@ -1731,10 +1743,13 @@ notebook.bt-nb tab:checked label {
         qs.connect("clicked", self._show_ww_templates); ww_bar.pack_start(qs, False, False, 0)
         for label, cb, tip in (
             ("Delete", self._ww_delete, "Remove this wakeword engine preset"),
-            ("⟳",      lambda _b: self._ww_reload(), "Re-check connection and reload models"),
+            ("⟳",      lambda _b: self._ww_reload(), "Re-check connection and reload models from the server"),
         ):
             b = Gtk.Button(label=label); b.set_tooltip_text(tip); b.connect("clicked", cb)
             ww_bar.pack_end(b, False, False, 0)
+        self.ww_status = Gtk.Label(xalign=0.0)
+        self.ww_status.get_style_context().add_class("dim-label")
+        ww_bar.pack_end(self.ww_status, False, False, 4)
         page.pack_start(ww_bar, False, False, 2)
 
         # ── Engine config card ────────────────────────────────────────────────
@@ -2026,6 +2041,8 @@ notebook.bt-nb tab:checked label {
 
     def _ww_reload(self) -> None:
         """Probe the dot and fetch models from the server (⟳ button)."""
+        if hasattr(self, "ww_status"):
+            self.ww_status.set_text("Connecting…")
         self._probe_dot(self.ww_dot, self.ww_uri.get_text(), 10400)
         self._ww_fetch_models()
 
@@ -2039,7 +2056,7 @@ notebook.bt-nb tab:checked label {
             host = parsed.hostname or "127.0.0.1"
             port = parsed.port or 10400
             try:
-                with socket.create_connection((host, port), timeout=2.0) as s:
+                with socket.create_connection((host, port), timeout=3.0) as s:
                     s.sendall(json.dumps({"type": "describe"}).encode() + b"\n")
                     line = b""
                     while not line.endswith(b"\n"):
@@ -2054,12 +2071,28 @@ notebook.bt-nb tab:checked label {
                         if not chunk: break
                         payload += chunk
                     data = json.loads(payload.decode("utf-8"))
-                    models = [m.get("name") for w in data.get("wake", []) for m in w.get("models", [])]
-                    if models:
-                        cur = _combo_text(self.ww_model)
-                        GLib.idle_add(lambda: _fill_combo(self.ww_model, models, cur or models[0]))
-            except Exception:
-                pass  # offline — dot already shows red
+                    models = [m.get("name") for w in data.get("wake", [])
+                              for m in w.get("models", []) if m.get("name")]
+                    def apply(models=models):
+                        if models:
+                            cur = _combo_text(self.ww_model)
+                            _fill_combo(self.ww_model, models, cur or models[0])
+                            if hasattr(self, "ww_status"):
+                                self.ww_status.set_markup(
+                                    f'<span foreground="#4a8" size="small">'
+                                    f'{len(models)} model{"s" if len(models) != 1 else ""} loaded: '
+                                    f'{", ".join(models)}</span>')
+                        else:
+                            if hasattr(self, "ww_status"):
+                                self.ww_status.set_markup(
+                                    '<span foreground="#888" size="small">Connected — no models found</span>')
+                    GLib.idle_add(apply)
+            except Exception as exc:
+                def show_err(exc=exc):
+                    if hasattr(self, "ww_status"):
+                        self.ww_status.set_markup(
+                            f'<span foreground="#c44" size="small">Unreachable: {exc}</span>')
+                GLib.idle_add(show_err)
         threading.Thread(target=work, daemon=True).start()
 
     def _ww_test(self, _b) -> None:
@@ -2503,15 +2536,22 @@ notebook.bt-nb tab:checked label {
         def work():
             models = stt.list_models(url, key)
             voices = wakeword_bench.list_voices(url, api_key_env=key)
+            # Kokoro and similar servers expose each voice as a /models entry.
+            # Skip populating the model combo when all "models" are also voices.
+            voices_set = set(voices)
+            real_models = [m for m in models if m not in voices_set]
 
             def apply():
-                _fill_combo(self.wwb_model, models, self.wwb_model.get_text())
+                if real_models:
+                    _fill_combo(self.wwb_model, real_models, self.wwb_model.get_text())
                 self.wwb_voices.set_models(voices)
                 if voices and not self.wwb_voices.get_text().strip():
                     self.wwb_voices.set_text(", ".join(voices))   # default: test them all
-                colour = "#34c759" if (models or voices) else "#ff9f0a"
+                colour = "#34c759" if (real_models or voices) else "#ff9f0a"
+                model_hint = (f"{len(real_models)} models, " if real_models
+                              else "type model id manually, ")
                 self.wwb_test_lbl.set_markup(
-                    f"<span foreground='{colour}'>Loaded {len(models)} models, "
+                    f"<span foreground='{colour}'>Loaded {model_hint}"
                     f"{len(voices)} voices.</span>")
                 return False
             GLib.idle_add(apply)
@@ -2553,48 +2593,64 @@ notebook.bt-nb tab:checked label {
                                     "and wyoming-openwakeword servers.</i>")
 
         def work():
-            def prog(done, total, u):
-                GLib.idle_add(self._wwbench_progress, done, total, u)
+            def prog(ei, n_eng, eng_name, ui, total, u):
+                GLib.idle_add(self._wwbench_progress, ei, n_eng, eng_name, ui, total, u)
             try:
-                res = wakeword_bench.run(
+                runs = wakeword_bench.run(
                     self.cfg.wakeword_engines,
                     tts_url=url, tts_api_key_env=key, tts_model=model, voices=voices,
                     language=self.cfg.language, count=count, progress=prog)
             except Exception as exc:  # noqa: BLE001 - surface setup errors
                 GLib.idle_add(self._wwbench_error, str(exc))
                 return
-            GLib.idle_add(self._wwbench_done, res)
+            GLib.idle_add(self._wwbench_done, runs)
         threading.Thread(target=work, daemon=True).start()
 
-    def _wwbench_progress(self, done, total, u) -> bool:
+    def _wwbench_progress(self, ei, n_eng, eng_name, ui, total, u) -> bool:
         tag = "✓" if (u.ok and (u.detections > 0) == u.has_wakeword) else ("•" if u.ok else "⚠")
         kind = "wake" if u.has_wakeword else "filler"
+        eng_prefix = (f"[{ei}/{n_eng}] <b>{GLib.markup_escape_text(eng_name)}</b>  "
+                      if n_eng > 1 else "")
         self.wwb_summary.set_markup(
-            f"<i>{done}/{total}</i>  {tag} {kind} · {GLib.markup_escape_text(u.voice)}"
-            + (f" · <span foreground='#ff3b30'>{GLib.markup_escape_text(u.error)}</span>" if u.error else ""))
+            f"{eng_prefix}<i>{ui}/{total}</i>  {tag} {kind} · {GLib.markup_escape_text(u.voice)}"
+            + (f" · <span foreground='#ff3b30'>{GLib.markup_escape_text(u.error)}</span>"
+               if u.error else ""))
         return False
 
     def _wwbench_error(self, msg: str) -> bool:
         self.wwb_summary.set_markup(f"<span foreground='#ff3b30'>{GLib.markup_escape_text(msg)}</span>")
         return False
 
-    def _wwbench_done(self, res) -> bool:
-        if res.expected == 0:
-            errs = {u.error for u in res.utterances if u.error}
+    def _wwbench_done(self, runs: list) -> bool:
+        if not runs:
+            self.wwb_summary.set_markup(
+                '<span foreground="#ff3b30">No engines configured — add one in the Input tab.</span>')
+            return False
+        # Check if all engines failed to synthesize
+        if all(er.result.expected == 0 for er in runs):
+            errs = {u.error for er in runs for u in er.result.utterances if u.error}
             hint = ("  " + GLib.markup_escape_text(next(iter(errs)))) if errs else ""
             self.wwb_summary.set_markup(
                 f"<span foreground='#ff3b30'>No utterances synthesized — check the TTS model/endpoint.</span>{hint}")
             return False
-        by_voice = res.recall_by_voice()
-        voice_bits = "  ".join(
-            f"{GLib.markup_escape_text(v)} {d}/{t}" for v, (d, t) in sorted(by_voice.items()))
-        colour = "#34c759" if res.recall >= 0.9 and res.false_fires == 0 else (
-            "#ff9f0a" if res.recall >= 0.6 else "#ff3b30")
-        self.wwb_summary.set_markup(
-            f"<b><span foreground='{colour}'>Recall {res.recall * 100:.0f}%</span></b> "
-            f"({res.detected}/{res.expected} fired)   ·   "
-            f"<b>False fires:</b> {res.false_fires} in {len(res.filler)} filler   ·   "
-            f"{res.seconds:.0f}s\n<small>per voice: {voice_bits}</small>")
+        lines = []
+        for er in runs:
+            r = er.result
+            name_esc = GLib.markup_escape_text(er.name)
+            if r.expected == 0:
+                lines.append(f"<b>{name_esc}</b>: no samples synthesized")
+                continue
+            colour = "#34c759" if r.recall >= 0.9 and r.false_fires == 0 else (
+                "#ff9f0a" if r.recall >= 0.6 else "#ff3b30")
+            by_voice = r.recall_by_voice()
+            voice_bits = "  ".join(
+                f"{GLib.markup_escape_text(v)} {d}/{t}" for v, (d, t) in sorted(by_voice.items()))
+            lines.append(
+                f"<b>{name_esc}</b>  "
+                f"<span foreground='{colour}'><b>Recall {r.recall * 100:.0f}%</b></span> "
+                f"({r.detected}/{r.expected})  ·  False fires: {r.false_fires}  ·  {r.seconds:.0f}s"
+                + (f"\n<small>  per voice: {voice_bits}</small>" if len(by_voice) > 1 else ""))
+        self.wwb_summary.set_markup("\n".join(lines))
         return False
 
     # ===== Manual ===========================================================

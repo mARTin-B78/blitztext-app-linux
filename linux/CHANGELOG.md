@@ -9,6 +9,32 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.18] - 2026-06-10
+
+### Fixed
+- **TTS model dropdown no longer floods with voice names.** Servers like Kokoro
+  expose each voice as a `/models` entry. The ⟳ button now detects this case
+  and skips filling the model combo, prompting the user to type the model id
+  manually (e.g. `kokoro`). The status line shows "type model id manually" as
+  a hint.
+
+### Changed
+- **Wakeword benchmark runs across all engines and shows per-engine results.**
+  Previously a callback signature mismatch caused the benchmark to crash when
+  more than one engine was configured. Now progress shows `[1/3] engine name`,
+  and the results panel lists Recall / False fires / time per engine.
+
+## [2.03.17] - 2026-06-10
+
+### Added
+- **Wakeword model fetch feedback.** The ⟳ button now shows a status line while
+  connecting; after loading it reports how many models were found (with their
+  names) or "Unreachable" if the server is down.
+- **Wakeword Quickstart covers all four ports.** The Quickstart menu now lists
+  presets for ports 10400–10403, plus `hey_jarvis` and `alexa` variants.
+- **Wakeword info box.** An info banner explains how wyoming-openwakeword works,
+  where to put model files, and lists the common built-in models.
+
 ## [2.03.16] - 2026-06-10
 
 ### Added
