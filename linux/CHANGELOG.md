@@ -9,6 +9,12 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.11] - 2026-06-09
+
+### Added
+- **Resize grip indicator.** A dotted SE-corner grip is drawn over the
+  bottom-right of the settings window so users discover it is resizable.
+
 ## [2.03.10] - 2026-06-09
 
 ### Fixed

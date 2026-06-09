@@ -787,7 +787,20 @@ notebook.bt-nb tab:checked label {
 
         nb = Gtk.Notebook()
         nb.get_style_context().add_class("bt-nb")
-        self.dlg.get_content_area().pack_start(nb, True, True, 0)
+
+        # Resize-grip overlay — draws the classic dotted SE grip so users know
+        # the window is resizable.
+        _overlay = Gtk.Overlay()
+        _overlay.add(nb)
+        _grip = Gtk.DrawingArea()
+        _grip.set_size_request(18, 18)
+        _grip.set_halign(Gtk.Align.END)
+        _grip.set_valign(Gtk.Align.END)
+        _grip.set_can_focus(False)
+        _grip.connect("draw", self._draw_resize_grip)
+        _overlay.add_overlay(_grip)
+        _overlay.set_overlay_pass_through(_grip, True)
+        self.dlg.get_content_area().pack_start(_overlay, True, True, 0)
         # Build each tab lazily on first view so the dialog opens instantly. The
         # heavy bits are the Gtk.FileChooserButton pickers in Input/Benchmark
         # (~0.2s each to construct); deferring them until you visit that tab keeps
@@ -2530,6 +2543,21 @@ notebook.bt-nb tab:checked label {
     def _log_copy(self) -> None:
         cb = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
         cb.set_text("\n".join(logbuffer.lines(self._log_min_level())), -1)
+
+    def _draw_resize_grip(self, _da, cr) -> None:
+        """Draw a 3×3 dotted SE resize-grip in the DrawingArea."""
+        import math
+        w = _da.get_allocated_width()
+        h = _da.get_allocated_height()
+        cr.set_source_rgba(0.55, 0.55, 0.55, 0.65)
+        spacing, radius = 5, 1.5
+        for row in range(3):
+            for col in range(3):
+                if row + col >= 2:   # lower-right triangle only
+                    cx = w - 3 + (col - 2) * spacing
+                    cy = h - 3 + (row - 2) * spacing
+                    cr.arc(cx, cy, radius, 0, 2 * math.pi)
+                    cr.fill()
 
     def _cleanup(self) -> None:
         self._stop_meter()
