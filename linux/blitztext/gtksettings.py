@@ -1933,7 +1933,7 @@ notebook.bt-nb tab:checked label {
 
         sel_sw = Gtk.ScrolledWindow()
         sel_sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        sel_sw.set_min_content_height(60)
+        sel_sw.set_min_content_height(80)
         sel_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
         sel_list.set_margin_start(4); sel_list.set_margin_end(4)
         sel_list.set_margin_top(2); sel_list.set_margin_bottom(2)
@@ -2056,9 +2056,10 @@ notebook.bt-nb tab:checked label {
         results_box.pack_start(self.bench_summary, False, False, 0)
 
         paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
-        paned.pack1(sel_sw, resize=True, shrink=True)
-        paned.pack2(results_box, resize=True, shrink=True)
+        paned.pack1(sel_sw, resize=True, shrink=False)
+        paned.pack2(results_box, resize=True, shrink=False)
         paned.set_position(180)  # default: engine list gets ~180px, rest goes to results
+        paned.set_size_request(-1, 320)  # never collapse below 320px total
         page.pack_start(paned, True, True, 4)
 
         # --- Wakeword benchmark ---------------------------------------------
@@ -2391,7 +2392,7 @@ notebook.bt-nb tab:checked label {
         nb.append_page(changelog_box, Gtk.Label(label="Changelog"))
 
         license_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        license_box.pack_start(_text_panel(license_text, height=300), True, True, 0)
+        license_box.pack_start(_md_panel(license_text, height=300), True, True, 0)
         nb.append_page(license_box, Gtk.Label(label="License"))
 
 
