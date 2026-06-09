@@ -1857,12 +1857,13 @@ notebook.bt-nb tab:checked label {
         run.set_halign(Gtk.Align.START)
         page.pack_start(run, False, False, 6)
 
-        self.bench_store = Gtk.ListStore(str, str, str, str, str, str)
+        self.bench_store = Gtk.ListStore(str, str, str, str, str, str, str)
         tree = Gtk.TreeView(model=self.bench_store)
         for title, i, expand in [("Engine", 0, False), ("Model", 1, False), ("Device", 2, False),
-                                 ("Time (s)", 3, False), ("Accuracy", 4, False), ("Output", 5, True)]:
+                                 ("Best for", 3, False), ("Time (s)", 4, False),
+                                 ("Accuracy", 5, False), ("Output", 6, True)]:
             r = Gtk.CellRendererText()
-            if i == 5:
+            if i == 6:
                 r.set_property("ellipsize", Pango.EllipsizeMode.END)
             col = Gtk.TreeViewColumn(title, r, text=i); col.set_resizable(True)
             col.set_expand(expand)
@@ -1951,7 +1952,8 @@ notebook.bt-nb tab:checked label {
     def _bench_add_row(self, row) -> bool:
         acc = f"{row.accuracy:.1f}%" if row.ok else "—"
         out = row.text if row.ok else f"⚠ {row.error}"
-        self.bench_store.append([row.engine, row.model, row.device, f"{row.seconds:.2f}", acc, out])
+        self.bench_store.append([row.engine, row.model, row.device, row.best_for,
+                                 f"{row.seconds:.2f}", acc, out])
         return False
 
     def _bench_done(self, rows) -> bool:

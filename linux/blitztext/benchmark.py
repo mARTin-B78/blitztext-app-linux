@@ -19,7 +19,8 @@ from .routing import normalize
 class BenchRow:
     engine: str
     model: str
-    device: str       # "CPU" | "GPU" | "remote"
+    device: str       # "CPU" | "CUDA" | "remote"
+    best_for: str     # "Short clips" | "Short / medium" | "Long / batch" | "Streaming"
     ok: bool
     seconds: float
     wer: float
@@ -60,8 +61,27 @@ def wer(reference: str, hypothesis: str, *, case_sensitive: bool = False) -> flo
 
 def _engine_device(engine, transcriber) -> str:
     if engine.is_local:
-        return "GPU" if getattr(transcriber, "device", "cpu") == "cuda" else "CPU"
+        return "CUDA" if getattr(transcriber, "device", "cpu") == "cuda" else "CPU"
     return "remote"
+
+
+def _engine_best_for(engine) -> str:
+    if engine.type == "riva_realtime":
+        return "Streaming"
+    model = (engine.model or "").lower()
+    name = engine.name.lower()
+    if any(x in name for x in ("stream", "realtime", "real-time", "live")):
+        return "Streaming"
+    if engine.is_local:
+        if any(x in model for x in ("tiny", "base")):
+            return "Short clips"
+        if any(x in model for x in ("large",)):
+            return "Long / batch"
+        return "Short / medium"
+    # Remote endpoint
+    if any(x in name for x in ("large", "batch")):
+        return "Long / batch"
+    return "Short / medium"
 
 
 def run(engines, wav_path: Path, reference: str, *, language: str = "",
@@ -79,6 +99,7 @@ def run(engines, wav_path: Path, reference: str, *, language: str = "",
             engine=e.name,
             model=e.model or ("local" if e.is_local else "(default)"),
             device=_engine_device(e, tr),
+            best_for=_engine_best_for(e),
             ok=res.ok,
             seconds=res.seconds,
             wer=w,
