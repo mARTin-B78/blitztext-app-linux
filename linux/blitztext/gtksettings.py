@@ -1210,6 +1210,12 @@ notebook.bt-nb tab:checked label {
         self.stt_result.set_valign(Gtk.Align.START)
         test_row.pack_start(self.stt_result, True, True, 0)
         box.pack_start(test_row, False, False, 2)
+
+        self.stt_bench_info = Gtk.Label(xalign=0.0)
+        self.stt_bench_info.set_use_markup(True)
+        self.stt_bench_info.set_margin_top(2)
+        box.pack_start(self.stt_bench_info, False, False, 0)
+
         self._stt_load(self.stt_combo.get_active())
         return box
 
@@ -1278,6 +1284,22 @@ notebook.bt-nb tab:checked label {
         else:
             _fill_combo(self.stt_model, [], e.model)
         self._stt_idx = idx
+        self._stt_update_bench_info(e.name)
+
+    def _stt_update_bench_info(self, engine_name: str) -> None:
+        if not hasattr(self, "stt_bench_info"):
+            return
+        last = self.cfg.bench_last.get(engine_name)
+        if not last:
+            self.stt_bench_info.set_markup("")
+            return
+        if last.get("ok"):
+            self.stt_bench_info.set_markup(
+                f'<span foreground="#888" size="small">Last benchmark: '
+                f'<b>{last["seconds"]:.2f}s</b> · <b>{last["accuracy"]:.1f}%</b> accuracy</span>')
+        else:
+            self.stt_bench_info.set_markup(
+                '<span foreground="#888" size="small">Last benchmark: <b>failed</b></span>')
 
     def _stt_commit(self) -> None:
         idx = self._stt_idx
@@ -2174,6 +2196,16 @@ notebook.bt-nb tab:checked label {
         lang_display = stt.fmt_languages(row.languages)
         self.bench_store.append([row.engine, url_display, row.model, row.device, row.best_for,
                                  lang_display, f"{row.seconds:.2f}", acc, out_friendly, tooltip])
+        # Persist result so Engines tab can show it
+        self.cfg.bench_last[row.engine] = {
+            "seconds": row.seconds, "accuracy": row.accuracy, "ok": row.ok,
+        }
+        save(self.cfg)
+        # Refresh info label if this engine is currently selected in Engines tab
+        if hasattr(self, "stt_name"):
+            cur = self.cfg.stt_engines[self._stt_idx].name if 0 <= self._stt_idx < len(self.cfg.stt_engines) else ""
+            if cur == row.engine:
+                self._stt_update_bench_info(row.engine)
         return False
 
     def _bench_done(self, rows) -> bool:

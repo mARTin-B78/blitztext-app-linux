@@ -124,6 +124,7 @@ class Config:
     bench_wav: str = ""
     bench_ref: str = ""
     bench_expand_models: bool = False
+    bench_last: dict = field(default_factory=dict)  # {engine_name: {seconds, accuracy, ok}}
     # workflows
     workflows: list[Workflow] = field(default_factory=list)
 
@@ -243,6 +244,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
         bench_wav=data.get("benchmark", {}).get("wav", ""),
         bench_ref=data.get("benchmark", {}).get("ref", ""),
         bench_expand_models=bool(data.get("benchmark", {}).get("expand_models", False)),
+        bench_last=dict(data.get("benchmark", {}).get("last", {})),
     )
 
     for entry in data.get("workflow", []):
@@ -382,6 +384,7 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "wav": cfg.bench_wav,
             "ref": cfg.bench_ref,
             "expand_models": cfg.bench_expand_models,
+            "last": cfg.bench_last,
         },
         "wakeword_engine": [
             {"name": e.name, "uri": e.uri, "model": e.model} for e in cfg.wakeword_engines
