@@ -193,7 +193,13 @@ def _transcribe_remote(engine: STTEngine, audio_path: Path, *, language: str, pr
     import os
 
     base = engine.url.rstrip("/")
-    endpoint = base + "/audio/transcriptions"
+    # If path is non-standard (not empty / /v1 / /v1.0), treat the full URL as
+    # the endpoint — supports WhisperX (/transcribe) and other custom paths.
+    _path = urlparse(base).path.rstrip("/")
+    if _path in ("", "/v1", "/v1.0"):
+        endpoint = base + "/audio/transcriptions"
+    else:
+        endpoint = base
     fields: dict[str, str] = {"response_format": "json"}
     if engine.model:
         fields["model"] = engine.model

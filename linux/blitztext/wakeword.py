@@ -35,7 +35,7 @@ def set_muted(muted: bool) -> None:
         elif os.path.exists(MUTE_FILE):
             os.remove(MUTE_FILE)
     except OSError as e:  # noqa: BLE001 - mute is best-effort, never crash
-        logbuffer.log(f"[wakeword] Could not update mute flag: {e}")
+        logbuffer.log(f"[wakeword] Could not update mute flag: {e}", level="WARNING")
 
 
 class WakewordListener:
@@ -67,7 +67,7 @@ class WakewordListener:
             try:
                 self._stream()
             except Exception as e:
-                logbuffer.log(f"[wakeword] Connection error: {e}")
+                logbuffer.log(f"[wakeword] Connection error: {e}", level="WARNING")
                 time.sleep(3)  # Retry backoff
 
     def _stream(self):

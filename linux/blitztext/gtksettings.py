@@ -1825,10 +1825,10 @@ notebook.bt-nb tab:checked label {
     def _ww_load(self) -> None:
         self._probe_dot(self.ww_dot, self.ww_uri.get_text(), 10400)
 
+        uri = self.ww_uri.get_text().strip()  # capture on GTK thread before spawning
         def work():
             import socket, json
             from urllib.parse import urlparse
-            uri = self.ww_uri.get_text().strip()
             parsed = urlparse(uri)
             host = parsed.hostname or "127.0.0.1"
             port = parsed.port or 10400
@@ -2435,6 +2435,17 @@ notebook.bt-nb tab:checked label {
         bar = Gtk.Box(spacing=8); bar.set_margin_top(6)
         self.log_autoscroll = Gtk.CheckButton(label="Auto-scroll"); self.log_autoscroll.set_active(True)
         bar.pack_start(self.log_autoscroll, False, False, 0)
+
+        lvl_lbl = Gtk.Label(label="Level:"); lvl_lbl.set_margin_start(8)
+        bar.pack_start(lvl_lbl, False, False, 0)
+        self.log_level = Gtk.ComboBoxText()
+        for lvl in ("Verbose", "Info", "Warning", "Error"):
+            self.log_level.append_text(lvl)
+        self.log_level.set_active(1)  # default: Info
+        self.log_level.set_tooltip_text("Show log entries at or above this severity level")
+        self.log_level.connect("changed", lambda _: (setattr(self, "_log_last", None), self._log_refresh()))
+        bar.pack_start(self.log_level, False, False, 0)
+
         clear = Gtk.Button(label="Clear"); clear.connect("clicked", lambda _b: (logbuffer.clear(), self._log_refresh()))
         copy = Gtk.Button(label="Copy"); copy.connect("clicked", lambda _b: self._log_copy())
         bar.pack_end(clear, False, False, 0); bar.pack_end(copy, False, False, 0)
@@ -2444,12 +2455,16 @@ notebook.bt-nb tab:checked label {
         self._log_refresh()
         self._log_timer = GLib.timeout_add(1000, self._log_tick)
 
+    def _log_min_level(self) -> str:
+        idx = self.log_level.get_active() if hasattr(self, "log_level") else 1
+        return ("DEBUG", "INFO", "WARNING", "ERROR")[max(0, min(idx, 3))]
+
     def _log_tick(self) -> bool:
         self._log_refresh()
         return True
 
     def _log_refresh(self) -> None:
-        text = "\n".join(logbuffer.lines())
+        text = "\n".join(logbuffer.lines(self._log_min_level()))
         if text == getattr(self, "_log_last", None):
             return
         self._log_last = text
@@ -2460,7 +2475,7 @@ notebook.bt-nb tab:checked label {
 
     def _log_copy(self) -> None:
         cb = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
-        cb.set_text("\n".join(logbuffer.lines()), -1)
+        cb.set_text("\n".join(logbuffer.lines(self._log_min_level())), -1)
 
     def _cleanup(self) -> None:
         self._stop_meter()
@@ -2516,17 +2531,20 @@ notebook.bt-nb tab:checked label {
             autostart.set_enabled(self.gen_boot.get_active())
             
             if c.wakeword_enabled:
-                import socket
-                from urllib.parse import urlparse
-                parsed = urlparse(c.wakeword_uri)
-                host = parsed.hostname or "127.0.0.1"
-                port = parsed.port or 10400
-                try:
-                    with socket.create_connection((host, port), timeout=1.5):
-                        pass
-                except OSError as e:
-                    self._error(f"Cannot connect to Wakeword server at {c.wakeword_uri}:\n{e}\n\nPlease check your server or disable wakeword.")
-                    return False
+                # Check reachability in background — don't block the GTK thread
+                uri = c.wakeword_uri
+                def _bg_ww_check(uri=uri):
+                    import socket
+                    from urllib.parse import urlparse
+                    parsed = urlparse(uri)
+                    host = parsed.hostname or "127.0.0.1"
+                    port = parsed.port or 10400
+                    try:
+                        with socket.create_connection((host, port), timeout=2.0):
+                            logbuffer.log(f"[wakeword] server reachable at {uri}", level="INFO")
+                    except OSError as e:
+                        logbuffer.log(f"[wakeword] cannot reach {uri}: {e}", level="WARNING")
+                threading.Thread(target=_bg_ww_check, daemon=True).start()
         except ValueError as exc:
             self._error(f"Check numeric fields: {exc}")
             return False
