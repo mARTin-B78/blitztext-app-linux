@@ -1445,6 +1445,8 @@ notebook.bt-nb tab:checked label {
             def apply():
                 cur = _combo_text(combo)
                 _fill_combo(combo, models, cur)
+                if not models and not cur:
+                    combo.entry.set_placeholder_text("type model name manually")
                 return False
             GLib.idle_add(apply)
         threading.Thread(target=work, daemon=True).start()

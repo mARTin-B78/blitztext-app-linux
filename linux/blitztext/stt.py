@@ -62,29 +62,46 @@ def status(engine: STTEngine, timeout: float = 2.0) -> bool:
 
 
 def list_models(base_url: str, api_key_env: str = "", timeout: float = 5.0) -> list[str]:
-    """Fetch model ids from an OpenAI-compatible (or Ollama-style) /models endpoint."""
+    """Fetch model ids from an OpenAI-compatible, Ollama-style, or Riva/NIM /models endpoint."""
     import os
 
     if not base_url:
         return []
-    url = base_url.rstrip("/") + "/models"
-    headers = {}
+    base = base_url.rstrip("/")
+    headers: dict[str, str] = {}
     key = os.environ.get(api_key_env) if api_key_env else None
     if key:
         headers["Authorization"] = f"Bearer {key}"
-    try:
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, json.JSONDecodeError, OSError):
-        return []
 
-    items = data.get("data") if isinstance(data, dict) else None
-    if isinstance(items, list):  # OpenAI shape: {"data":[{"id":...}]}
-        return [m["id"] for m in items if isinstance(m, dict) and m.get("id")]
-    items = data.get("models") if isinstance(data, dict) else None
-    if isinstance(items, list):  # Ollama shape: {"models":[{"name"/"model":...}]}
-        return [m.get("name") or m.get("model") for m in items if (m.get("name") or m.get("model"))]
+    def _get(url: str) -> dict | None:
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.URLError, json.JSONDecodeError, OSError):
+            return None
+
+    # 1. Standard OpenAI /models
+    data = _get(base + "/models")
+    if isinstance(data, dict):
+        items = data.get("data")
+        if isinstance(items, list):  # OpenAI shape: {"data":[{"id":...}]}
+            return [m["id"] for m in items if isinstance(m, dict) and m.get("id")]
+        items = data.get("models")
+        if isinstance(items, list):  # Ollama shape: {"models":[{"name"/"model":...}]}
+            return [m.get("name") or m.get("model") for m in items
+                    if (m.get("name") or m.get("model"))]
+
+    # 2. NVIDIA Riva / NIM — exposes model info at /metadata
+    data = _get(base + "/metadata")
+    if isinstance(data, dict):
+        for info in data.get("modelInfo") or []:
+            name = info.get("shortName") or info.get("modelUrl") or ""
+            if name:
+                # Strip the long tag suffix: keep everything before the first ':'
+                short = name.split(":")[0]
+                return [short]
+
     return []
 
 
