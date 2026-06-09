@@ -302,19 +302,27 @@ def _infobox(parent: Gtk.Box, text: str) -> Gtk.Box:
     return box
 
 
-def _section_title(parent: Gtk.Box, text: str, margin_top: int = 16) -> None:
-    """A small bold uppercase section header above a group of settings."""
+def _section_title(parent: Gtk.Box, text: str, margin_top: int = 16,
+                   icon: str = "") -> None:
+    """A small bold uppercase section header, with optional symbolic icon."""
+    row = Gtk.Box(spacing=5)
+    row.set_margin_top(margin_top); row.set_margin_bottom(3)
+    row.get_style_context().add_class("bt-section")
+    if icon:
+        img = Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.MENU)
+        img.get_style_context().add_class("bt-section")
+        row.pack_start(img, False, False, 0)
     lbl = Gtk.Label(xalign=0.0)
     lbl.set_markup(f"<b><small>{GLib.markup_escape_text(text.upper())}</small></b>")
-    lbl.set_margin_top(margin_top); lbl.set_margin_bottom(3)
-    lbl.get_style_context().add_class("bt-section")
-    parent.pack_start(lbl, False, False, 0)
+    row.pack_start(lbl, False, False, 0)
+    parent.pack_start(row, False, False, 0)
 
 
-def _card_section(parent: Gtk.Box, title: str = "", margin_top: int = 16) -> Gtk.ListBox:
+def _card_section(parent: Gtk.Box, title: str = "", margin_top: int = 16,
+                  icon: str = "") -> Gtk.ListBox:
     """A titled card group. Returns a ListBox styled as a card for packing rows into."""
     if title:
-        _section_title(parent, title, margin_top)
+        _section_title(parent, title, margin_top, icon=icon)
     lb = Gtk.ListBox()
     lb.set_selection_mode(Gtk.SelectionMode.NONE)
     lb.get_style_context().add_class("boxed-list")
@@ -517,9 +525,17 @@ def _url_field_lb(lb: Gtk.ListBox, label: str, placeholder: str, on_reload,
     return row_box.get_children()[-2]  # fallback: second-to-last (before refresh btn)
 
 
-def _page(nb: Gtk.Notebook, title: str) -> Gtk.Box:
+def _page(nb: Gtk.Notebook, title: str, icon: str = "") -> Gtk.Box:
     outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-    nb.append_page(outer, Gtk.Label(label=title))
+    if icon:
+        tab_box = Gtk.Box(spacing=5)
+        tab_box.pack_start(
+            Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.MENU), False, False, 0)
+        tab_box.pack_start(Gtk.Label(label=title), False, False, 0)
+        tab_box.show_all()
+        nb.append_page(outer, tab_box)
+    else:
+        nb.append_page(outer, Gtk.Label(label=title))
     sw = Gtk.ScrolledWindow()
     sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.ALWAYS)
     sw.set_overlay_scrolling(False)  # always-visible scrollbar, not the overlay kind
@@ -787,35 +803,35 @@ notebook.bt-nb tab:checked label {
 
         nb = Gtk.Notebook()
         nb.get_style_context().add_class("bt-nb")
+        self.dlg.get_content_area().pack_start(nb, True, True, 0)
 
-        # Resize-grip overlay — draws the classic dotted SE grip so users know
-        # the window is resizable.
-        _overlay = Gtk.Overlay()
-        _overlay.add(nb)
+        # Resize-grip strip — sits below the notebook, above the button row, so
+        # users notice the window is resizable.
+        _grip_strip = Gtk.Box()
         _grip = Gtk.DrawingArea()
-        _grip.set_size_request(18, 18)
+        _grip.set_size_request(18, 10)
         _grip.set_halign(Gtk.Align.END)
-        _grip.set_valign(Gtk.Align.END)
         _grip.set_can_focus(False)
         _grip.connect("draw", self._draw_resize_grip)
-        _overlay.add_overlay(_grip)
-        _overlay.set_overlay_pass_through(_grip, True)
-        self.dlg.get_content_area().pack_start(_overlay, True, True, 0)
+        _grip_strip.pack_end(_grip, False, False, 0)
+        self.dlg.get_content_area().pack_end(_grip_strip, False, False, 0)
+
         # Build each tab lazily on first view so the dialog opens instantly. The
         # heavy bits are the Gtk.FileChooserButton pickers in Input/Benchmark
         # (~0.2s each to construct); deferring them until you visit that tab keeps
         # the initial open near-instant. _collect() force-builds any unvisited tab
         # before saving, so no field is ever missed.
         self._pending_tabs: dict = {}
-        for title, builder in (("Presets", self._build_presets),
-                               ("Engines", self._build_engines),
-                               ("Input", self._build_input),
-                               ("General", self._build_general),
-                               ("Benchmark", self._build_benchmark),
-                               ("Log", self._build_log),
-                               ("Manual", self._build_manual),
-                               ("About", self._build_about)):
-            self._pending_tabs[_page(nb, title)] = builder
+        for title, icon, builder in (
+                ("Presets",   "document-properties-symbolic",    self._build_presets),
+                ("Engines",   "network-server-symbolic",          self._build_engines),
+                ("Input",     "audio-input-microphone-symbolic",  self._build_input),
+                ("General",   "preferences-system-symbolic",      self._build_general),
+                ("Benchmark", "utilities-system-monitor-symbolic",self._build_benchmark),
+                ("Log",       "text-x-generic-symbolic",          self._build_log),
+                ("Manual",    "help-contents-symbolic",           self._build_manual),
+                ("About",     "help-about-symbolic",              self._build_about)):
+            self._pending_tabs[_page(nb, title, icon)] = builder
         self._build_tab(nb.get_nth_page(0))   # the visible tab, eagerly
         nb.connect("switch-page", lambda _nb, page, _n: self._build_tab(page))
 
@@ -862,7 +878,7 @@ notebook.bt-nb tab:checked label {
         page.pack_start(bar, False, False, 0)
 
         # ── Identity card ─────────────────────────────────────────────────────
-        id_card = _card_section(page, "Identity", margin_top=4)
+        id_card = _card_section(page, "Identity", margin_top=4, icon="emblem-system-symbolic")
         self.wf_name = _labeled(id_card, "Name", _entry(placeholder="Preset name"),
                                 tooltip="A short name for this action, shown in the main panel.")
         self.wf_icon = self._icon_field_lb(id_card, "Icon (emoji)")
@@ -870,13 +886,13 @@ notebook.bt-nb tab:checked label {
                                 tooltip="One line explaining what this preset does.")
 
         # ── Trigger card ──────────────────────────────────────────────────────
-        trig_card = _card_section(page, "Trigger")
+        trig_card = _card_section(page, "Trigger", icon="input-keyboard-symbolic")
         self.wf_keywords = _labeled(trig_card, "Keywords", _entry(placeholder="nicer email, bessere email"),
                                     tooltip="Spoken trigger words, comma-separated. Say one at the start or end of your speech to activate this preset.")
         self.wf_hotkey = self._key_field_lb(trig_card, "Hotkey (optional)", "", placeholder="click Set, or e.g. <ctrl>+<alt>+e")
 
         # ── Behaviour card ────────────────────────────────────────────────────
-        beh_card = _card_section(page, "Behaviour")
+        beh_card = _card_section(page, "Behaviour", icon="system-run-symbolic")
         self.wf_mode = _labeled(beh_card, "Mode", _combo(["transcribe", "rewrite", "stream"]),
                                 tooltip="’transcribe’ types your words as-is. ‘rewrite’ sends them to the language model first. ‘stream’ shows live text from a realtime engine.")
         # Engine dropdown — "(active engine)" + one entry per configured LLM engine.
@@ -890,7 +906,7 @@ notebook.bt-nb tab:checked label {
                                  tooltip="Creativity of the rewrite, 0–1. Lower is more predictable. Blank uses the engine default.")
 
         # ── Prompt ────────────────────────────────────────────────────────────
-        _section_title(page, "Prompt sent to the LLM (rewrite mode)", margin_top=14)
+        _section_title(page, "Prompt sent to the LLM (rewrite mode)", margin_top=14, icon="applications-science-symbolic")
         frame = Gtk.Frame(); frame.set_shadow_type(Gtk.ShadowType.IN)
         sw = Gtk.ScrolledWindow(); sw.set_min_content_height(140)
         self.wf_prompt = Gtk.TextView(); self.wf_prompt.set_wrap_mode(Gtk.WrapMode.WORD)
@@ -1149,9 +1165,9 @@ notebook.bt-nb tab:checked label {
         _infobox(page, "Engines do the work. The speech-to-text engine turns your voice into "
                        "text; the language model rewrites it. Each can run locally or on "
                        "a server you enter. A green dot means it is reachable, red means offline.")
-        _section_title(page, "Speech-to-text engine", margin_top=4)
+        _section_title(page, "Speech-to-text engine", margin_top=4, icon="audio-input-microphone-symbolic")
         page.pack_start(self._stt_section(), False, False, 0)
-        _section_title(page, "Language model (rewrite)")
+        _section_title(page, "Language model (rewrite)", icon="applications-science-symbolic")
         page.pack_start(self._llm_section(), False, False, 0)
         self._refresh_status()
 
@@ -1215,7 +1231,7 @@ notebook.bt-nb tab:checked label {
         self.stt_type.connect("changed", self._stt_type_changed)
 
         # ── Device & precision card (local engines only) ─────────────────────
-        self.stt_dev_card = _card_section(box, "Internal engine — device & precision", margin_top=4)
+        self.stt_dev_card = _card_section(box, "Internal engine — device & precision", margin_top=4, icon="computer-symbolic")
         self.stt_device  = _labeled(self.stt_dev_card, "Device", _type_combo(_DEVICE_OPTIONS, self.cfg.device),
                                     tooltip="Which processor runs the speech model. "
                                             "Auto tries your GPU first. GPU (CUDA) requires NVIDIA — much faster than CPU.")
@@ -1645,7 +1661,7 @@ notebook.bt-nb tab:checked label {
         LW = 170
 
         # ── Input mode card ───────────────────────────────────────────────────
-        mode_card = _card_section(page, "Input mode & keys", margin_top=4)
+        mode_card = _card_section(page, "Input mode & keys", margin_top=4, icon="input-keyboard-symbolic")
         self.in_mode = _labeled(mode_card, "Input mode", _combo(["modifiers", "hotkeys"], self.cfg.input_mode),
                                 width=LW,
                                 tooltip="’modifiers’: hold/press the keys below — easiest for most people. "
@@ -1660,7 +1676,7 @@ notebook.bt-nb tab:checked label {
         self.in_cancel = self._key_field_lb(mode_card, "Cancel",             self.cfg.key_cancel, width=LW)
 
         # ── Quality gate card ─────────────────────────────────────────────────
-        q_card = _card_section(page, "Quality gate")
+        q_card = _card_section(page, "Quality gate", icon="security-high-symbolic")
         self.q_min = _labeled(q_card, "Min seconds", _entry(str(self.cfg.min_speech_seconds)), width=LW,
                               tooltip="Minimum audio length. Shorter clips are silently ignored (avoids pasting nothing).")
         self.q_rms = _labeled(q_card, "Silence RMS", _entry(str(self.cfg.silence_rms)), width=LW,
@@ -1673,7 +1689,7 @@ notebook.bt-nb tab:checked label {
                     description="Remove ending punctuation from pasted text — handy for code insertion.")
 
         # ── Wakeword card ─────────────────────────────────────────────────────
-        ww_card = _card_section(page, "Hands-free wakeword")
+        ww_card = _card_section(page, "Hands-free wakeword", icon="audio-input-microphone-symbolic")
         self.ww_enabled = Gtk.Switch(); self.ww_enabled.set_active(self.cfg.wakeword_enabled)
         _switch_row(ww_card, "Enable wakeword", self.ww_enabled, width=LW,
                     description="Start dictation with a spoken keyword via an external openWakeWord server.")
@@ -1724,14 +1740,14 @@ notebook.bt-nb tab:checked label {
                                       tooltip="Say one of these to type AND press Enter (spoken ‘submit’). Use a distinctive multi-word phrase. Empty = off.")
 
         # ── Wakeword sound cues ───────────────────────────────────────────────
-        ww_snd_card = _card_section(page, "Wakeword sound cues (hands-free only)")
+        ww_snd_card = _card_section(page, "Wakeword sound cues (hands-free only)", icon="audio-speakers-symbolic")
         self.ww_snd_detected = self._sound_field(ww_snd_card, "Wakeword detected", self.cfg.wakeword_sound_detected,
             "Plays the instant the wake word fires — your ‘speak now’ cue. Leave empty for no sound.", width=LW)
         self.ww_snd_done = self._sound_field(ww_snd_card, "Speech captured", self.cfg.wakeword_sound_done,
             "Plays when your spoken command is captured and recording stops.", width=LW)
 
         # ── Manual dictation sounds card ──────────────────────────────────────
-        snd_card = _card_section(page, "Audio cues (keyboard / hotkey dictation)")
+        snd_card = _card_section(page, "Audio cues (keyboard / hotkey dictation)", icon="audio-speakers-symbolic")
         self.snd_enabled = Gtk.Switch(); self.snd_enabled.set_active(self.cfg.sounds_enabled)
         _switch_row(snd_card, "Play audio cues", self.snd_enabled, width=LW,
                     description="On/off for the manual start/stop chimes below. Does not affect wakeword sounds.")
@@ -1788,7 +1804,7 @@ notebook.bt-nb tab:checked label {
                        "and whether Blitztext starts automatically when you log in.")
 
         # ── Microphone card ───────────────────────────────────────────────────
-        mic_card = _card_section(page, "Microphone", margin_top=4)
+        mic_card = _card_section(page, "Microphone", margin_top=4, icon="audio-input-microphone-symbolic")
         self._mics = audio.list_mics()
         names = [label for _, label in self._mics]
         cur   = next((lbl for nm, lbl in self._mics if nm == self.cfg.mic), names[0] if names else "")
@@ -1801,7 +1817,7 @@ notebook.bt-nb tab:checked label {
         self.gen_mic.connect("changed", lambda _c: self._restart_meter())
 
         # ── Output card ───────────────────────────────────────────────────────
-        out_card = _card_section(page, "Text output & language")
+        out_card = _card_section(page, "Text output & language", icon="insert-text-symbolic")
         self.gen_output = _labeled(out_card, "Output mode", _combo(["type", "paste"], self.cfg.output),
                                    tooltip="’type’ types the text key by key via xdotool. "
                                            "’paste’ copies it to the clipboard and presses Ctrl+V (faster for long text).")
@@ -1809,7 +1825,7 @@ notebook.bt-nb tab:checked label {
                                  tooltip="Spoken language code (de, en, …). Leave blank to auto-detect.")
 
         # ── Notifications card ────────────────────────────────────────────────
-        notif_card = _card_section(page, "Notifications & overlay")
+        notif_card = _card_section(page, "Notifications & overlay", icon="dialog-information-symbolic")
         self.gen_notify = Gtk.Switch(); self.gen_notify.set_active(self.cfg.notify)
         _switch_row(notif_card, "Notifications", self.gen_notify,
                     "Desktop pop-ups for recording, transcription, and errors (manual dictation).")
@@ -1821,7 +1837,7 @@ notebook.bt-nb tab:checked label {
                     "Show a microphone, live waveform, and recognised text in a bubble at the cursor while you dictate.")
 
         # ── Startup card ──────────────────────────────────────────────────────
-        start_card = _card_section(page, "Startup")
+        start_card = _card_section(page, "Startup", icon="system-reboot-symbolic")
         self.gen_boot = Gtk.Switch(); self.gen_boot.set_active(autostart.is_enabled())
         _switch_row(start_card, "Launch on login", self.gen_boot,
                     "Start Blitztext automatically when you log in.")
@@ -1975,7 +1991,7 @@ notebook.bt-nb tab:checked label {
         reff.connect("file-set", _on_ref_set)
 
         # ── Engine / model selector ───────────────────────────────────────────
-        _section_title(page, "Engines to benchmark", margin_top=10)
+        _section_title(page, "Engines to benchmark", margin_top=10, icon="utilities-system-monitor-symbolic")
 
         sel_hdr = Gtk.Box(spacing=6); sel_hdr.set_margin_bottom(4)
         self._bench_filter = Gtk.SearchEntry()

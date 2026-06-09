@@ -9,6 +9,17 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.12] - 2026-06-10
+
+### Added
+- **Icons in settings.** All tab labels (Presets, Engines, Input, General,
+  Benchmark, Log, Manual, About) and every section header inside each tab now
+  show a small GTK symbolic icon, making the layout easier to scan.
+
+### Fixed
+- **Resize grip position.** The grip indicator now appears correctly at the
+  bottom-right corner below the notebook, not misplaced in the tab bar.
+
 ## [2.03.11] - 2026-06-09
 
 ### Added
