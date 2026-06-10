@@ -1823,6 +1823,10 @@ notebook.bt-nb tab:checked label {
         self.ww_uri.connect("focus-out-event", self._on_ww_uri_leave)
         self.ww_model = _labeled(ww_cfg_card, "Model name", _model_combo("Search models…"), width=LW,
                                  tooltip="Which wake model to listen for (e.g. okay_computer, hey_jarvis). Press ⟳ on the URI field to load models from the server.")
+        self.ww_cancel_model = _labeled(ww_cfg_card, "Cancel model", _model_combo("none — use text keywords"), width=LW,
+                                        tooltip="Optional: a wakeword model that immediately cancels the recording when heard (e.g. a 'stop' model). Faster than the Whisper-based text cancel.")
+        self.ww_send_model = _labeled(ww_cfg_card, "Send model", _model_combo("none — use text keywords"), width=LW,
+                                      tooltip="Optional: a wakeword model that finishes recording and presses Enter (e.g. a 'send it' model).")
         self.ww_combo.connect("changed", self._ww_changed)
 
         self.ww_mic_level = Gtk.LevelBar()
@@ -2052,6 +2056,10 @@ notebook.bt-nb tab:checked label {
         self.ww_name.set_text(e.name)
         self.ww_uri.set_text(e.uri)
         _fill_combo(self.ww_model, [], e.model)
+        if hasattr(self, "ww_cancel_model"):
+            _fill_combo(self.ww_cancel_model, [], self.cfg.wakeword_cancel_model)
+        if hasattr(self, "ww_send_model"):
+            _fill_combo(self.ww_send_model, [], self.cfg.wakeword_send_model)
         self._probe_dot(self.ww_dot, e.uri, 10400)
         self._ww_fetch_models()
 
@@ -2151,6 +2159,14 @@ notebook.bt-nb tab:checked label {
                         if models:
                             cur = _combo_text(self.ww_model)
                             _fill_combo(self.ww_model, models, cur or models[0])
+                            # Also populate cancel/send model pickers with the same list.
+                            # Preserve whatever the user already typed; empty stays empty.
+                            if hasattr(self, "ww_cancel_model"):
+                                cur_c = _combo_text(self.ww_cancel_model)
+                                _fill_combo(self.ww_cancel_model, models, cur_c)
+                            if hasattr(self, "ww_send_model"):
+                                cur_s = _combo_text(self.ww_send_model)
+                                _fill_combo(self.ww_send_model, models, cur_s)
                             if hasattr(self, "ww_status"):
                                 self.ww_status.set_markup(
                                     f'<span foreground="#4a8" size="small">'
@@ -3083,6 +3099,8 @@ notebook.bt-nb tab:checked label {
             c.wakeword_sound_detected = self.ww_snd_detected.get_filename() or ""
             c.wakeword_sound_done = self.ww_snd_done.get_filename() or ""
             c.wakeword_silence_seconds = float(self.ww_silence.get_text())
+            c.wakeword_cancel_model = _combo_text(self.ww_cancel_model) if hasattr(self, "ww_cancel_model") else ""
+            c.wakeword_send_model = _combo_text(self.ww_send_model) if hasattr(self, "ww_send_model") else ""
             c.cancel_keywords = [k.strip() for k in self.cancel_keywords.get_text().split(",") if k.strip()]
             c.send_keywords = [k.strip() for k in self.send_keywords.get_text().split(",") if k.strip()]
             if hasattr(self, "ww_key_cancel"):

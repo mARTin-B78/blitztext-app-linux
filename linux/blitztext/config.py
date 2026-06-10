@@ -110,6 +110,8 @@ class Config:
     wakeword_sound_detected: str = ""   # WAV played when the wakeword fires (speak now)
     wakeword_sound_done: str = ""        # WAV played when the command is captured
     wakeword_silence_seconds: float = 2.0  # auto-stop after this much trailing silence
+    wakeword_cancel_model: str = ""  # wakeword model that cancels an in-progress recording
+    wakeword_send_model: str = ""    # wakeword model that finishes + sends (Enter) a recording
     # Text-to-speech for the wakeword benchmark — its own OpenAI-compatible
     # endpoint (Kokoro, XTTS, OpenAI, …): base URL incl. /v1, an optional bearer
     # key env var, a model id, and the voices to cycle through.
@@ -239,6 +241,8 @@ def load(path: Path = CONFIG_PATH) -> Config:
         wakeword_sound_detected=ww.get("sound_detected", ""),
         wakeword_sound_done=ww.get("sound_done", ""),
         wakeword_silence_seconds=float(ww.get("silence_seconds", 2.0)),
+        wakeword_cancel_model=ww.get("cancel_model", ""),
+        wakeword_send_model=ww.get("send_model", ""),
         tts_url=tts.get("url", "").rstrip("/"),
         tts_api_key_env=tts.get("api_key_env", ""),
         tts_model=tts.get("model", ""),
@@ -384,6 +388,8 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "sound_detected": cfg.wakeword_sound_detected,
             "sound_done": cfg.wakeword_sound_done,
             "silence_seconds": cfg.wakeword_silence_seconds,
+            "cancel_model": cfg.wakeword_cancel_model,
+            "send_model": cfg.wakeword_send_model,
         },
         "tts": {
             "url": cfg.tts_url,

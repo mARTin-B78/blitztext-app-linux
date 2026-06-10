@@ -9,6 +9,18 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.30] - 2026-06-10
+
+### Added
+- **Dedicated wakeword models for cancel and send.** Two new optional fields in
+  the wakeword settings card — "Cancel model" and "Send model" — let you assign
+  a specific wakeword model (e.g. a custom "stop" or "send it" ONNX model) to
+  each action. When configured, a `WakewordActionListener` opens a second
+  Wyoming connection during recording and fires the action the instant the model
+  triggers — no Whisper pass, no silence timer. The Whisper-based cancel watcher
+  from v2.03.29 remains as a fallback when no cancel wakeword model is set.
+  Model dropdowns are populated from the same server fetch as the trigger model.
+
 ## [2.03.29] - 2026-06-10
 
 ### Changed

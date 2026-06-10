@@ -158,11 +158,141 @@ class WakewordListener:
     def _handle_detection(self):
         if time.time() < self._cooldown_until:
             return
-            
+
         if is_muted():
             logbuffer.log("[wakeword] Detected, but paused (resume via tray)")
             return
-            
+
         logbuffer.log(f"[wakeword] Detected '{self.model}'!")
         self._cooldown_until = time.time() + 3.0  # 3s cooldown
         self.on_detect()
+
+
+class WakewordActionListener:
+    """Listens for multiple wakeword models simultaneously and calls per-model callbacks.
+
+    Used during active wakeword recording so that dedicated "cancel" and "send"
+    wakeword phrases trigger :meth:`~blitztext.daemon.Daemon.cancel_dictation` or
+    :meth:`~blitztext.daemon.Daemon.finish_dictation` immediately — much faster
+    than waiting for Whisper to transcribe the whole clip.
+
+    ``model_callbacks`` is a ``{model_name: callable}`` dict; only the models
+    present in the dict are requested from the server.  No cooldown is applied
+    because the listener is torn down immediately after the first action fires.
+    """
+
+    def __init__(self, uri: str, model_callbacks: dict, mic: str):
+        self.uri = uri
+        self.model_callbacks = dict(model_callbacks)   # {name: callable}
+        self.mic = mic
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if not self.model_callbacks:
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(
+            target=self._run, daemon=True, name="WakewordActionListener")
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=2.0)
+            self._thread = None
+
+    def _run(self) -> None:
+        while not self._stop_event.is_set():
+            try:
+                self._stream()
+            except Exception as e:
+                logbuffer.log(f"[wakeword-action] Connection error: {e}", level="WARNING")
+                time.sleep(2)
+
+    def _stream(self) -> None:
+        parsed = urlparse(self.uri)
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or 10400
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(5.0)
+            sock.connect((host, port))
+            logbuffer.log(f"[wakeword-action] Connected — listening for {list(self.model_callbacks)}")
+
+            detect_msg = {"type": "detect", "data": {"names": list(self.model_callbacks)}}
+            sock.sendall((json.dumps(detect_msg) + "\n").encode("utf-8"))
+
+            audio_start = {"type": "audio-start",
+                           "data": {"rate": 16000, "width": 2, "channels": 1}}
+            sock.sendall((json.dumps(audio_start) + "\n").encode("utf-8"))
+
+            read_active = True
+
+            def read_loop() -> None:
+                try:
+                    sock.settimeout(1.0)
+                    while read_active and not self._stop_event.is_set():
+                        try:
+                            line = b""
+                            while not line.endswith(b"\n"):
+                                byte = sock.recv(1)
+                                if not byte:
+                                    return
+                                line += byte
+                            if not line:
+                                return
+                            msg = json.loads(line.decode("utf-8"))
+                            if msg.get("type") == "detection":
+                                name = msg.get("data", {}).get("name", "")
+                                cb = self.model_callbacks.get(name)
+                                if cb is None:
+                                    # Try partial match — some servers omit the lang suffix
+                                    for k, v in self.model_callbacks.items():
+                                        if name.startswith(k) or k.startswith(name):
+                                            cb = v
+                                            break
+                                if cb:
+                                    logbuffer.log(
+                                        f"[wakeword-action] '{name}' detected — firing action")
+                                    self._stop_event.set()   # one-shot: stop after first fire
+                                    cb()
+                            payload_len = msg.get("payload_length", 0)
+                            if payload_len > 0:
+                                remaining = payload_len
+                                while remaining > 0:
+                                    chunk = sock.recv(min(remaining, 4096))
+                                    if not chunk:
+                                        break
+                                    remaining -= len(chunk)
+                        except socket.timeout:
+                            pass
+                except Exception:
+                    pass
+
+            reader = threading.Thread(target=read_loop, daemon=True)
+            reader.start()
+
+            cmd = ["pw-record", "--rate=16000", "--channels=1", "--format=s16", "-"]
+            if self.mic:
+                cmd.extend(["--target", self.mic])
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+            try:
+                while not self._stop_event.is_set() and proc.poll() is None:
+                    chunk = proc.stdout.read(3200)
+                    if not chunk:
+                        break
+                    header = {"type": "audio-chunk",
+                              "data": {"rate": 16000, "width": 2, "channels": 1},
+                              "payload_length": len(chunk)}
+                    sock.sendall((json.dumps(header) + "\n").encode("utf-8"))
+                    sock.sendall(chunk)
+            finally:
+                read_active = False
+                proc.terminate()
+                try:
+                    proc.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                reader.join(timeout=1.0)

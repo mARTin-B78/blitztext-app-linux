@@ -315,11 +315,31 @@ class Daemon:
             elif self.countdown_cb:
                 self.countdown_cb(None, silence)
 
-        # Real-time cancel keyword watcher: accumulate PCM from the VAD meter
-        # and run quick transcription checks so cancel fires immediately rather
-        # than waiting for the full silence timeout + normal transcription pass.
+        # Wakeword-based action listener: if cancel/send wakeword models are
+        # configured, open a second Wyoming connection during recording so a
+        # dedicated wakeword ("stop", "send it") fires instantly — no Whisper pass.
+        self._action_listener = None
+        if self.cfg.wakeword_enabled and (
+                self.cfg.wakeword_cancel_model or self.cfg.wakeword_send_model):
+            from .wakeword import WakewordActionListener
+            cbs: dict = {}
+            if self.cfg.wakeword_cancel_model:
+                cbs[self.cfg.wakeword_cancel_model] = lambda: GLib.idle_add(
+                    self.cancel_dictation)
+            if self.cfg.wakeword_send_model:
+                cbs[self.cfg.wakeword_send_model] = lambda: GLib.idle_add(
+                    lambda: self.finish_dictation(send_enter=True))
+            self._action_listener = WakewordActionListener(
+                uri=self.cfg.wakeword_uri, model_callbacks=cbs, mic=self.cfg.mic)
+            self._action_listener.start()
+
+        # Whisper-based cancel watcher: fallback when no cancel wakeword model is
+        # set, or as belt-and-suspenders for the spoken cancel keyword list.
         on_chunk = None
-        if self.cfg.cancel_keywords and getattr(self, "transcriber", None) is not None:
+        use_whisper_watcher = (self.cfg.cancel_keywords
+                               and getattr(self, "transcriber", None) is not None
+                               and not self.cfg.wakeword_cancel_model)
+        if use_whisper_watcher:
             self._cancel_watcher = _CancelWatcher(
                 self.transcriber,
                 self.cfg.cancel_keywords,
@@ -356,6 +376,9 @@ class Daemon:
         if getattr(self, "_cancel_watcher", None) is not None:
             self._cancel_watcher.stop()
             self._cancel_watcher = None
+        if getattr(self, "_action_listener", None) is not None:
+            self._action_listener.stop()
+            self._action_listener = None
 
     def _ov_meter_start(self) -> None:
         """A level meter purely to drive the overlay waveform in streaming mode.
