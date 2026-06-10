@@ -9,6 +9,26 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.40] - 2026-06-10
+
+### Changed
+- **Documentation overhaul with screenshots.** Renamed 21 raw screenshots to
+  meaningful filenames (`main-panel.png`, `overlay-listening.png`,
+  `settings-presets.png`, `settings-general.png`, `settings-keyboard.png`,
+  `settings-wakeword.png`, `settings-stt-engines.png`,
+  `settings-llm-engines.png`, `settings-benchmark-stt.png`,
+  `settings-benchmark-wakeword.png`, `settings-log.png`,
+  `settings-manual.png`, `settings-about.png`, and 7 setup-wizard screens).
+- **README.md / linux/README.md** updated with organized screenshot sections
+  (Main panel & overlay, Settings — General & Input, Settings — Engines,
+  Settings — Benchmark, Settings — Log & About, Setup wizard) using
+  click-to-enlarge image links.
+- **MANUAL.md** rewritten to match the new sidebar navigation: intro updated;
+  section headers renamed (Engines tab → STT Engines / LLM Engines; Input tab
+  → Keyboard + Wakeword; Benchmark tab → Benchmark — STT / Benchmark —
+  Wakeword); screenshot added at the top of every section including Manual and
+  About pages.
+
 ## [2.03.39] - 2026-06-10
 
 ### Fixed
