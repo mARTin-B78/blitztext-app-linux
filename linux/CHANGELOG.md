@@ -9,6 +9,21 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.32] - 2026-06-10
+
+### Changed
+- **Settings dialog navigation redesigned.** Replaced the `Gtk.Notebook` tab bar
+  with a 170 px left sidebar (`Gtk.ListBox` of flat buttons with section headers)
+  and a `Gtk.Stack` for the content area. The dialog is now 860 × 700 px by default.
+  Lazy-loading is preserved: each page is built only on first visit.
+- **Input page split into Keyboard and Wakeword.** The former "Input" tab is now
+  two separate pages — "Keyboard" (input mode, hotkeys, quality gate, audio cues)
+  and "Wakeword" (enable switch, mic level, test button, silence timeout, cancel/send
+  words, engine preset selector, engine config card, wakeword sound cues). Either
+  page may be visited first; the mic level-meter starts on whichever is opened.
+- **Benchmark page split into Benchmark — STT and Benchmark — Wakeword.** The
+  single "Benchmark" tab is now two dedicated pages. All field names and collect
+  logic are unchanged.
 ## [2.03.31] - 2026-06-10
 
 ### Added

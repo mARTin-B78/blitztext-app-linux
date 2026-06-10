@@ -1,13 +1,16 @@
-"""GTK settings: dropdown + editor managers for prompt presets and engines.
+"""GTK settings: sidebar + stack layout for prompt presets and engines.
 
-Tabs:
-  Presets  - prompt presets (select from a dropdown, edit, add, delete)
-  Engines  - STT and LLM engine presets with online/offline status + STT test
-  Input    - input scheme, keys, quality gate
-  General  - mic (with live level meter), output, language, notifications, autostart
-  Benchmark- compare STT engines against a reference clip
-  Log      - runtime log output
-  About    - version, source, changelog, and license
+Pages:
+  Presets           - prompt presets (select from a dropdown, edit, add, delete)
+  General           - mic (with live level meter), output, language, notifications, autostart
+  Keyboard          - input scheme, keys, quality gate, audio cues
+  Wakeword          - hands-free wakeword, engine config, wakeword sound cues
+  STT Engines       - STT and LLM engine presets with online/offline status + STT test
+  Benchmark — STT   - compare STT engines against a reference clip
+  Benchmark — WW    - stress-test wakeword engines with synthesized speech
+  Log               - runtime log output
+  Manual            - user manual
+  About             - version, source, changelog, and license
 """
 
 from __future__ import annotations
@@ -544,28 +547,6 @@ def _url_field_lb(lb: Gtk.ListBox, label: str, placeholder: str, on_reload,
     return row_box.get_children()[-2]  # fallback: second-to-last (before refresh btn)
 
 
-def _page(nb: Gtk.Notebook, title: str, icon: str = "") -> Gtk.Box:
-    outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-    if icon:
-        tab_box = Gtk.Box(spacing=5)
-        tab_box.pack_start(
-            Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.MENU), False, False, 0)
-        tab_box.pack_start(Gtk.Label(label=title), False, False, 0)
-        tab_box.show_all()
-        nb.append_page(outer, tab_box)
-    else:
-        nb.append_page(outer, Gtk.Label(label=title))
-    sw = Gtk.ScrolledWindow()
-    sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.ALWAYS)
-    sw.set_overlay_scrolling(False)  # always-visible scrollbar, not the overlay kind
-    outer.pack_start(sw, True, True, 0)
-    inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-    for m in ("top", "bottom", "start", "end"):
-        getattr(inner, f"set_margin_{m}")(15)
-    sw.add(inner)
-    outer._bt_inner = inner
-    return outer
-
 
 def _read_first(paths: list[Path], fallback: str = "Not available in this install.") -> str:
     for path in paths:
@@ -755,7 +736,6 @@ class SettingsDialog:
         self._wf_idx = self._stt_idx = self._llm_idx = 0
 
         self.dlg = Gtk.Dialog(transient_for=parent, modal=True)
-        self.dlg.set_default_size(740, 700)
 
         _header = Gtk.HeaderBar()
         _header.set_show_close_button(True)
@@ -813,18 +793,12 @@ class SettingsDialog:
 .bt-infobox label {
     color: @theme_fg_color;
 }
-notebook.bt-nb tab {
-    padding: 8px 18px;
-    border-radius: 4px 4px 0 0;
+.bt-sidebar-active {
+    background-color: alpha(@theme_selected_bg_color, 0.15);
+    border-radius: 6px;
 }
-notebook.bt-nb tab label {
-    font-size: 14px;
-    color: mix(@theme_fg_color, @theme_bg_color, 0.35);
-}
-notebook.bt-nb tab:checked label {
-    font-size: 14px;
-    font-weight: bold;
-    color: #1a73e8;
+.sidebar {
+    background-color: mix(@theme_bg_color, @theme_fg_color, 0.03);
 }
 .bt-emoji-btn {
     font-size: 20px;
@@ -844,11 +818,31 @@ notebook.bt-nb tab:checked label {
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
 
-        nb = Gtk.Notebook()
-        nb.get_style_context().add_class("bt-nb")
-        self.dlg.get_content_area().pack_start(nb, True, True, 0)
+        # Widen dialog for sidebar
+        self.dlg.set_default_size(860, 700)
 
-        # Resize-grip strip — sits below the notebook, above the button row, so
+        # Outer horizontal container
+        _body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        self.dlg.get_content_area().pack_start(_body, True, True, 0)
+
+        # Left sidebar
+        _sidebar_scroll = Gtk.ScrolledWindow()
+        _sidebar_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
+        _sidebar_scroll.set_size_request(170, -1)
+        _sidebar_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        _sidebar_scroll.add(_sidebar_box)
+        _sidebar_scroll.get_style_context().add_class("sidebar")
+        _body.pack_start(_sidebar_scroll, False, False, 0)
+
+        _vsep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+        _body.pack_start(_vsep, False, False, 0)
+
+        # Right stack
+        self._stack = Gtk.Stack()
+        self._stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        _body.pack_start(self._stack, True, True, 0)
+
+        # Resize-grip strip — sits below the body, above the button row, so
         # users notice the window is resizable.
         _grip_strip = Gtk.Box()
         _grip = Gtk.DrawingArea()
@@ -859,24 +853,73 @@ notebook.bt-nb tab:checked label {
         _grip_strip.pack_end(_grip, False, False, 0)
         self.dlg.get_content_area().pack_end(_grip_strip, False, False, 0)
 
-        # Build each tab lazily on first view so the dialog opens instantly. The
-        # heavy bits are the Gtk.FileChooserButton pickers in Input/Benchmark
-        # (~0.2s each to construct); deferring them until you visit that tab keeps
-        # the initial open near-instant. _collect() force-builds any unvisited tab
-        # before saving, so no field is ever missed.
-        self._pending_tabs: dict = {}
-        for title, icon, builder in (
-                ("Presets",   "document-properties-symbolic",    self._build_presets),
-                ("Engines",   "network-server-symbolic",          self._build_engines),
-                ("Input",     "audio-input-microphone-symbolic",  self._build_input),
-                ("General",   "preferences-system-symbolic",      self._build_general),
-                ("Benchmark", "utilities-system-monitor-symbolic",self._build_benchmark),
-                ("Log",       "text-x-generic-symbolic",          self._build_log),
-                ("Manual",    "help-contents-symbolic",           self._build_manual),
-                ("About",     "help-about-symbolic",              self._build_about)):
-            self._pending_tabs[_page(nb, title, icon)] = builder
-        self._build_tab(nb.get_nth_page(0))   # the visible tab, eagerly
-        nb.connect("switch-page", lambda _nb, page, _n: self._build_tab(page))
+        # Sidebar helpers
+        def _add_sidebar_section(label: str) -> None:
+            lbl = Gtk.Label(xalign=0.0)
+            lbl.set_markup(f'<span size="small" weight="bold" alpha="65%">{GLib.markup_escape_text(label.upper())}</span>')
+            lbl.set_margin_top(14); lbl.set_margin_bottom(2)
+            lbl.set_margin_start(12); lbl.set_margin_end(8)
+            _sidebar_box.pack_start(lbl, False, False, 0)
+
+        def _add_sidebar_row(label: str, icon: str, page_widget) -> Gtk.Button:
+            btn = Gtk.Button()
+            btn.get_style_context().add_class("flat")
+            btn_box = Gtk.Box(spacing=8)
+            btn_box.set_margin_top(3); btn_box.set_margin_bottom(3)
+            btn_box.set_margin_start(8); btn_box.set_margin_end(8)
+            if icon:
+                img = Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.MENU)
+                img.set_pixel_size(16)
+                btn_box.pack_start(img, False, False, 0)
+            lbl = Gtk.Label(label=label, xalign=0.0)
+            btn_box.pack_start(lbl, True, True, 0)
+            btn.add(btn_box)
+            btn.connect("clicked", lambda _b, pw=page_widget: self._show_page(pw))
+            _sidebar_box.pack_start(btn, False, False, 0)
+            return btn
+
+        def _stack_page(title: str) -> Gtk.Box:
+            outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            sw = Gtk.ScrolledWindow()
+            sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.ALWAYS)
+            sw.set_overlay_scrolling(False)
+            outer.pack_start(sw, True, True, 0)
+            inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            for m in ("top", "bottom", "start", "end"):
+                getattr(inner, f"set_margin_{m}")(15)
+            sw.add(inner)
+            outer._bt_inner = inner
+            self._stack.add_named(outer, title)
+            return outer
+
+        # Build pages lazily on first visit — heavy bits (FileChooserButton etc.)
+        # are deferred so the dialog opens instantly.
+        self._pending_pages: dict = {}   # page widget → builder
+        self._sidebar_btns: dict = {}    # page widget → sidebar button
+
+        def _reg(section_label, sidebar_label, icon, builder):
+            if section_label:
+                _add_sidebar_section(section_label)
+            pg = _stack_page(sidebar_label)
+            btn = _add_sidebar_row(sidebar_label, icon, pg)
+            self._pending_pages[pg] = builder
+            self._sidebar_btns[pg] = btn
+            return pg
+
+        _reg(None,          "Presets",              "document-properties-symbolic",     self._build_presets)
+        _reg("General",     "General",              "preferences-system-symbolic",       self._build_general)
+        _reg("Input",       "Keyboard",             "input-keyboard-symbolic",           self._build_keyboard)
+        _reg(None,          "Wakeword",             "audio-input-microphone-symbolic",   self._build_wakeword)
+        _reg("Engines",     "STT Engines",          "network-server-symbolic",           self._build_engines)
+        _reg("Benchmark",   "Benchmark — STT",      "utilities-system-monitor-symbolic", self._build_benchmark_stt)
+        _reg(None,          "Benchmark — Wakeword", "audio-input-microphone-symbolic",   self._build_benchmark_ww)
+        _reg("System",      "Log",                  "text-x-generic-symbolic",           self._build_log)
+        _reg(None,          "Manual",               "help-contents-symbolic",            self._build_manual)
+        _reg(None,          "About",                "help-about-symbolic",               self._build_about)
+
+        # Show the first page on open
+        first_page = list(self._pending_pages)[0]
+        self._show_page(first_page)
 
         self._bind_entry = None
         self._bind_pressed: list[str] = []
@@ -885,18 +928,29 @@ notebook.bt-nb tab:checked label {
         self.dlg.connect("response", self._on_response)
         self.dlg.connect("destroy", lambda *_: self._cleanup())
 
-    def _build_tab(self, page: Gtk.Box) -> None:
-        """Build a notebook tab's contents the first time it's shown (lazy)."""
-        builder = self._pending_tabs.pop(page, None)
+    def _show_page(self, page) -> None:
+        """Switch to page, build it on first visit, update sidebar highlight."""
+        self._build_page(page)
+        self._stack.set_visible_child(page)
+        for pw, btn in self._sidebar_btns.items():
+            ctx = btn.get_style_context()
+            if pw is page:
+                ctx.add_class("bt-sidebar-active")
+            else:
+                ctx.remove_class("bt-sidebar-active")
+
+    def _build_page(self, page) -> None:
+        """Build a page's contents the first time it's shown (lazy)."""
+        builder = self._pending_pages.pop(page, None)
         if builder is not None:
             content = getattr(page, "_bt_inner", page)
             builder(content)
-            page.show_all()   # the dialog may already be on-screen
+            page.show_all()
 
     def _force_build_tabs(self) -> None:
-        """Build any not-yet-visited tabs so _collect() sees every field."""
-        for page in list(self._pending_tabs):
-            self._build_tab(page)
+        """Build any not-yet-visited pages so _collect() sees every field."""
+        for page in list(self._pending_pages):
+            self._build_page(page)
 
     # ===== Presets ==========================================================
     def _build_presets(self, page: Gtk.Box) -> None:
@@ -1740,12 +1794,12 @@ notebook.bt-nb tab:checked label {
         self._bind_entry = None
         return True
 
-    # ===== Input ============================================================
-    def _build_input(self, page: Gtk.Box) -> None:
+    # ===== Keyboard =========================================================
+    def _build_keyboard(self, page: Gtk.Box) -> None:
         _infobox(page, "Choose how you start and stop dictating. With the default "
                        "’modifiers’ mode: hold Ctrl and the Windows key to talk, then press "
-                       "Ctrl to stop and paste. Below you can tune the noise filter, set up "
-                       "hands-free wakeword, and pick sounds that confirm start and stop.")
+                       "Ctrl to stop and paste. Below you can tune the noise filter and "
+                       "pick sounds that confirm start and stop.")
         LW = 170
 
         # ── Input mode card ───────────────────────────────────────────────────
@@ -1776,20 +1830,66 @@ notebook.bt-nb tab:checked label {
         _switch_row(q_card, "Strip trailing . / ,", self.q_strip, width=LW,
                     description="Remove ending punctuation from pasted text — handy for code insertion.")
 
-        # ── Wakeword card ─────────────────────────────────────────────────────
-        ww_card = _card_section(page, "Hands-free wakeword", icon="audio-input-microphone-symbolic")
+        # ── Manual dictation sounds card ──────────────────────────────────────
+        snd_card = _card_section(page, "Audio cues (keyboard / hotkey dictation)", icon="audio-speakers-symbolic")
+        self.snd_enabled = Gtk.Switch(); self.snd_enabled.set_active(self.cfg.sounds_enabled)
+        _switch_row(snd_card, "Play audio cues", self.snd_enabled, width=LW,
+                    description="On/off for the manual start/stop chimes below. Does not affect wakeword sounds.")
+        self.snd_before = self._sound_field(snd_card, "Start sound", self.cfg.sound_before,
+            "Plays when manual recording starts.", width=LW)
+        self.snd_after  = self._sound_field(snd_card, "Stop sound", self.cfg.sound_after,
+            "Plays when manual recording stops (paste, paste+Enter, or auto-stop).", width=LW)
+
+        # Start meter if not already running (covers the case where Keyboard is
+        # visited before General, which is where _start_meter() normally fires).
+        if self._meter is None:
+            self._start_meter()
+
+    # ===== Wakeword =========================================================
+    def _build_wakeword(self, page: Gtk.Box) -> None:
+        _infobox(page,
+            "Set up hands-free wakeword dictation. Each preset connects to one "
+            "wyoming-openwakeword server instance. Add one preset per server. "
+            "Press ⟳ to auto-detect the available wakeword models from that server.\n\n"
+            "To add new wakeword models: place your .onnx model files in the server’s "
+            "model directory and restart it, e.g.:\n"
+            "  docker run … -v ~/wakewords:/data/models  homeassistant/wyoming-openwakeword\n"
+            "Common built-in models: okay_computer · hey_jarvis · alexa · hey_mycroft · computer")
+        LW = 170
+
+        # ── Wakeword enable card ──────────────────────────────────────────────
+        ww_card = _card_section(page, "Hands-free wakeword", margin_top=4, icon="audio-input-microphone-symbolic")
         self.ww_enabled = Gtk.Switch(); self.ww_enabled.set_active(self.cfg.wakeword_enabled)
         _switch_row(ww_card, "Enable wakeword", self.ww_enabled, width=LW,
                     description="Start dictation with a spoken keyword via an external openWakeWord server.")
 
-        _infobox(page,
-            "Each preset connects to one wyoming-openwakeword server instance. "
-            "Add one preset per server. Press ⟳ to auto-detect the available wakeword models "
-            "from that server.\n\n"
-            "To add new wakeword models: place your .onnx model files in the server's "
-            "model directory and restart it, e.g.:\n"
-            "  docker run … -v ~/wakewords:/data/models  homeassistant/wyoming-openwakeword\n"
-            "Common built-in models: okay_computer · hey_jarvis · alexa · hey_mycroft · computer")
+        self.ww_mic_level = Gtk.LevelBar()
+        self.ww_mic_level.set_min_value(0); self.ww_mic_level.set_max_value(1)
+        _labeled(ww_card, "Input level", self.ww_mic_level, width=LW,
+                 tooltip="Live microphone level — the bar should move when you speak.")
+
+        self.ww_test_btn = Gtk.Button(label="Test wakeword"); self.ww_test_btn.set_halign(Gtk.Align.START)
+        self.ww_test_btn.connect("clicked", self._ww_test)
+        self.ww_test_lbl = Gtk.Label(label=""); self.ww_test_lbl.set_xalign(0.0)
+        test_box = Gtk.Box(spacing=10)
+        test_box.pack_start(self.ww_test_btn, False, False, 0)
+        test_box.pack_start(self.ww_test_lbl, False, False, 0)
+        _labeled(ww_card, "", test_box, width=LW)
+
+        self.ww_silence = _labeled(ww_card, "Silence to stop (s)", _entry(str(self.cfg.wakeword_silence_seconds)), width=LW,
+                                   tooltip="After the wakeword fires, stop recording this many seconds after you stop speaking. Default 2.0.")
+        self.cancel_keywords, self.ww_key_cancel = self._kw_shortcut_row(
+            ww_card, "Cancel words", ", ".join(self.cfg.cancel_keywords),
+            "abbrechen, cancel", self.cfg.key_cancel,
+            tooltip_kw="Say one of these at the start or end of a clip to DISCARD it — nothing is typed. Empty = off.",
+            tooltip_key="Keyboard shortcut that cancels dictation (works even during wakeword recording).",
+            width=LW)
+        self.send_keywords, self.ww_key_send = self._kw_shortcut_row(
+            ww_card, "Send words", ", ".join(self.cfg.send_keywords),
+            "computer send, computer abschicken", self.cfg.key_send,
+            tooltip_kw="Say one of these to type AND press Enter (spoken ‘submit’). Use a distinctive multi-word phrase. Empty = off.",
+            tooltip_key="Keyboard shortcut that stops recording and pastes with Enter.",
+            width=LW)
 
         # ── Engine selector bar ───────────────────────────────────────────────
         ww_bar = Gtk.Box(spacing=6); ww_bar.set_margin_top(6)
@@ -1828,38 +1928,10 @@ notebook.bt-nb tab:checked label {
         self.ww_model = _labeled(ww_cfg_card, "Model name", _model_combo("Search models…"), width=LW,
                                  tooltip="Which wake model to listen for (e.g. okay_computer, hey_jarvis). Press ⟳ on the URI field to load models from the server.")
         self.ww_cancel_model = _labeled(ww_cfg_card, "Cancel model", _model_combo("none — use text keywords"), width=LW,
-                                        tooltip="Optional: a wakeword model that immediately cancels the recording when heard (e.g. a 'stop' model). Faster than the Whisper-based text cancel.")
+                                        tooltip="Optional: a wakeword model that immediately cancels the recording when heard (e.g. a ‘stop’ model). Faster than the Whisper-based text cancel.")
         self.ww_send_model = _labeled(ww_cfg_card, "Send model", _model_combo("none — use text keywords"), width=LW,
-                                      tooltip="Optional: a wakeword model that finishes recording and presses Enter (e.g. a 'send it' model).")
+                                      tooltip="Optional: a wakeword model that finishes recording and presses Enter (e.g. a ‘send it’ model).")
         self.ww_combo.connect("changed", self._ww_changed)
-
-        self.ww_mic_level = Gtk.LevelBar()
-        self.ww_mic_level.set_min_value(0); self.ww_mic_level.set_max_value(1)
-        _labeled(ww_card, "Input level", self.ww_mic_level, width=LW,
-                 tooltip="Live microphone level — the bar should move when you speak.")
-
-        self.ww_test_btn = Gtk.Button(label="Test wakeword"); self.ww_test_btn.set_halign(Gtk.Align.START)
-        self.ww_test_btn.connect("clicked", self._ww_test)
-        self.ww_test_lbl = Gtk.Label(label=""); self.ww_test_lbl.set_xalign(0.0)
-        test_box = Gtk.Box(spacing=10)
-        test_box.pack_start(self.ww_test_btn, False, False, 0)
-        test_box.pack_start(self.ww_test_lbl, False, False, 0)
-        _labeled(ww_card, "", test_box, width=LW)
-
-        self.ww_silence = _labeled(ww_card, "Silence to stop (s)", _entry(str(self.cfg.wakeword_silence_seconds)), width=LW,
-                                   tooltip="After the wakeword fires, stop recording this many seconds after you stop speaking. Default 2.0.")
-        self.cancel_keywords, self.ww_key_cancel = self._kw_shortcut_row(
-            ww_card, "Cancel words", ", ".join(self.cfg.cancel_keywords),
-            "abbrechen, cancel", self.cfg.key_cancel,
-            tooltip_kw="Say one of these at the start or end of a clip to DISCARD it — nothing is typed. Empty = off.",
-            tooltip_key="Keyboard shortcut that cancels dictation (works even during wakeword recording).",
-            width=LW)
-        self.send_keywords, self.ww_key_send = self._kw_shortcut_row(
-            ww_card, "Send words", ", ".join(self.cfg.send_keywords),
-            "computer send, computer abschicken", self.cfg.key_send,
-            tooltip_kw="Say one of these to type AND press Enter (spoken ‘submit’). Use a distinctive multi-word phrase. Empty = off.",
-            tooltip_key="Keyboard shortcut that stops recording and pastes with Enter.",
-            width=LW)
 
         self._ww_load_idx(active_idx)
 
@@ -1870,17 +1942,7 @@ notebook.bt-nb tab:checked label {
         self.ww_snd_done = self._sound_field(ww_snd_card, "Speech captured", self.cfg.wakeword_sound_done,
             "Plays when your spoken command is captured and recording stops.", width=LW)
 
-        # ── Manual dictation sounds card ──────────────────────────────────────
-        snd_card = _card_section(page, "Audio cues (keyboard / hotkey dictation)", icon="audio-speakers-symbolic")
-        self.snd_enabled = Gtk.Switch(); self.snd_enabled.set_active(self.cfg.sounds_enabled)
-        _switch_row(snd_card, "Play audio cues", self.snd_enabled, width=LW,
-                    description="On/off for the manual start/stop chimes below. Does not affect wakeword sounds.")
-        self.snd_before = self._sound_field(snd_card, "Start sound", self.cfg.sound_before,
-            "Plays when manual recording starts.", width=LW)
-        self.snd_after  = self._sound_field(snd_card, "Stop sound", self.cfg.sound_after,
-            "Plays when manual recording stops (paste, paste+Enter, or auto-stop).", width=LW)
-
-        # Start meter if not already running (covers the case where Input is
+        # Start meter if not already running (covers the case where Wakeword is
         # visited before General, which is where _start_meter() normally fires).
         if self._meter is None:
             self._start_meter()
@@ -2226,7 +2288,8 @@ notebook.bt-nb tab:checked label {
         threading.Thread(target=work, daemon=True).start()
 
     # ===== Benchmark ========================================================
-    def _build_benchmark(self, page: Gtk.Box) -> None:
+    # ===== Benchmark — STT ==================================================
+    def _build_benchmark_stt(self, page: Gtk.Box) -> None:
         _infobox(page, "Compare your speech-to-text engines. Pick a recording (.wav) and a "
                        "text file (.txt) containing exactly what is said, then press Run "
                        "benchmark. The table shows how fast each engine is and how accurate, "
@@ -2440,8 +2503,8 @@ notebook.bt-nb tab:checked label {
         paned.set_size_request(-1, 320)  # never collapse below 320px total
         page.pack_start(paned, True, True, 4)
 
-        # --- Wakeword benchmark ---------------------------------------------
-        page.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), False, False, 10)
+    # ===== Benchmark — Wakeword =============================================
+    def _build_benchmark_ww(self, page: Gtk.Box) -> None:
         _infobox(page, "Stress-test the wakeword. It synthesizes short sentences with your "
                        "wakeword spoken in random voices (plus filler with none), streams them to "
                        "your wyoming-openwakeword server, and reports how reliably it fires "
@@ -2494,7 +2557,7 @@ notebook.bt-nb tab:checked label {
             self._wwb_checks[e.name] = cb
             eng_row.pack_start(cb, False, False, 0)
         if not self.cfg.wakeword_engines:
-            eng_row.pack_start(Gtk.Label(label="(no wakeword engines configured — add one in the Input tab)"),
+            eng_row.pack_start(Gtk.Label(label="(no wakeword engines configured — add one in the Wakeword page)"),
                                False, False, 0)
         ctrl.pack_start(eng_row, False, False, 0)
 
@@ -2836,7 +2899,7 @@ notebook.bt-nb tab:checked label {
         self.wwb_store.clear()
         if not runs:
             self.wwb_summary.set_markup(
-                '<span foreground="#ff3b30">No engines configured — add one in the Input tab.</span>')
+                '<span foreground="#ff3b30">No engines configured — add one in the Wakeword page.</span>')
             return False
         if all(er.result.expected == 0 for er in runs):
             errs = {u.error for er in runs for u in er.result.utterances if u.error}
