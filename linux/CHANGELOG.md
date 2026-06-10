@@ -9,6 +9,18 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.38] - 2026-06-10
+
+### Fixed
+- **STT Engines and Wakeword no longer have horizontal scrollbars.** Root
+  cause: `Gtk.Entry` widgets compute natural width from placeholder text
+  (e.g. `"http://localhost:8010/v1  ·  realtime: http://localhost:8006/v1"`
+  ≈ 500 px). Without `set_width_chars(1)` the entry cannot shrink below its
+  natural width even when placed in an expanding container. Added
+  `set_width_chars(1)` to all entry-creating helpers: `_entry()`, `_url_field()`,
+  `ModelPicker`, `_kw_shortcut_row`, and `_sound_field`. Also added
+  `set_max_width_chars(50)` to the `stt_result` wrapping label.
+
 ## [2.03.37] - 2026-06-10
 
 ### Fixed

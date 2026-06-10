@@ -358,6 +358,7 @@ def _lb_add(lb: Gtk.ListBox, widget: Gtk.Widget) -> None:
 
 def _entry(text="", placeholder="") -> Gtk.Entry:
     e = Gtk.Entry(); e.set_text(str(text)); e.set_hexpand(True)
+    e.set_width_chars(1)
     if placeholder:
         e.set_placeholder_text(placeholder)
     return e
@@ -424,7 +425,7 @@ class ModelPicker(Gtk.Box):
 
     def __init__(self, placeholder: str = ""):
         super().__init__(spacing=4)
-        self.entry = Gtk.Entry(); self.entry.set_hexpand(True)
+        self.entry = Gtk.Entry(); self.entry.set_hexpand(True); self.entry.set_width_chars(1)
         if placeholder:
             self.entry.set_placeholder_text(placeholder)
         self.pack_start(self.entry, True, True, 0)
@@ -510,10 +511,10 @@ def _url_field(parent: Gtk.Box, label: str, placeholder: str, on_reload,
     row.pack_start(lbl, False, False, 0)
     if dot is not None:
         row.pack_start(dot, False, False, 0)   # connection dot beside the field (left), like Engines
-    e = Gtk.Entry(); e.set_hexpand(True)
+    e = Gtk.Entry(); e.set_hexpand(True); e.set_width_chars(1)
     if placeholder:
         e.set_placeholder_text(placeholder)
-        
+
     lbl.set_mnemonic_widget(e)
     atk = e.get_accessible()
     if atk and label:
@@ -1356,6 +1357,7 @@ class SettingsDialog:
         test_row.pack_start(stt_test_btn, False, False, 0)
         self.stt_result = Gtk.Label(xalign=0.0)
         self.stt_result.set_line_wrap(True)
+        self.stt_result.set_max_width_chars(50)
         self.stt_result.set_selectable(True)
         self.stt_result.set_valign(Gtk.Align.START)
         test_row.pack_start(self.stt_result, True, True, 0)
@@ -1743,6 +1745,7 @@ class SettingsDialog:
         kw_entry.set_text(kw_value)
         kw_entry.set_placeholder_text(kw_placeholder)
         kw_entry.set_hexpand(True)
+        kw_entry.set_width_chars(1)
         if tooltip_kw:
             kw_entry.set_tooltip_text(tooltip_kw)
             lbl.set_tooltip_text(tooltip_kw)
@@ -1977,6 +1980,7 @@ class SettingsDialog:
 
         path_entry = Gtk.Entry()
         path_entry.set_hexpand(True)
+        path_entry.set_width_chars(1)
         path_entry.set_editable(False)
         path_entry.set_placeholder_text(empty_note)
         if value:
