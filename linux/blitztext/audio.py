@@ -72,9 +72,10 @@ class LevelMeter:
     False if no recorder is available or the device can't be opened.
     """
 
-    def __init__(self, device: str = "", on_level=None, recorder: str = "auto"):
+    def __init__(self, device: str = "", on_level=None, recorder: str = "auto", on_chunk=None):
         self.device = device or ""
         self.on_level = on_level
+        self.on_chunk = on_chunk   # optional: called with raw s16le PCM bytes each chunk
         self._recorder = recorder
         self._proc: subprocess.Popen | None = None
         self._thread: threading.Thread | None = None
@@ -117,6 +118,8 @@ class LevelMeter:
                 chunk = proc.stdout.read(_CHUNK_BYTES)
                 if not chunk:
                     break
+                if self.on_chunk:
+                    self.on_chunk(chunk)
                 samples = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0
                 level = float(np.sqrt(np.mean(np.square(samples)))) if samples.size else 0.0
                 if self.on_level:

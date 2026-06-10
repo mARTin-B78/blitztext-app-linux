@@ -34,6 +34,102 @@ StatusCallback = Callable[[str, str | None, str], None]
 # stop speaking.
 _VAD_COUNTDOWN_GRACE = 0.35
 
+# Cancel-watcher: accumulate this much audio before the first check, then
+# re-check every time this many new bytes arrive.  3200 bytes = 100 ms at
+# 16 kHz s16le mono.  0.8 s min avoids false positives on the very first chunk;
+# 0.6 s poll keeps latency low without hammering the transcriber.
+_CANCEL_MIN_BYTES  = int(0.8 * 16000 * 2)   # 25600
+_CANCEL_POLL_BYTES = int(0.6 * 16000 * 2)   # 19200
+
+
+def _pcm_to_wav(path: str, pcm: bytes) -> None:
+    """Write raw s16le 16 kHz mono PCM bytes as a minimal RIFF WAV."""
+    import struct
+    data_len = len(pcm)
+    with open(path, "wb") as f:
+        f.write(b"RIFF")
+        f.write(struct.pack("<I", 36 + data_len))
+        f.write(b"WAVE")
+        f.write(b"fmt ")
+        f.write(struct.pack("<IHHIIHH", 16, 1, 1, 16000, 32000, 2, 16))
+        f.write(b"data")
+        f.write(struct.pack("<I", data_len))
+        f.write(pcm)
+
+
+class _CancelWatcher:
+    """Listens to in-progress VAD audio and triggers cancel if a keyword is heard.
+
+    PCM chunks (raw s16le 16 kHz mono) are fed via :meth:`feed` from the VAD
+    level-meter thread.  Every _CANCEL_POLL_BYTES of *new* audio (after an
+    initial _CANCEL_MIN_BYTES warm-up), a fast beam_size=1 transcription of the
+    accumulated buffer runs in a background thread.  If a cancel keyword is
+    found, the supplied ``on_cancel`` callback fires once and the watcher stops.
+    """
+
+    def __init__(self, transcriber, cancel_keywords, language, threshold, on_cancel):
+        self._transcriber = transcriber
+        self._keywords = cancel_keywords
+        self._language = language
+        self._threshold = threshold
+        self._on_cancel = on_cancel
+        self._buf = bytearray()
+        self._new_bytes = 0
+        self._active = True
+        self._lock = threading.Lock()
+        self._checking = False   # prevents overlapping check threads
+
+    def feed(self, chunk: bytes) -> None:
+        if not self._active:
+            return
+        with self._lock:
+            if not self._active:
+                return
+            self._buf.extend(chunk)
+            self._new_bytes += len(chunk)
+            ready = (len(self._buf) >= _CANCEL_MIN_BYTES
+                     and self._new_bytes >= _CANCEL_POLL_BYTES
+                     and not self._checking)
+            if ready:
+                self._new_bytes = 0
+                self._checking = True
+                snapshot = bytes(self._buf)
+        if ready:
+            threading.Thread(target=self._check, args=(snapshot,), daemon=True,
+                             name="CancelWatcher").start()
+
+    def stop(self) -> None:
+        with self._lock:
+            self._active = False
+
+    def _check(self, audio: bytes) -> None:
+        import os
+        import tempfile
+        from pathlib import Path
+        fd, tmp = tempfile.mkstemp(prefix="bt-cw-", suffix=".wav")
+        try:
+            os.close(fd)
+            _pcm_to_wav(tmp, audio)
+            text = self._transcriber.transcribe(
+                Path(tmp), language=self._language, beam_size=1)
+            with self._lock:
+                if not self._active:
+                    return
+            kw = is_cancel(text, self._keywords, threshold=self._threshold)
+            if kw:
+                with self._lock:
+                    if not self._active:
+                        return
+                    self._active = False
+                log(f'[cancel-watcher] “{kw}” heard live — cancelling immediately.')
+                self._on_cancel()
+        except Exception:   # noqa: BLE001 — watcher must never crash the daemon
+            pass
+        finally:
+            Path(tmp).unlink(missing_ok=True)
+            with self._lock:
+                self._checking = False
+
 
 class Daemon:
     def __init__(self, cfg: Config, status_cb: StatusCallback | None = None,
@@ -219,7 +315,24 @@ class Daemon:
             elif self.countdown_cb:
                 self.countdown_cb(None, silence)
 
-        self._vad_meter = audio.LevelMeter(self.cfg.mic, on_level=on_level, recorder=self.recorder_name)
+        # Real-time cancel keyword watcher: accumulate PCM from the VAD meter
+        # and run quick transcription checks so cancel fires immediately rather
+        # than waiting for the full silence timeout + normal transcription pass.
+        on_chunk = None
+        if self.cfg.cancel_keywords and getattr(self, "transcriber", None) is not None:
+            self._cancel_watcher = _CancelWatcher(
+                self.transcriber,
+                self.cfg.cancel_keywords,
+                self.cfg.language,
+                self.cfg.routing_threshold,
+                on_cancel=lambda: GLib.idle_add(self.cancel_dictation),
+            )
+            on_chunk = self._cancel_watcher.feed
+        else:
+            self._cancel_watcher = None
+
+        self._vad_meter = audio.LevelMeter(self.cfg.mic, on_level=on_level,
+                                           recorder=self.recorder_name, on_chunk=on_chunk)
         ok = self._vad_meter.start()
 
         # Safety net: if the LevelMeter fails to open the mic (e.g. device busy
@@ -240,6 +353,9 @@ class Daemon:
         if getattr(self, '_vad_meter', None) is not None:
             self._vad_meter.stop()
             self._vad_meter = None
+        if getattr(self, "_cancel_watcher", None) is not None:
+            self._cancel_watcher.stop()
+            self._cancel_watcher = None
 
     def _ov_meter_start(self) -> None:
         """A level meter purely to drive the overlay waveform in streaming mode.

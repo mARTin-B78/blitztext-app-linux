@@ -9,6 +9,17 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.29] - 2026-06-10
+
+### Changed
+- **Cancel keywords now fire immediately during wakeword recording.** A
+  real-time `_CancelWatcher` accumulates raw PCM from the VAD level-meter,
+  then every ~0.6 s of new audio runs a fast `beam_size=1` local transcription
+  pass to check for cancel keywords. When one is found it calls
+  `cancel_dictation()` instantly — no waiting for the silence timer or a full
+  transcription of the whole clip. Falls back to the existing post-transcription
+  check if no local transcriber is loaded or no cancel keywords are configured.
+
 ## [2.03.28] - 2026-06-10
 
 ### Fixed
