@@ -112,6 +112,9 @@ class WakewordListener:
                                 self._handle_detection()
                                 
                             payload_len = msg.get("payload_length", 0)
+                            if not (0 <= payload_len <= 10 * 1024 * 1024):
+                                logbuffer.log(f"[wakeword] Disconnecting: payload length {payload_len} out of bounds", level="WARNING")
+                                break
                             if payload_len > 0:
                                 # Consume payload
                                 remaining = payload_len
@@ -258,6 +261,9 @@ class WakewordActionListener:
                                     self._stop_event.set()   # one-shot: stop after first fire
                                     cb()
                             payload_len = msg.get("payload_length", 0)
+                            if not (0 <= payload_len <= 10 * 1024 * 1024):
+                                logbuffer.log(f"[wakeword-action] Disconnecting: payload length {payload_len} out of bounds", level="WARNING")
+                                break
                             if payload_len > 0:
                                 remaining = payload_len
                                 while remaining > 0:
