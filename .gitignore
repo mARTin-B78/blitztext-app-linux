@@ -33,3 +33,8 @@ node_modules/
 
 # Agent workspace
 jules/
+
+# Raw screenshot source folders (published screenshots stay in Screenshots/)
+Screenshots/Settings - new/
+Screenshots/Settings-old/
+Screenshots/Welcome Setup/
