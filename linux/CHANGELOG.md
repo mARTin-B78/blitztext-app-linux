@@ -9,6 +9,19 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.27] - 2026-06-10
+
+### Added
+- **Overlay × cancel button.** A small × button appears in the top-right corner
+  of the on-screen waveform HUD while recording or streaming. Clicking it
+  cancels the current dictation. The rest of the overlay remains fully
+  click-through; only the button area receives pointer events.
+- **Cancel/Send keyboard shortcuts in Wakeword tab.** The "Cancel words" and
+  "Send words" rows in the Input → Wakeword section now include an inline
+  shortcut entry + "Set" button, so you can configure `key_cancel` /
+  `key_send` right next to the spoken-word equivalents without visiting the
+  keyboard-mode card.
+
 ## [2.03.26] - 2026-06-10
 
 ### Fixed

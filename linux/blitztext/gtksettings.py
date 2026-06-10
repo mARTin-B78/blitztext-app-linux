@@ -1648,6 +1648,51 @@ notebook.bt-nb tab:checked label {
         return False
 
     # -- key binding ("Set" button captures the next keypress) ---
+    def _kw_shortcut_row(self, lb, label: str, kw_value: str, kw_placeholder: str,
+                         key_value: str, *, tooltip_kw: str = "", tooltip_key: str = "",
+                         width: int = 150):
+        """Combined row: [label][keywords entry] | [shortcut label][shortcut entry][Set]."""
+        row_box = Gtk.Box(spacing=8)
+        row_box.set_margin_top(6); row_box.set_margin_bottom(6)
+        row_box.set_margin_start(12); row_box.set_margin_end(8)
+
+        lbl = Gtk.Label(label=label, xalign=0.0)
+        lbl.set_size_request(width, -1)
+        row_box.pack_start(lbl, False, False, 0)
+
+        kw_entry = Gtk.Entry()
+        kw_entry.set_text(kw_value)
+        kw_entry.set_placeholder_text(kw_placeholder)
+        kw_entry.set_hexpand(True)
+        if tooltip_kw:
+            kw_entry.set_tooltip_text(tooltip_kw)
+            lbl.set_tooltip_text(tooltip_kw)
+        row_box.pack_start(kw_entry, True, True, 0)
+
+        sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+        sep.set_margin_start(4); sep.set_margin_end(4)
+        row_box.pack_start(sep, False, False, 0)
+
+        key_lbl = Gtk.Label(label="Shortcut", xalign=0.0)
+        key_lbl.get_style_context().add_class("dim-label")
+        row_box.pack_start(key_lbl, False, False, 0)
+
+        key_entry = Gtk.Entry()
+        key_entry.set_text(key_value)
+        key_entry.set_placeholder_text("<esc>")
+        key_entry.set_size_request(100, -1)
+        if tooltip_key:
+            key_entry.set_tooltip_text(tooltip_key)
+            key_lbl.set_tooltip_text(tooltip_key)
+        row_box.pack_start(key_entry, False, False, 0)
+
+        set_btn = Gtk.Button(label="Set")
+        set_btn.connect("clicked", lambda _b, e=key_entry: self._bind_key(e))
+        row_box.pack_start(set_btn, False, False, 0)
+
+        _lb_add(lb, row_box)
+        return kw_entry, key_entry
+
     def _key_field(self, page: Gtk.Box, label: str, value: str, placeholder: str = "", width: int = 150) -> Gtk.Entry:
         row = Gtk.Box(spacing=10); row.set_margin_top(3); row.set_margin_bottom(3)
         lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(width, -1)
@@ -1789,12 +1834,18 @@ notebook.bt-nb tab:checked label {
 
         self.ww_silence = _labeled(ww_card, "Silence to stop (s)", _entry(str(self.cfg.wakeword_silence_seconds)), width=LW,
                                    tooltip="After the wakeword fires, stop recording this many seconds after you stop speaking. Default 2.0.")
-        self.cancel_keywords = _labeled(ww_card, "Cancel words", _entry(", ".join(self.cfg.cancel_keywords),
-                                        placeholder="abbrechen, cancel"), width=LW,
-                                        tooltip="Say one of these at the start or end of a clip to DISCARD it — nothing is typed. Empty = off.")
-        self.send_keywords = _labeled(ww_card, "Send words", _entry(", ".join(self.cfg.send_keywords),
-                                      placeholder="computer send, computer abschicken"), width=LW,
-                                      tooltip="Say one of these to type AND press Enter (spoken ‘submit’). Use a distinctive multi-word phrase. Empty = off.")
+        self.cancel_keywords, self.ww_key_cancel = self._kw_shortcut_row(
+            ww_card, "Cancel words", ", ".join(self.cfg.cancel_keywords),
+            "abbrechen, cancel", self.cfg.key_cancel,
+            tooltip_kw="Say one of these at the start or end of a clip to DISCARD it — nothing is typed. Empty = off.",
+            tooltip_key="Keyboard shortcut that cancels dictation (works even during wakeword recording).",
+            width=LW)
+        self.send_keywords, self.ww_key_send = self._kw_shortcut_row(
+            ww_card, "Send words", ", ".join(self.cfg.send_keywords),
+            "computer send, computer abschicken", self.cfg.key_send,
+            tooltip_kw="Say one of these to type AND press Enter (spoken ‘submit’). Use a distinctive multi-word phrase. Empty = off.",
+            tooltip_key="Keyboard shortcut that stops recording and pastes with Enter.",
+            width=LW)
 
         self._ww_load_idx(active_idx)
 
@@ -3028,6 +3079,10 @@ notebook.bt-nb tab:checked label {
             c.wakeword_silence_seconds = float(self.ww_silence.get_text())
             c.cancel_keywords = [k.strip() for k in self.cancel_keywords.get_text().split(",") if k.strip()]
             c.send_keywords = [k.strip() for k in self.send_keywords.get_text().split(",") if k.strip()]
+            if hasattr(self, "ww_key_cancel"):
+                c.key_cancel = self.ww_key_cancel.get_text().strip() or c.key_cancel
+            if hasattr(self, "ww_key_send"):
+                c.key_send = self.ww_key_send.get_text().strip() or c.key_send
             c.tts_url = self.wwb_url.get_text().strip().rstrip("/")
             c.tts_api_key_env = self.wwb_key.get_text().strip()
             c.tts_model = self.wwb_model.get_text().strip()

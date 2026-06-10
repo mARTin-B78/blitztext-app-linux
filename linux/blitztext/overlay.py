@@ -56,9 +56,12 @@ _PHASES = {
 }
 
 
+_CANCEL_BTN_R = 11     # hit-radius of the × button (px)
+
 class Overlay:
-    def __init__(self, anchor_mode: str = "caret") -> None:
+    def __init__(self, anchor_mode: str = "caret", on_cancel=None) -> None:
         self.anchor_mode = anchor_mode
+        self._on_cancel_cb = on_cancel   # callable() → cancels current recording
         self._visible = False
         self._state = "recording"
         self._text = ""
@@ -94,6 +97,8 @@ class Overlay:
         self._pending_level: float = 0.0
         self._level_flush_queued: bool = False
 
+        self._cancel_btn_rect = (0, 0, 0, 0)   # (x, y, w, h) in window coords
+
         self._win = Gtk.Window(type=Gtk.WindowType.POPUP)
         self._win.set_app_paintable(True)
         self._win.set_resizable(False)
@@ -112,15 +117,32 @@ class Overlay:
         self._area.connect("draw", self._on_draw)
         self._win.add(self._area)
         self._win.connect("realize", self._on_realize)
+        self._win.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+        self._win.connect("button-press-event", self._on_click)
         self._win.set_default_size(_WIDTH, self._height)
 
-    # -- click-through --------------------------------------------------------
+    # -- click-through (all except the × button) ------------------------------
     def _on_realize(self, _w) -> None:
+        self._update_input_region()
+
+    def _update_input_region(self) -> None:
         gdkwin = self._win.get_window()
-        if gdkwin is not None:
-            # Empty input region → the HUD ignores all clicks; they fall through
-            # to whatever is underneath (the field you're typing into).
-            gdkwin.input_shape_combine_region(cairo.Region(), 0, 0)
+        if gdkwin is None:
+            return
+        if self._on_cancel_cb and self._state in ("recording", "streaming"):
+            x, y, w, h = self._cancel_btn_rect
+            r = cairo.Region(cairo.RectangleInt(int(x), int(y), int(w), int(h)))
+        else:
+            r = cairo.Region()   # empty → fully click-through
+        gdkwin.input_shape_combine_region(r, 0, 0)
+
+    def _on_click(self, _win, event) -> bool:
+        if self._on_cancel_cb is None:
+            return False
+        x, y, w, h = self._cancel_btn_rect
+        if x <= event.x <= x + w and y <= event.y <= y + h:
+            self._on_cancel_cb()
+        return True
 
     # -- thread-safe public API ----------------------------------------------
     def show(self, state: str, window_id: str | None) -> None:
@@ -235,6 +257,7 @@ class Overlay:
             # The countdown only makes sense while listening; drop it as soon as
             # we move on to transcribing / done / idle so the ring doesn't linger.
             self._cd_deadline = None
+        self._update_input_region()   # enable/disable × hit area
         if state in ("recording", "streaming", "busy"):
             self._cancel_hide()
         elif state in ("done", "idle", "error"):
@@ -342,6 +365,13 @@ class Overlay:
         self._win.move(int(win_x), int(win_y))
         self._area.set_size_request(_WIDTH, self._height)
 
+        # X button: top-right corner of the bubble body.
+        _body_top = _TAIL_H if self._tail_up else 0
+        btn_d = _CANCEL_BTN_R * 2
+        self._cancel_btn_rect = (
+            _WIDTH - _PAD - btn_d, _body_top + _PAD // 2, btn_d, btn_d)
+        self._update_input_region()
+
     # -- drawing --------------------------------------------------------------
     def _on_draw(self, _area, cr) -> bool:
         # Start fully transparent.
@@ -373,10 +403,17 @@ class Overlay:
         wf_w = w - _PAD - wf_x
         self._draw_wave(cr, wf_x, body_top + _PAD, wf_w, _HEADER_H)
 
-        # Phase label by the waveform (top-right) — only when there's no preset
-        # banner below (which carries the phase instead) and no text yet.
+        # × cancel button (top-right corner, recording/streaming only).
+        if self._on_cancel_cb and self._state in ("recording", "streaming"):
+            self._draw_cancel_btn(cr, body_top)
+
+        # Phase label by the waveform — only when there's no preset banner and no text.
+        # Shift left to leave room for the × button.
+        label_right = (w - _PAD - _CANCEL_BTN_R * 2 - 6
+                       if self._on_cancel_cb and self._state in ("recording", "streaming")
+                       else w - _PAD)
         if self._phase_label and not self._text and not self._preset_name:
-            self._draw_label(cr, w - _PAD, body_top + _PAD + 12, self._phase_label)
+            self._draw_label(cr, label_right, body_top + _PAD + 12, self._phase_label)
 
         y = body_top + _PAD + _HEADER_H
         # Matched-preset banner: emoji + name (left), live phase chip (right).
@@ -523,6 +560,25 @@ class Overlay:
         cr.set_source_rgba(1, 1, 1, 0.55)
         cr.move_to(right_x - tw, cy - th / 2)
         PangoCairo.show_layout(cr, layout)
+
+    def _draw_cancel_btn(self, cr, body_top) -> None:
+        x, y, w, h = self._cancel_btn_rect
+        cx_btn = x + w / 2
+        cy_btn = y + h / 2
+        cr.set_source_rgba(1, 1, 1, 0.15)
+        cr.arc(cx_btn, cy_btn, _CANCEL_BTN_R, 0, 2 * math.pi)
+        cr.fill()
+        arm = _CANCEL_BTN_R * 0.45
+        cr.set_source_rgba(1, 1, 1, 0.80)
+        cr.set_line_width(1.8)
+        cr.set_line_cap(cairo.LINE_CAP_ROUND)
+        cr.move_to(cx_btn - arm, cy_btn - arm)
+        cr.line_to(cx_btn + arm, cy_btn + arm)
+        cr.stroke()
+        cr.move_to(cx_btn + arm, cy_btn - arm)
+        cr.line_to(cx_btn - arm, cy_btn + arm)
+        cr.stroke()
+        cr.set_line_cap(cairo.LINE_CAP_BUTT)
 
     def _draw_text(self, cr, x, y, w) -> None:
         layout = self._win.create_pango_layout(self._text)

@@ -96,7 +96,11 @@ class App:
             try:
                 from .overlay import Overlay
 
-                self.overlay = Overlay(anchor_mode=cfg.overlay_anchor)
+                self.overlay = Overlay(
+                    anchor_mode=cfg.overlay_anchor,
+                    on_cancel=lambda: threading.Thread(
+                        target=self.daemon.cancel_dictation, daemon=True).start(),
+                )
                 if cfg.overlay_anchor == "caret":
                     from . import caret
 
