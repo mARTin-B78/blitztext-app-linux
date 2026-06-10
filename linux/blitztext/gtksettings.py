@@ -267,6 +267,7 @@ def _switch_row(parent, label: str, switch: Gtk.Switch, description: str = "",
 
     desc = Gtk.Label(label=description, xalign=0.0)
     desc.set_line_wrap(True)
+    desc.set_max_width_chars(50)   # bound natural width so NEVER-policy SW doesn't grow the dialog
     desc.get_style_context().add_class("dim-label")
     row.pack_start(desc, True, True, 0)
 
@@ -882,7 +883,7 @@ class SettingsDialog:
         def _stack_page(title: str) -> Gtk.Box:
             outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
             sw = Gtk.ScrolledWindow()
-            sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.ALWAYS)
+            sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.ALWAYS)
             sw.set_overlay_scrolling(False)
             outer.pack_start(sw, True, True, 0)
             inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)

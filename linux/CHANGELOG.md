@@ -9,6 +9,19 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.35] - 2026-06-10
+
+### Fixed
+- **Settings pages no longer widen the dialog.** `_switch_row` description
+  labels had `set_line_wrap(True)` but no `set_max_width_chars`, so GTK
+  computed their natural width as the full un-wrapped text (87 chars × ~8 px
+  = ~700 px). With `NEVER` horizontal policy on the page `ScrolledWindow`,
+  that propagated directly to the dialog width, making Keyboard, Wakeword,
+  STT Engines, and Benchmark pages ~1000–1360 px wide. Fixed by adding
+  `set_max_width_chars(50)` (≈ 375 px) to description labels, and changed the
+  page `ScrolledWindow` horizontal policy from `NEVER` to `AUTOMATIC` as a
+  safety net for any other wide widget.
+
 ## [2.03.34] - 2026-06-10
 
 ### Fixed
