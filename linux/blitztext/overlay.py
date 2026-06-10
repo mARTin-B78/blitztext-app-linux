@@ -129,7 +129,7 @@ class Overlay:
         gdkwin = self._win.get_window()
         if gdkwin is None:
             return
-        if self._on_cancel_cb and self._state in ("recording", "streaming"):
+        if self._on_cancel_cb and self._state in ("recording", "streaming", "busy"):
             x, y, w, h = self._cancel_btn_rect
             r = cairo.Region(cairo.RectangleInt(int(x), int(y), int(w), int(h)))
         else:
@@ -403,14 +403,14 @@ class Overlay:
         wf_w = w - _PAD - wf_x
         self._draw_wave(cr, wf_x, body_top + _PAD, wf_w, _HEADER_H)
 
-        # × cancel button (top-right corner, recording/streaming only).
-        if self._on_cancel_cb and self._state in ("recording", "streaming"):
+        # × cancel button (top-right corner, recording/streaming/busy).
+        if self._on_cancel_cb and self._state in ("recording", "streaming", "busy"):
             self._draw_cancel_btn(cr, body_top)
 
         # Phase label by the waveform — only when there's no preset banner and no text.
         # Shift left to leave room for the × button.
         label_right = (w - _PAD - _CANCEL_BTN_R * 2 - 6
-                       if self._on_cancel_cb and self._state in ("recording", "streaming")
+                       if self._on_cancel_cb and self._state in ("recording", "streaming", "busy")
                        else w - _PAD)
         if self._phase_label and not self._text and not self._preset_name:
             self._draw_label(cr, label_right, body_top + _PAD + 12, self._phase_label)

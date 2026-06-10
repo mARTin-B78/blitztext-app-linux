@@ -163,6 +163,7 @@ class Daemon:
         self._active_workflow: Workflow | None = None
         self._target_window: str | None = None
         self._busy = False
+        self._abort_event = threading.Event()
         self._prepared = False
         self._listener = None
         # Synthetic preset used by the voice-routing hotkey.
@@ -520,18 +521,29 @@ class Daemon:
                 self._active_workflow = None
                 self._stream_segment_text = ""
                 rec = None
-            else:
+                busy = False
+            elif self._recording is not None:
                 streamer = None
-                if self._recording is None:
-                    return
                 rec = self._recording
                 self._recording = None
                 self._active_workflow = None
+                busy = False
+            elif self._busy:
+                streamer = None
+                rec = None
+                busy = True
+            else:
+                return
         if streamer is not None:
             streamer.stop()
             self._ov_meter_stop()
             self._emit("idle", None, "Cancelled")
             self._notify("Cancelled", "Streaming stopped.", "low")
+            self._play_sound("device-removed")
+            return
+        if busy:
+            self._abort_event.set()
+            self._emit("idle", None, "Cancelled")
             self._play_sound("device-removed")
             return
         rec.discard()
@@ -608,6 +620,7 @@ class Daemon:
 
     # -- worker ---------------------------------------------------------------
     def _process(self, audio_path, workflow: Workflow, window_id, send_enter: bool = False) -> None:
+        self._abort_event.clear()
         label = workflow.name
         try:
             # Quality gate: drop silent / too-short clips before we even transcribe.
@@ -630,6 +643,9 @@ class Daemon:
                 local_transcriber=self.transcriber,
                 timeout=self.cfg.timeout,
             )
+            if self._abort_event.is_set():
+                log(f"✗ {label}: cancelled during transcription.")
+                return
 
             text = quality.clean(text, strip_trailing_punctuation=self.cfg.strip_trailing_punctuation)
             text = quality.expand_spoken_punctuation(text)
@@ -747,6 +763,7 @@ class Daemon:
                         temperature=target.temperature,
                         timeout=self.cfg.timeout,
                         on_token=on_token,
+                        abort_event=self._abort_event,
                     )
                 except LLMError as exc:
                     self._emit("error", label, str(exc))
@@ -761,6 +778,10 @@ class Daemon:
                     log(f"ERROR ({label} rewrite unexpected): {exc}")
                     if self.text_cb:
                         self.text_cb(f"✗ {msg}")
+                    return
+
+                if self._abort_event.is_set():
+                    log(f"✗ {label}: cancelled during rewrite.")
                     return
 
                 # Sanity-check: reject responses that are >80 % whitespace —

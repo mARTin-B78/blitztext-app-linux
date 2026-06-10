@@ -9,6 +9,16 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.41] - 2026-06-10
+
+### Added
+- **Cancel button shown during transcription and rewriting.** The `×` button in
+  the top-right corner of the overlay is now visible and clickable in the
+  `busy` state (Transcribing… / Rewriting…), not only while recording.
+  Clicking it during transcription discards the result once the STT call
+  returns. Clicking it during a rewrite breaks out of the LLM stream
+  immediately — the partial text is discarded and nothing is typed.
+
 ## [2.03.40] - 2026-06-10
 
 ### Changed

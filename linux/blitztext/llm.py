@@ -50,6 +50,7 @@ def chat(
     temperature: float | None = None,
     timeout: int = 45,
     on_token: Callable[[str], None] | None = None,
+    abort_event=None,
 ) -> str:
     """Run a chat completion and return the full text.
 
@@ -82,7 +83,7 @@ def chat(
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             if stream:
-                content = _read_stream(resp, on_token)
+                content = _read_stream(resp, on_token, abort_event)
             else:
                 body = json.loads(resp.read().decode("utf-8"))
                 content = body["choices"][0]["message"]["content"]
@@ -107,12 +108,14 @@ def chat(
     return content
 
 
-def _read_stream(resp, on_token: Callable[[str], None]) -> str:
+def _read_stream(resp, on_token: Callable[[str], None], abort_event=None) -> str:
     """Parse an OpenAI-style SSE stream, returning the accumulated content and
     feeding each delta to ``on_token``. Tolerant of keep-alive blanks and the
     trailing ``[DONE]`` sentinel."""
     parts: list[str] = []
     for raw in resp:
+        if abort_event and abort_event.is_set():
+            break
         line = raw.decode("utf-8", "replace").strip()
         if not line or not line.startswith("data:"):
             continue
