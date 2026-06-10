@@ -112,6 +112,7 @@ class Config:
     wakeword_silence_seconds: float = 2.0  # auto-stop after this much trailing silence
     wakeword_cancel_model: str = ""  # wakeword model that cancels an in-progress recording
     wakeword_send_model: str = ""    # wakeword model that finishes + sends (Enter) a recording
+    setup_complete: bool = False     # True once the first-run wizard has been completed
     # Text-to-speech for the wakeword benchmark — its own OpenAI-compatible
     # endpoint (Kokoro, XTTS, OpenAI, …): base URL incl. /v1, an optional bearer
     # key env var, a model id, and the voices to cycle through.
@@ -202,6 +203,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
         output=g.get("output", "type"),
         type_delay_ms=int(g.get("type_delay_ms", 4)),
         notify=bool(g.get("notify", True)),
+        setup_complete=bool(g.get("setup_complete", False)),
         notify_routing=bool(g.get("notify_routing", True)),
         language=g.get("language", "de"),
         overlay_enabled=bool(g.get("overlay_enabled", True)),
@@ -335,6 +337,7 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "output": cfg.output,
             "type_delay_ms": cfg.type_delay_ms,
             "notify": cfg.notify,
+            "setup_complete": cfg.setup_complete,
             "notify_routing": cfg.notify_routing,
             "language": cfg.language,
             "overlay_enabled": cfg.overlay_enabled,

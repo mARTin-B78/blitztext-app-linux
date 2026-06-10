@@ -9,6 +9,20 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.31] - 2026-06-10
+
+### Added
+- **First-run setup wizard.** A paged GTK dialog (`setup_wizard.py`) guides
+  new users through five steps: trigger method (keyboard / wakeword / both),
+  keyboard shortcut assignment (with live key capture), wakeword server
+  configuration (with connection test), speech-to-text engine selection
+  (local Whisper model size or remote API), and optional AI rewriting (LLM
+  endpoint + model). Navigation has Back, Next, and Skip buttons. The wizard
+  shows automatically on first launch (before the daemon starts) and can be
+  reopened via the "Setup Wizard…" button in the Settings header bar.
+  Completing the wizard sets `setup_complete = true` in the config so it
+  does not reappear.
+
 ## [2.03.30] - 2026-06-10
 
 ### Added

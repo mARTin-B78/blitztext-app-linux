@@ -120,6 +120,12 @@ class App:
         _install_css()
         self._build_window()
 
+        # Show the first-run wizard for fresh installs before the daemon starts.
+        if not getattr(cfg, "setup_complete", False):
+            from .setup_wizard import SetupWizard
+            wiz = SetupWizard(cfg, parent=None)
+            wiz.run()
+
         threading.Thread(target=self._startup, daemon=True).start()
 
     # -- window ---------------------------------------------------------------

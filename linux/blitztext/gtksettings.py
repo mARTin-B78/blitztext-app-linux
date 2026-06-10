@@ -767,6 +767,10 @@ class SettingsDialog:
             "Save and restart the daemon — required when changing STT engine, hotkeys, "
             "microphone, or wakeword server.")
         _header.pack_end(self._save_restart_btn)
+        _wizard_btn = Gtk.Button(label="Setup Wizard…")
+        _wizard_btn.set_tooltip_text("Re-run the first-run setup wizard.")
+        _wizard_btn.connect("clicked", self._open_wizard)
+        _header.pack_start(_wizard_btn)
         _save = Gtk.Button(label="Save")
         _save.connect("clicked", lambda _b: self.dlg.response(RESP_SAVE))
         _save.set_tooltip_text("Save settings and apply what can be applied without restarting.")
@@ -3057,6 +3061,11 @@ notebook.bt-nb tab:checked label {
                     cy = h - 3 + (row - 2) * spacing
                     cr.arc(cx, cy, radius, 0, 2 * math.pi)
                     cr.fill()
+
+    def _open_wizard(self, _btn=None) -> None:
+        from .setup_wizard import SetupWizard
+        wiz = SetupWizard(self.cfg, parent=self.dlg)
+        wiz.run()
 
     def _cleanup(self) -> None:
         self._stop_meter()
