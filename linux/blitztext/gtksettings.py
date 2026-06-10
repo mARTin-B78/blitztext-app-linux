@@ -1806,6 +1806,11 @@ notebook.bt-nb tab:checked label {
         self.snd_after  = self._sound_field(snd_card, "Stop sound", self.cfg.sound_after,
             "Plays when manual recording stops (paste, paste+Enter, or auto-stop).", width=LW)
 
+        # Start meter if not already running (covers the case where Input is
+        # visited before General, which is where _start_meter() normally fires).
+        if self._meter is None:
+            self._start_meter()
+
     def _sound_field(self, page, label: str, value: str, tooltip: str = "",
                      empty_note: str = "Leave empty to use the built-in system sound.",
                      clear_tip: str = "Clear — use the built-in system sound",
@@ -1948,13 +1953,16 @@ notebook.bt-nb tab:checked label {
         self._start_meter()
 
     def _selected_mic_name(self) -> str:
+        if not hasattr(self, "gen_mic"):
+            return ""  # General tab not yet built; use default device
         i = self.gen_mic.get_active()
         return self._mics[i][0] if 0 <= i < len(self._mics) else ""
 
     def _start_meter(self) -> None:
         self._stop_meter()
         def on_level(v):
-            GLib.idle_add(self.mic_level.set_value, v)
+            if hasattr(self, "mic_level"):
+                GLib.idle_add(self.mic_level.set_value, v)
             if hasattr(self, "ww_mic_level"):
                 GLib.idle_add(self.ww_mic_level.set_value, v)
         self._meter = audio.LevelMeter(self._selected_mic_name(), on_level=on_level)

@@ -9,6 +9,16 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.24] - 2026-06-10
+
+### Fixed
+- **Input level meter works without visiting General first.** The level meter
+  was only started inside `_build_general()` and referenced `mic_level`
+  unconditionally. If Input was opened first the meter never started. Now
+  `_build_input()` also starts the meter when it isn't running yet, and both
+  level bars (`mic_level` in General and `ww_mic_level` in Input) are updated
+  defensively via `hasattr` so either tab can be visited in any order.
+
 ## [2.03.23] - 2026-06-10
 
 ### Fixed
