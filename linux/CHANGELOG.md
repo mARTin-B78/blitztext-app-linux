@@ -9,6 +9,15 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.36] - 2026-06-10
+
+### Changed
+- **STT Engines split from LLM Engines.** The single "STT Engines" sidebar
+  page is now two pages — "STT Engines" (speech-to-text configuration) and
+  "LLM Engines" (language model / rewrite configuration) — each with its
+  own infobox. The underlying `_stt_section()` and `_llm_section()` methods
+  are unchanged.
+
 ## [2.03.35] - 2026-06-10
 
 ### Fixed

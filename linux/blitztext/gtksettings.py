@@ -912,7 +912,8 @@ class SettingsDialog:
         _reg("General",     "General",              "preferences-system-symbolic",       self._build_general)
         _reg("Input",       "Keyboard",             "input-keyboard-symbolic",           self._build_keyboard)
         _reg(None,          "Wakeword",             "audio-input-microphone-symbolic",   self._build_wakeword)
-        _reg("Engines",     "STT Engines",          "network-server-symbolic",           self._build_engines)
+        _reg("Engines",     "STT Engines",          "network-server-symbolic",           self._build_stt_engines)
+        _reg(None,          "LLM Engines",          "applications-science-symbolic",     self._build_llm_engines)
         _reg("Benchmark",   "Benchmark — STT",      "utilities-system-monitor-symbolic", self._build_benchmark_stt)
         _reg(None,          "Benchmark — Wakeword", "audio-input-microphone-symbolic",   self._build_benchmark_ww)
         _reg("System",      "Log",                  "text-x-generic-symbolic",           self._build_log)
@@ -1259,14 +1260,20 @@ class SettingsDialog:
         pop.show_all()
         search_sw.set_visible(False)  # hide search results until user types
 
-    # ===== Engines ==========================================================
-    def _build_engines(self, page: Gtk.Box) -> None:
-        _infobox(page, "Engines do the work. The speech-to-text engine turns your voice into "
-                       "text; the language model rewrites it. Each can run locally or on "
-                       "a server you enter. A green dot means it is reachable, red means offline.")
-        _section_title(page, "Speech-to-text engine", margin_top=4, icon="audio-input-microphone-symbolic")
+    # ===== STT Engines ======================================================
+    def _build_stt_engines(self, page: Gtk.Box) -> None:
+        _infobox(page, "The speech-to-text engine transcribes your voice. It can run locally "
+                       "(faster-whisper, built-in) or connect to a remote OpenAI-compatible API "
+                       "or NVIDIA Riva stream. A green dot means the server is reachable.")
         page.pack_start(self._stt_section(), False, False, 0)
-        _section_title(page, "Language model (rewrite)", icon="applications-science-symbolic")
+        self._refresh_status()
+
+    # ===== LLM Engines ======================================================
+    def _build_llm_engines(self, page: Gtk.Box) -> None:
+        _infobox(page, "The language model rewrites your transcribed text — for example into a "
+                       "polished email or a code comment. It is optional: leave it disabled if "
+                       "you just want plain transcription. Connect to any OpenAI-compatible LAN "
+                       "server or cloud service.")
         page.pack_start(self._llm_section(), False, False, 0)
         self._refresh_status()
 
