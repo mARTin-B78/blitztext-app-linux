@@ -9,6 +9,17 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.25] - 2026-06-10
+
+### Changed
+- **Smart Save — no restart popup anymore.** "Save" now diffs the changed
+  settings against what requires a daemon restart. If only safe settings
+  changed (language, sounds, LLM prompt, keywords, overlay, …) it shows
+  "✓ Settings applied" inline in the header bar for 4 s and closes the
+  dialog. If restart-required fields changed (STT engine, hotkeys,
+  microphone, wakeword server) it shows "⚠ Saved — restart needed for: …"
+  and highlights "Save & Restart" so you can act on it. No modal popups.
+
 ## [2.03.24] - 2026-06-10
 
 ### Fixed

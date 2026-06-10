@@ -754,14 +754,23 @@ class SettingsDialog:
         _header = Gtk.HeaderBar()
         _header.set_show_close_button(True)
         _header.set_title("Blitztext — Settings")
-        _save_restart = Gtk.Button(label="Save & Restart")
-        _save_restart.get_style_context().add_class("suggested-action")
-        _save_restart.connect("clicked", lambda _b: self.dlg.response(RESP_SAVE_RESTART))
-        _header.pack_end(_save_restart)
+        self._save_restart_btn = Gtk.Button(label="Save & Restart")
+        self._save_restart_btn.get_style_context().add_class("suggested-action")
+        self._save_restart_btn.connect("clicked", lambda _b: self.dlg.response(RESP_SAVE_RESTART))
+        self._save_restart_btn.set_tooltip_text(
+            "Save and restart the daemon — required when changing STT engine, hotkeys, "
+            "microphone, or wakeword server.")
+        _header.pack_end(self._save_restart_btn)
         _save = Gtk.Button(label="Save")
         _save.connect("clicked", lambda _b: self.dlg.response(RESP_SAVE))
+        _save.set_tooltip_text("Save settings and apply what can be applied without restarting.")
         _header.pack_end(_save)
+        # Status label shown after Save — inline, no modal popup
+        self._status_lbl = Gtk.Label()
+        self._status_lbl.set_margin_start(8); self._status_lbl.set_margin_end(4)
+        _header.set_custom_title(self._status_lbl)
         _header.show_all()
+        self._status_lbl.hide()   # hidden until first save
         self.dlg.set_titlebar(_header)
 
         _prov = Gtk.CssProvider()
@@ -3058,18 +3067,62 @@ notebook.bt-nb tab:checked label {
                               buttons=Gtk.ButtonsType.OK, text=msg)
         d.run(); d.destroy()
 
-    def _info(self, msg: str) -> None:
-        d = Gtk.MessageDialog(transient_for=self.dlg, modal=True, message_type=Gtk.MessageType.INFO,
-                              buttons=Gtk.ButtonsType.OK, text=msg)
-        d.run(); d.destroy()
+    # ---- restart-diff fields ---------------------------------------------------
+    # Human-readable label → tuple of Config field names that must match.
+    _RESTART_FIELDS: list[tuple[str, tuple]] = [
+        ("active STT engine",   ("stt_active",)),
+        ("STT engine settings", ("stt_engines",)),
+        ("device / compute",    ("device", "compute_type")),
+        ("wakeword",            ("wakeword_enabled", "wakeword_active",
+                                 "wakeword_engines")),
+        ("hotkeys",             ("input_mode", "push_to_talk",
+                                 "key_start", "key_stop", "key_send", "key_cancel")),
+        ("microphone",          ("mic",)),
+    ]
+
+    @staticmethod
+    def _cfg_snapshot(cfg) -> dict:
+        import dataclasses
+        return dataclasses.asdict(cfg)
+
+    def _diff_requires_restart(self, snap_before: dict, snap_after: dict) -> list[str]:
+        reasons = []
+        for label, fields in self._RESTART_FIELDS:
+            if any(snap_before.get(f) != snap_after.get(f) for f in fields):
+                reasons.append(label)
+        return reasons
+
+    def _set_status(self, msg: str, *, warning: bool = False) -> None:
+        colour = "#e67e00" if warning else "#2a7d2a"
+        self._status_lbl.set_markup(
+            f'<span foreground="{colour}" size="small">{GLib.markup_escape_text(msg)}</span>')
+        self._status_lbl.show()
+        if warning:
+            self._save_restart_btn.get_style_context().add_class("suggested-action")
+        else:
+            self._save_restart_btn.get_style_context().remove_class("suggested-action")
+
+    def _clear_status(self) -> bool:
+        self._status_lbl.hide()
+        return False  # don't repeat the timeout
 
     def _on_response(self, dlg, resp):
         if resp in (RESP_SAVE, RESP_SAVE_RESTART):
-            self._force_build_tabs()   # ensure every tab's fields exist
+            self._force_build_tabs()
         if resp == RESP_SAVE:
+            import copy
+            snap_before = self._cfg_snapshot(self.cfg)
             if self._collect():
                 save(self.cfg)
-                self._info("Saved. Restart Blitztext to apply engine/hotkey changes.")
+                snap_after = self._cfg_snapshot(self.cfg)
+                needs = self._diff_requires_restart(snap_before, snap_after)
+                if needs:
+                    self._set_status(
+                        f"⚠ Saved — restart needed for: {', '.join(needs)}",
+                        warning=True)
+                else:
+                    self._set_status("✓ Settings applied")
+                    GLib.timeout_add(4000, self._clear_status)
             return
         if resp == RESP_SAVE_RESTART:
             if self._collect():
