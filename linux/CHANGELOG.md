@@ -9,6 +9,29 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.39] - 2026-06-10
+
+### Fixed
+- **Remaining horizontal scrollbars eliminated.** Root causes: (1) infobox
+  `max_width_chars` was 72 — at typical system font sizes (9 px/char) this
+  produced a natural width wider than the ~677 px content area; reduced to 58.
+  (2) Engine-selector combos (`stt_combo`, `llm_combo`, `ww_combo`) and the
+  `_combo()` helper had no constraint on CellRendererText width — long engine
+  names or ALSA device names drove the combo's natural width to 300–500 px.
+  Fixed by adding `_ellipsize_combo()` (sets `ellipsize=END` and
+  `max-width-chars=28` on the internal CellRendererText) to all combos.
+  (3) `_STT_TYPES`, `_LLM_TYPES`, `_DEVICE_OPTIONS`, `_COMPUTE_OPTIONS`
+  labels were 40–52 characters; shortened to ≤27 chars.
+
+### Changed
+- **Wakeword Cancel/Send word rows split into two rows.** Keywords and
+  keyboard shortcut are now on separate lines inside the card, avoiding the
+  cramped single-row layout.
+- **Benchmark — Wakeword: "Run wakeword benchmark" button moved** from the
+  bottom of the settings pane to the top of the results pane; pane divider
+  adjusted from 390 → 340 px. The button is now always visible without
+  scrolling and sits logically above the results it produces.
+
 ## [2.03.38] - 2026-06-10
 
 ### Fixed

@@ -40,24 +40,24 @@ GREEN, RED, GREY = "#34c759", "#ff3b30", "#b8b8be"
 
 # (stored_value, display_label) pairs used by _type_combo / _type_key
 _STT_TYPES: list[tuple[str, str]] = [
-    ("local",         "Internal  —  faster-whisper, runs inside the app"),
-    ("openai",        "Server  —  OpenAI-compatible API (LAN or cloud)"),
-    ("riva_realtime", "Realtime  —  NVIDIA Riva / NIM streaming"),
+    ("local",         "Internal (faster-whisper)"),
+    ("openai",        "Server (OpenAI-compatible)"),
+    ("riva_realtime", "Realtime (NVIDIA Riva)"),
 ]
 _LLM_TYPES: list[tuple[str, str]] = [
-    ("local", "LAN server  —  runs on your machine or local network"),
-    ("cloud", "Cloud service  —  OpenAI, Groq, OpenRouter, …"),
+    ("local", "LAN server"),
+    ("cloud", "Cloud service"),
 ]
 _DEVICE_OPTIONS: list[tuple[str, str]] = [
-    ("auto", "Auto  (try GPU / CUDA first, fall back to CPU)"),
+    ("auto", "Auto (GPU → CPU)"),
     ("cpu",  "CPU"),
-    ("cuda", "GPU  (CUDA)"),
+    ("cuda", "GPU (CUDA)"),
 ]
 _COMPUTE_OPTIONS: list[tuple[str, str]] = [
     ("auto",         "Auto"),
-    ("int8",         "int8  —  fast, less memory"),
-    ("float16",      "float16  —  accurate, needs more VRAM"),
-    ("int8_float16", "int8_float16  —  balanced"),
+    ("int8",         "int8"),
+    ("float16",      "float16"),
+    ("int8_float16", "int8_float16"),
 ]
 
 # (name, url, api_key_env, type_key, default_model) — quickstart templates
@@ -306,7 +306,7 @@ def _infobox(parent: Gtk.Box, text: str) -> Gtk.Box:
     icon.set_margin_start(6); icon.set_margin_end(2)
     box.pack_start(icon, False, False, 0)
     lbl = Gtk.Label(label=text, xalign=0.0)
-    lbl.set_line_wrap(True); lbl.set_xalign(0.0); lbl.set_max_width_chars(72)
+    lbl.set_line_wrap(True); lbl.set_xalign(0.0); lbl.set_max_width_chars(58)
     lbl.set_margin_top(8); lbl.set_margin_bottom(8); lbl.set_margin_end(8)
     box.pack_start(lbl, True, True, 0)
     acc = box.get_accessible()
@@ -370,6 +370,13 @@ def _block_scroll(combo: Gtk.ComboBoxText) -> Gtk.ComboBoxText:
     return combo
 
 
+def _ellipsize_combo(combo: Gtk.ComboBoxText, max_chars: int = 28) -> None:
+    """Limit a ComboBoxText's natural width so long item labels don't widen the dialog."""
+    for r in combo.get_cells():
+        r.set_property("ellipsize", Pango.EllipsizeMode.END)
+        r.set_property("max-width-chars", max_chars)
+
+
 def _combo(options, active=None) -> Gtk.ComboBoxText:
     c = _block_scroll(Gtk.ComboBoxText())
     for o in options:
@@ -379,6 +386,7 @@ def _combo(options, active=None) -> Gtk.ComboBoxText:
     elif options:
         c.set_active(0)
     c.set_size_request(10, -1)
+    _ellipsize_combo(c)
     return c
 
 
@@ -1287,6 +1295,8 @@ class SettingsDialog:
         # ── Selector bar ──────────────────────────────────────────────────────
         bar = Gtk.Box(spacing=6)
         self.stt_combo = _block_scroll(Gtk.ComboBoxText())
+        self.stt_combo.set_size_request(10, -1)
+        _ellipsize_combo(self.stt_combo)
         for e in self.cfg.stt_engines:
             self.stt_combo.append_text(e.name)
         self.stt_combo.set_active(self._index_of(self.cfg.stt_engines, self.cfg.stt_active))
@@ -1378,6 +1388,8 @@ class SettingsDialog:
         # ── Selector bar ──────────────────────────────────────────────────────
         bar = Gtk.Box(spacing=6)
         self.llm_combo = _block_scroll(Gtk.ComboBoxText())
+        self.llm_combo.set_size_request(10, -1)
+        _ellipsize_combo(self.llm_combo)
         for e in self.cfg.llm_engines:
             self.llm_combo.append_text(e.name)
         self.llm_combo.set_active(self._index_of(self.cfg.llm_engines, self.cfg.llm_active))
@@ -1732,15 +1744,16 @@ class SettingsDialog:
     def _kw_shortcut_row(self, lb, label: str, kw_value: str, kw_placeholder: str,
                          key_value: str, *, tooltip_kw: str = "", tooltip_key: str = "",
                          width: int = 150):
-        """Combined row: [label][keywords entry] | [shortcut label][shortcut entry][Set]."""
-        row_box = Gtk.Box(spacing=8)
-        row_box.set_margin_top(6); row_box.set_margin_bottom(6)
-        row_box.set_margin_start(12); row_box.set_margin_end(8)
-
+        """Two rows: keywords on top, shortcut underneath."""
+        # Row 1 — keywords
+        row1 = Gtk.Box(spacing=8)
+        row1.set_margin_top(6); row1.set_margin_bottom(2)
+        row1.set_margin_start(12); row1.set_margin_end(8)
         lbl = Gtk.Label(label=label, xalign=0.0)
         lbl.set_size_request(width, -1)
-        row_box.pack_start(lbl, False, False, 0)
-
+        if tooltip_kw:
+            lbl.set_tooltip_text(tooltip_kw)
+        row1.pack_start(lbl, False, False, 0)
         kw_entry = Gtk.Entry()
         kw_entry.set_text(kw_value)
         kw_entry.set_placeholder_text(kw_placeholder)
@@ -1748,31 +1761,32 @@ class SettingsDialog:
         kw_entry.set_width_chars(1)
         if tooltip_kw:
             kw_entry.set_tooltip_text(tooltip_kw)
-            lbl.set_tooltip_text(tooltip_kw)
-        row_box.pack_start(kw_entry, True, True, 0)
+        row1.pack_start(kw_entry, True, True, 0)
+        _lb_add(lb, row1)
 
-        sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
-        sep.set_margin_start(4); sep.set_margin_end(4)
-        row_box.pack_start(sep, False, False, 0)
-
+        # Row 2 — shortcut (indented under the label to align with the entry above)
+        row2 = Gtk.Box(spacing=8)
+        row2.set_margin_top(2); row2.set_margin_bottom(6)
+        row2.set_margin_start(12); row2.set_margin_end(8)
+        indent = Gtk.Box(); indent.set_size_request(width, -1)
+        row2.pack_start(indent, False, False, 0)
         key_lbl = Gtk.Label(label="Shortcut", xalign=0.0)
         key_lbl.get_style_context().add_class("dim-label")
-        row_box.pack_start(key_lbl, False, False, 0)
-
+        if tooltip_key:
+            key_lbl.set_tooltip_text(tooltip_key)
+        row2.pack_start(key_lbl, False, False, 0)
         key_entry = Gtk.Entry()
         key_entry.set_text(key_value)
         key_entry.set_placeholder_text("<esc>")
-        key_entry.set_size_request(100, -1)
+        key_entry.set_size_request(150, -1)
         if tooltip_key:
             key_entry.set_tooltip_text(tooltip_key)
-            key_lbl.set_tooltip_text(tooltip_key)
-        row_box.pack_start(key_entry, False, False, 0)
-
+        row2.pack_start(key_entry, False, False, 0)
         set_btn = Gtk.Button(label="Set")
         set_btn.connect("clicked", lambda _b, e=key_entry: self._bind_key(e))
-        row_box.pack_start(set_btn, False, False, 0)
+        row2.pack_start(set_btn, False, False, 0)
+        _lb_add(lb, row2)
 
-        _lb_add(lb, row_box)
         return kw_entry, key_entry
 
     def _key_field(self, page: Gtk.Box, label: str, value: str, placeholder: str = "", width: int = 150) -> Gtk.Entry:
@@ -1911,7 +1925,10 @@ class SettingsDialog:
 
         # ── Engine selector bar ───────────────────────────────────────────────
         ww_bar = Gtk.Box(spacing=6); ww_bar.set_margin_top(6)
-        self.ww_combo = _block_scroll(Gtk.ComboBoxText()); self.ww_combo.set_hexpand(True)
+        self.ww_combo = _block_scroll(Gtk.ComboBoxText())
+        self.ww_combo.set_hexpand(True)
+        self.ww_combo.set_size_request(10, -1)
+        _ellipsize_combo(self.ww_combo)
         for e in self.cfg.wakeword_engines:
             self.ww_combo.append_text(e.name)
         active_idx = next((i for i, e in enumerate(self.cfg.wakeword_engines)
@@ -2600,10 +2617,6 @@ class SettingsDialog:
                  tooltip="How many wakeword utterances to synthesize and test (filler-only "
                          "utterances for false-fire checking are added on top).")
 
-        wrun = Gtk.Button(label="Run wakeword benchmark"); wrun.connect("clicked", self._run_wakeword_bench)
-        wrun.set_halign(Gtk.Align.START)
-        ctrl.pack_start(wrun, False, False, 6)
-
         # ---- Results pane (bottom half of the Paned) ----
         # col 8 = foreground colour (not displayed)
         self.wwb_store = Gtk.ListStore(str, str, str, str, str, str, str, str, str)
@@ -2658,7 +2671,11 @@ class SettingsDialog:
         tb.pack_start(_copy_btn, False, False, 0)
         tb.pack_start(_save_btn, False, False, 0)
 
+        wrun = Gtk.Button(label="Run wakeword benchmark"); wrun.connect("clicked", self._run_wakeword_bench)
+        wrun.set_halign(Gtk.Align.START)
+
         results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        results_box.pack_start(wrun, False, False, 4)
         results_box.pack_start(tb, False, False, 0)
         results_box.pack_start(ww_sw, True, True, 0)
         results_box.pack_start(self.wwb_summary, False, False, 0)
@@ -2676,7 +2693,7 @@ class SettingsDialog:
         ww_paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
         ww_paned.pack1(ctrl_sw, resize=True, shrink=True)
         ww_paned.pack2(results_box, resize=True, shrink=False)
-        ww_paned.set_position(390)
+        ww_paned.set_position(340)
         page.pack_start(ww_paned, True, True, 4)
 
     def _run_bench(self, _b) -> None:
