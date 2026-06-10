@@ -74,16 +74,19 @@ class ModifierScheme:
             return
         self._pressed.add(token)
 
+        # Cancel works while arming/armed AND when the daemon is recording via
+        # wakeword (state stays "idle" in the scheme because wakeword bypasses
+        # the key-press path entirely).
+        if self._is(token, self.cancel) and (
+                self._state != "idle" or self.daemon.is_recording):
+            self._state = "idle"
+            self.daemon.cancel_dictation()
+            return
+
         if self._state == "idle":
             if self.start.issubset(self._pressed):
                 self._state = "arming"
                 self.daemon.start_dictation()
-            return
-
-        # Cancel works while arming or armed.
-        if self._is(token, self.cancel):
-            self._state = "idle"
-            self.daemon.cancel_dictation()
             return
 
         if self._state == "armed":

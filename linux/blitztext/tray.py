@@ -88,6 +88,15 @@ class Tray:
 
         menu.append(Gtk.SeparatorMenuItem())
 
+        # Cancel recording — always visible, only sensitive while recording.
+        # Primary escape hatch when wakeword fires on audiobook/TV audio.
+        self.cancel_item = Gtk.MenuItem(label="✕  Cancel recording")
+        self.cancel_item.set_sensitive(False)
+        self.cancel_item.connect(
+            "activate", lambda _i: self.app.daemon.cancel_dictation())
+        menu.append(self.cancel_item)
+        menu.append(Gtk.SeparatorMenuItem())
+
         # Hands-free wakeword: a reversible pause toggle. Without this, a stale
         # /tmp/wake_muted flag would silently disable detection with no way back.
         if getattr(self.app.cfg, "wakeword_enabled", False):
@@ -120,6 +129,8 @@ class Tray:
     def update_status(self, state: str, message: str) -> None:
         self.indicator.set_icon_full(ICONS.get(state, ICONS["idle"]), state)
         self.status_item.set_label(f"● {message or state.title()}")
+        if hasattr(self, "cancel_item"):
+            self.cancel_item.set_sensitive(state in ("recording", "armed", "busy"))
 
     def pump(self) -> None:
         """Service pending GLib/GTK events; called from tkinter's loop."""

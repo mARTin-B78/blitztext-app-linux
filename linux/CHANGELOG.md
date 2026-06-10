@@ -9,6 +9,21 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.26] - 2026-06-10
+
+### Fixed
+- **Cancel key now works during wakeword-triggered recording.** Previously the
+  `ModifierScheme` state machine stayed in "idle" when the wakeword fired
+  (it bypasses the key-press path), so the cancel hotkey was silently ignored.
+  It now checks `daemon.is_recording` as a fallback so it fires regardless of
+  how recording started.
+
+### Added
+- **"✕ Cancel recording" in the tray menu.** Always visible; grayed out when
+  idle, enabled as soon as recording starts (wakeword or manual). The primary
+  escape hatch when the wakeword fires on audiobook / TV audio and spoken
+  cancel words can't be heard over the background audio.
+
 ## [2.03.25] - 2026-06-10
 
 ### Changed
