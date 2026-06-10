@@ -1,10 +1,11 @@
 # Blitztext — User Manual
 
-A reference for every setting in the Blitztext **Settings** window, tab by tab.
+A reference for every setting in the Blitztext **Settings** window, page by page.
 
 Open Settings from the system-tray menu (**Settings…**) or the control panel. The
-window has seven tabs — **Presets · Engines · Input · General · Benchmark · Log ·
-About** — and three buttons along the bottom.
+sidebar lists all pages: **Presets · General · Keyboard · Wakeword · STT Engines ·
+LLM Engines · Benchmark — STT · Benchmark — Wakeword · Log · Manual · About**.
+Three buttons run along the top: **Save**, **Save & Restart**, and **✕ Close**.
 
 > **Where settings are stored:** `~/.config/blitztext/config.toml`
 > (or `$XDG_CONFIG_HOME/blitztext/config.toml`). You can edit that file directly;
@@ -20,7 +21,11 @@ About** — and three buttons along the bottom.
 
 ---
 
-## Presets tab
+## Presets
+
+<p align="center">
+  <a href="Screenshots/settings-presets.png"><img src="Screenshots/settings-presets.png" alt="Presets page" width="100%"></a>
+</p>
 
 Presets are your dictation **actions**. Each one either types what you say, or
 rewrites it through the language model first (e.g. into a polished email). Trigger
@@ -44,54 +49,35 @@ Use the dropdown at the top to pick a preset to edit, **+ Add** to create one, o
 
 ---
 
-## Engines tab
+## General
 
-Engines do the work: the **speech-to-text (STT)** engine turns your voice into
-text; the **language model (LLM)** rewrites it. Each engine can run locally or on
-a server you specify. A **green dot** means it's reachable, **red** means offline.
-The currently selected engine in each dropdown is the **active** one.
+<p align="center">
+  <a href="Screenshots/settings-general.png"><img src="Screenshots/settings-general.png" alt="General page" width="100%"></a>
+</p>
 
-### Speech-to-text engine
-
-Buttons: **+ Add** (cloud/OpenAI-style), **+ Stream** (realtime Riva/NIM),
-**Delete**, **Test** (records 4 s and transcribes), **Refresh** (re-check status).
-Each engine maps to a `[[stt_engine]]` entry; the active one is `[stt] active`.
+Microphone, text delivery, language, notifications, the on-screen overlay, and
+autostart.
 
 | Setting | TOML key | Description |
 |---|---|---|
-| **Name** | `name` | A label for this engine (e.g. "faster-whisper GPU"). |
-| **Type** | `type` | `local` (in-process faster-whisper) · `openai` (any OpenAI-compatible `/v1` STT server) · `riva_realtime` (live streaming engine). |
-| **URL** | `url` | Server endpoint. Example: `http://localhost:8010/v1` · realtime: `http://localhost:8006/v1`. Ignored for `local`. |
-| **Model** | `model` | Model name. For `local`: `tiny`/`base`/`small`/`medium`/`large-v3` or a path. For remote: blank = server default, or pick from the searchable list fetched from the URL. |
-| **API key env** | `api_key_env` | *Name of the environment variable* holding the API key (e.g. `GROQ_API_KEY`). Optional. |
-
-**Local engine (faster-whisper) — device & precision** (global, `[whisper]`):
-
-| Setting | TOML key | Description |
-|---|---|---|
-| **Device** | `device` | `auto` (try CUDA, fall back to CPU) · `cpu` · `cuda`. |
-| **Compute type** | `compute_type` | `auto` · `int8` · `float16` · `int8_float16`. Lower precision is faster and uses less memory. |
-
-### Language model (rewrite)
-
-Buttons: **+ Add**, **Delete**, **Refresh**. Each maps to a `[[llm_engine]]`
-entry; the active one is `[llm] active`.
-
-| Setting | TOML key | Description |
-|---|---|---|
-| **Name** | `name` | A label for this LLM (e.g. "Local Qwen"). |
-| **Type** | `type` | `local` (a server on this machine) or `cloud`. |
-| **Base URL** | `url` | OpenAI-compatible endpoint, e.g. `http://localhost:28080/v1` or `https://api.openai.com/v1`. |
-| **Model** | `model` | The model to use; pick from the list once the URL is set. |
-| **API key env** | `api_key_env` | Environment-variable name holding the key (e.g. `OPENAI_API_KEY`). Blank for local servers. |
-| **Temperature** | `temperature` | Default creativity for rewrites (e.g. `0.3`). Presets can override this. |
+| **Microphone** | `mic` | Which input device Blitztext records from. |
+| **Input level** | — | Live level bar (read-only); should move when you speak. |
+| **Output** | `output` | `type` types the text key-by-key · `paste` copies it and presses Ctrl+V (faster for long text). |
+| **Language hint** | `language` | Spoken-language code (`de`, `en`, …). Blank = auto-detect. |
+| **Notifications** | `notify` | Show desktop notifications for recording/transcription status and errors (manual sessions). |
+| **Announce matched preset** | `notify_routing` | After a voice command, pop a notification showing which preset (and spoken keyword) matched — shown **even for hands-free** sessions, with the preset's emoji. Only fires on a real match. |
+| **Visual overlay** | `overlay_enabled` | Show a translucent bubble at the cursor while you dictate — a pulsing **microphone**, a **live waveform** of your mic level, and the **recognised text** (word-by-word with a streaming engine, or the final result as a brief confirmation). The tail points at where the text lands, and it gives **hands-free** sessions visible feedback. Click-through; never takes focus. *(X11 only.)* |
+| **Launch on login** | *(autostart file)* | Start Blitztext automatically when you log in (writes a desktop autostart entry, not `config.toml`). |
 
 ---
 
-## Input tab
+## Keyboard
 
-Controls **how you start and stop** dictating, the noise filter, hands-free
-wakeword, and audio cues.
+<p align="center">
+  <a href="Screenshots/settings-keyboard.png"><img src="Screenshots/settings-keyboard.png" alt="Keyboard page" width="100%"></a>
+</p>
+
+Controls **how you start and stop** dictating with the keyboard, the noise filter, and audio cues.
 
 ### Input mode & keys
 
@@ -120,7 +106,26 @@ in the `[quality]` section.
 | **Reject hallucinations** | `reject_hallucinations` | Drop STT "ghost" outputs like *"Thank you."* / *"Bye."* that Whisper invents from silence. |
 | **Strip trailing punctuation** | `strip_trailing_punctuation` | Remove ending periods from delivered text — handy for code insertion. |
 
-### Hands-free (Wakeword)
+### Audio cues (manual dictation)
+
+These control the chimes for **manual** (keyboard/hotkey) dictation only. The
+hands-free wakeword sounds are **separate and independent** (see Wakeword page).
+
+| Setting | TOML key | Description |
+|---|---|---|
+| **Play audio cues** | `[sounds] enabled` | On/off for the **manual** start/stop chimes below. Does **not** affect the wakeword sounds. |
+| **Play before** | `[sounds] before` | Chime when recording **starts** (manual dictation). Empty = built-in system sound. |
+| **Play after** | `[sounds] after` | Chime when recording **stops** (paste, paste+Enter, or auto-stop on silence). Empty = built-in system sound. |
+
+> Each sound row has ▶ (preview) and ⌫ (clear).
+
+---
+
+## Wakeword
+
+<p align="center">
+  <a href="Screenshots/settings-wakeword.png"><img src="Screenshots/settings-wakeword.png" alt="Wakeword page" width="100%"></a>
+</p>
 
 Start dictation with a spoken keyword via an external
 [Wyoming](https://github.com/rhasspy/wyoming) openWakeWord server. Maps to the
@@ -143,20 +148,7 @@ Start dictation with a spoken keyword via an external
 > You can also pause/resume detection from the tray ("Pause wakeword"), which
 > toggles the `/tmp/wake_muted` flag.
 
-### Audio cues (manual dictation)
-
-These control the chimes for **manual** (keyboard/hotkey) dictation only. The
-hands-free wakeword sounds above are **separate and independent**.
-
-| Setting | TOML key | Description |
-|---|---|---|
-| **Play audio cues** | `[sounds] enabled` | On/off for the **manual** start/stop chimes below. Does **not** affect the wakeword sounds above. |
-| **Play before** | `[sounds] before` | Chime when recording **starts** (manual dictation). Empty = built-in system sound. |
-| **Play after** | `[sounds] after` | Chime when recording **stops** (paste, paste+Enter, or auto-stop on silence). Empty = built-in system sound. |
-
-> Each sound row has ▶ (preview) and ⌫ (clear).
->
-> **The two pairs differ by trigger *and* by empty-behaviour:**
+> **The two sound pairs differ by trigger *and* by empty-behaviour:**
 >
 > | | Plays on | Used for | When empty |
 > |---|---|---|---|
@@ -165,28 +157,69 @@ hands-free wakeword sounds above are **separate and independent**.
 
 ---
 
-## General tab
+## STT Engines
 
-Microphone, text delivery, language, notifications, the on-screen overlay, and
-autostart.
+<p align="center">
+  <a href="Screenshots/settings-stt-engines.png"><img src="Screenshots/settings-stt-engines.png" alt="STT Engines page" width="100%"></a>
+</p>
+
+The **speech-to-text** engine turns your voice into text. Each engine can run
+locally or on a server. A **green dot** means it's reachable, **red** means
+offline. The active engine is the one selected in the top dropdown.
+
+Buttons: **+ Add** (batch/cloud/OpenAI-style), **+ Stream** (realtime Riva/NIM),
+**Delete**, **Test** (records 4 s and transcribes), **Refresh** (re-check status).
+Each engine maps to a `[[stt_engine]]` entry; the active one is `[stt] active`.
 
 | Setting | TOML key | Description |
 |---|---|---|
-| **Microphone** | `mic` | Which input device Blitztext records from. |
-| **Input level** | — | Live level bar (read-only); should move when you speak. |
-| **Output** | `output` | `type` types the text key-by-key · `paste` copies it and presses Ctrl+V (faster for long text). |
-| **Language hint** | `language` | Spoken-language code (`de`, `en`, …). Blank = auto-detect. |
-| **Notifications** | `notify` | Show desktop notifications for recording/transcription status and errors (manual sessions). |
-| **Announce matched preset** | `notify_routing` | After a voice command, pop a notification showing which preset (and spoken keyword) matched — shown **even for hands-free** sessions, with the preset's emoji. Only fires on a real match. |
-| **Visual overlay** | `overlay_enabled` | Show a translucent bubble at the cursor while you dictate — a pulsing **microphone**, a **live waveform** of your mic level, and the **recognised text** (word-by-word with a streaming engine, or the final result as a brief confirmation). The tail points at where the text lands, and it gives **hands-free** sessions visible feedback. Click-through; never takes focus. *(X11 only.)* |
-| **Launch on login** | *(autostart file)* | Start Blitztext automatically when you log in (writes a desktop autostart entry, not `config.toml`). |
+| **Name** | `name` | A label for this engine (e.g. "faster-whisper GPU"). |
+| **Type** | `type` | `local` (in-process faster-whisper) · `openai` (any OpenAI-compatible `/v1` STT server) · `riva_realtime` (live streaming engine). |
+| **URL** | `url` | Server endpoint. Example: `http://localhost:8010/v1` · realtime: `http://localhost:8006/v1`. Ignored for `local`. |
+| **Model** | `model` | Model name. For `local`: `tiny`/`base`/`small`/`medium`/`large-v3` or a path. For remote: blank = server default, or pick from the searchable list fetched from the URL. |
+| **API key env** | `api_key_env` | *Name of the environment variable* holding the API key (e.g. `GROQ_API_KEY`). Optional. |
+
+**Local engine (faster-whisper) — device & precision** (global, `[whisper]`):
+
+| Setting | TOML key | Description |
+|---|---|---|
+| **Device** | `device` | `auto` (try CUDA, fall back to CPU) · `cpu` · `cuda`. |
+| **Compute type** | `compute_type` | `auto` · `int8` · `float16` · `int8_float16`. Lower precision is faster and uses less memory. |
 
 ---
 
-## Benchmark tab
+## LLM Engines
+
+<p align="center">
+  <a href="Screenshots/settings-llm-engines.png"><img src="Screenshots/settings-llm-engines.png" alt="LLM Engines page" width="100%"></a>
+</p>
+
+The **language model** rewrites your dictated text (e.g. into a polished email).
+Each engine can be a local LAN server or a cloud service. The active engine is
+the one selected in the top dropdown.
+
+Buttons: **+ Add**, **Delete**, **Refresh**. Each maps to a `[[llm_engine]]`
+entry; the active one is `[llm] active`.
+
+| Setting | TOML key | Description |
+|---|---|---|
+| **Name** | `name` | A label for this LLM (e.g. "Local Qwen"). |
+| **Type** | `type` | `local` (a server on this machine) or `cloud`. |
+| **Base URL** | `url` | OpenAI-compatible endpoint, e.g. `http://localhost:28080/v1` or `https://api.openai.com/v1`. |
+| **Model** | `model` | The model to use; pick from the list once the URL is set. |
+| **API key env** | `api_key_env` | Environment-variable name holding the key (e.g. `OPENAI_API_KEY`). Blank for local servers. |
+| **Temperature** | `temperature` | Default creativity for rewrites (e.g. `0.3`). Presets can override this. |
+
+---
+
+## Benchmark — STT
+
+<p align="center">
+  <a href="Screenshots/settings-benchmark-stt.png"><img src="Screenshots/settings-benchmark-stt.png" alt="Benchmark — STT page" width="100%"></a>
+</p>
 
 Compare your STT engines for **speed and accuracy** on the same clip. Add an
-engine preset (Engines tab) for each model you want to compare. No persistent
+engine in the STT Engines page for each model you want to compare. No persistent
 settings — it's a one-off tool.
 
 1. **Audio (.wav)** — a recording to transcribe.
@@ -213,7 +246,24 @@ A summary line names the **fastest** and **most accurate** engine. Click any col
 
 ---
 
-## Log tab
+## Benchmark — Wakeword
+
+<p align="center">
+  <a href="Screenshots/settings-benchmark-wakeword.png"><img src="Screenshots/settings-benchmark-wakeword.png" alt="Benchmark — Wakeword page" width="100%"></a>
+</p>
+
+Stress-test your wakeword detection by generating speech with a TTS server and
+checking whether the wake word fires correctly. Reports **recall** (how often it
+fires when it should) and **false-fire rate** (how often it fires on non-wake
+speech) across multiple synthetic voices.
+
+---
+
+## Log
+
+<p align="center">
+  <a href="Screenshots/settings-log.png"><img src="Screenshots/settings-log.png" alt="Log page" width="100%"></a>
+</p>
 
 A live activity log — useful to watch a model load/download or to diagnose a
 problem (recording, transcription, routing, and wakeword events all appear here).
@@ -227,7 +277,21 @@ problem (recording, transcription, routing, and wakeword events all appear here)
 
 ---
 
-## About tab
+## Manual
+
+<p align="center">
+  <a href="Screenshots/settings-manual.png"><img src="Screenshots/settings-manual.png" alt="Manual page" width="100%"></a>
+</p>
+
+Inline copy of this manual, readable without leaving the app.
+
+---
+
+## About
+
+<p align="center">
+  <a href="Screenshots/settings-about.png"><img src="Screenshots/settings-about.png" alt="About page" width="100%"></a>
+</p>
 
 Read-only information:
 

@@ -8,9 +8,13 @@ Blitztext is a native Linux dictation tool that captures your voice, transcribes
 > No hosted backend — bring your own models and endpoints.
 
 <p align="center">
-  <img src="Screenshots/panel.png" alt="Blitztext control panel" width="380">
+  <img src="Screenshots/main-panel.png" alt="Blitztext control panel" width="360">
+</p>
+
+<p align="center">
+  <img src="Screenshots/overlay-listening.png" alt="On-screen overlay while listening" width="360">
   &nbsp;&nbsp;
-  <img src="Screenshots/tray-menu.png" alt="Blitztext system-tray menu" width="300">
+  <img src="Screenshots/overlay-result.png" alt="On-screen overlay showing transcription result" width="360">
 </p>
 
 📖 **[User manual](MANUAL.md)** — every setting in every tab, explained.
@@ -65,47 +69,124 @@ Stream:    hotkey → mic PCM chunks → Riva/NIM WebSocket → live words typed
 
 ## Screenshots
 
-Everything is configured in the GTK **Settings** window — every tab has tooltips
-and screen-reader (ATK) support. Click any image to open it full size.
+Everything is configured in the GTK **Settings** window — the sidebar gives quick
+access to every page. All controls have tooltips and screen-reader (ATK) support.
+Click any image to open it full size.
+
+### Main panel & overlay
 
 <p align="center">
-  <a href="Screenshots/settings-presets.png"><img src="Screenshots/settings-presets.png" alt="Presets settings tab" width="100%"></a><br>
-  <em><b>Presets</b> — your dictation actions. Each preset is either a plain transcription or an LLM rewrite, and carries its own spoken keyword(s) for voice routing, an optional global hotkey, and a custom rewrite prompt.</em>
+  <a href="Screenshots/main-panel.png"><img src="Screenshots/main-panel.png" alt="Blitztext main panel" width="46%"></a>
+  &nbsp;
+  <a href="Screenshots/overlay-listening.png"><img src="Screenshots/overlay-listening.png" alt="Overlay — listening" width="46%"></a>
+</p>
+<p align="center">
+  <em><b>Left:</b> Control panel listing all presets with icons, descriptions, and hotkeys.</em>
+  &nbsp;&nbsp;
+  <em><b>Right:</b> On-screen overlay showing the live waveform while listening.</em>
 </p>
 
 <p align="center">
-  <a href="Screenshots/settings-engines.png"><img src="Screenshots/settings-engines.png" alt="Engines settings tab" width="100%"></a><br>
-  <em><b>Engines</b> — your speech-to-text and language-model back-ends, local or remote. Add and rename engines, watch live online/offline status, and pick models from a searchable list fetched straight from the endpoint.</em>
+  <a href="Screenshots/overlay-result.png"><img src="Screenshots/overlay-result.png" alt="Overlay — transcription result" width="46%"></a>
+</p>
+<p align="center">
+  <em>Overlay after transcription — preset name and recognised text appear at the cursor.</em>
+</p>
+
+### Settings — General & Input
+
+<p align="center">
+  <a href="Screenshots/settings-presets.png"><img src="Screenshots/settings-presets.png" alt="Presets page" width="48%"></a>
+  &nbsp;
+  <a href="Screenshots/settings-general.png"><img src="Screenshots/settings-general.png" alt="General page" width="48%"></a>
+</p>
+<p align="center">
+  <em><b>Presets</b> — dictation actions with keywords, hotkeys, LLM mode, and custom prompts.</em>
+  &nbsp;&nbsp;
+  <em><b>General</b> — microphone, output mode, language hint, notifications, overlay, autostart.</em>
 </p>
 
 <p align="center">
-  <a href="Screenshots/settings-input.png"><img src="Screenshots/settings-input.png" alt="Input settings tab" width="100%"></a><br>
-  <em><b>Input</b> — how you start and stop dictation: the modifier-key scheme (Ctrl+Win / Ctrl / Alt / Esc) or custom hotkeys, plus the silence-based auto-stop (VAD), the quality gate, and audio cues.</em>
+  <a href="Screenshots/settings-keyboard.png"><img src="Screenshots/settings-keyboard.png" alt="Keyboard page" width="48%"></a>
+  &nbsp;
+  <a href="Screenshots/settings-wakeword.png"><img src="Screenshots/settings-wakeword.png" alt="Wakeword page" width="48%"></a>
+</p>
+<p align="center">
+  <em><b>Keyboard</b> — modifier-key scheme or direct hotkeys, quality gate, audio cues.</em>
+  &nbsp;&nbsp;
+  <em><b>Wakeword</b> — hands-free dictation via a Wyoming/openWakeWord server, with live level meter and model picker.</em>
+</p>
+
+### Settings — Engines
+
+<p align="center">
+  <a href="Screenshots/settings-stt-engines.png"><img src="Screenshots/settings-stt-engines.png" alt="STT Engines page" width="48%"></a>
+  &nbsp;
+  <a href="Screenshots/settings-llm-engines.png"><img src="Screenshots/settings-llm-engines.png" alt="LLM Engines page" width="48%"></a>
+</p>
+<p align="center">
+  <em><b>STT Engines</b> — speech-to-text back-ends (local faster-whisper, OpenAI-compatible server, or Riva realtime), with green/red status dot and Test button.</em>
+  &nbsp;&nbsp;
+  <em><b>LLM Engines</b> — language-model back-ends for text rewriting (LAN server or cloud service).</em>
+</p>
+
+### Settings — Benchmark
+
+<p align="center">
+  <a href="Screenshots/settings-benchmark-stt.png"><img src="Screenshots/settings-benchmark-stt.png" alt="Benchmark — STT page" width="48%"></a>
+  &nbsp;
+  <a href="Screenshots/settings-benchmark-wakeword.png"><img src="Screenshots/settings-benchmark-wakeword.png" alt="Benchmark — Wakeword page" width="48%"></a>
+</p>
+<p align="center">
+  <em><b>Benchmark — STT</b> — compare every configured engine against a reference WAV + transcript; results table shows speed, accuracy, device, and language support.</em>
+  &nbsp;&nbsp;
+  <em><b>Benchmark — Wakeword</b> — stress-test wakeword detection using a TTS server to synthesise wake phrases in random voices, reporting recall and false-fire rates.</em>
+</p>
+
+### Settings — Log & About
+
+<p align="center">
+  <a href="Screenshots/settings-log.png"><img src="Screenshots/settings-log.png" alt="Log page" width="48%"></a>
+  &nbsp;
+  <a href="Screenshots/settings-about.png"><img src="Screenshots/settings-about.png" alt="About page" width="48%"></a>
+</p>
+<p align="center">
+  <em><b>Log</b> — live activity log for recording, transcription, routing, and wakeword events.</em>
+  &nbsp;&nbsp;
+  <em><b>About</b> — version, source link, inline changelog, and licence.</em>
+</p>
+
+### Setup Wizard
+
+The first-run wizard guides you through the essentials in a few steps.
+
+<p align="center">
+  <a href="Screenshots/setup-welcome.png"><img src="Screenshots/setup-welcome.png" alt="Setup — Welcome" width="32%"></a>
+  &nbsp;
+  <a href="Screenshots/setup-trigger.png"><img src="Screenshots/setup-trigger.png" alt="Setup — Trigger mode" width="32%"></a>
+  &nbsp;
+  <a href="Screenshots/setup-shortcuts.png"><img src="Screenshots/setup-shortcuts.png" alt="Setup — Keyboard shortcuts" width="32%"></a>
+</p>
+<p align="center">
+  <em>Welcome &nbsp;·&nbsp; Choose trigger mode (keyboard / wakeword / both) &nbsp;·&nbsp; Set keyboard shortcuts</em>
 </p>
 
 <p align="center">
-  <a href="Screenshots/wakeword.png"><img src="Screenshots/wakeword.png" alt="Wakeword (hands-free) settings" width="100%"></a><br>
-  <em><b>Wakeword (hands-free)</b> — point Blitztext at a Wyoming/openWakeWord server, choose a wake model, and test the connection live so a spoken keyword starts dictation with no keys at all.</em>
+  <a href="Screenshots/setup-voice.png"><img src="Screenshots/setup-voice.png" alt="Setup — Voice activation" width="32%"></a>
+  &nbsp;
+  <a href="Screenshots/setup-stt.png"><img src="Screenshots/setup-stt.png" alt="Setup — STT engine" width="32%"></a>
+  &nbsp;
+  <a href="Screenshots/setup-ai.png"><img src="Screenshots/setup-ai.png" alt="Setup — AI rewriting" width="32%"></a>
+</p>
+<p align="center">
+  <em>Voice activation (wakeword server) &nbsp;·&nbsp; Choose STT engine &nbsp;·&nbsp; Optional AI text rewriting</em>
 </p>
 
 <p align="center">
-  <a href="Screenshots/settings-general.png"><img src="Screenshots/settings-general.png" alt="General settings tab" width="100%"></a><br>
-  <em><b>General</b> — core preferences: microphone with a live level meter, output mode (type vs. paste), language hint, type delay, the on-screen dictation overlay, and autostart on login.</em>
+  <a href="Screenshots/setup-done.png"><img src="Screenshots/setup-done.png" alt="Setup — All done" width="32%"></a>
 </p>
-
 <p align="center">
-  <a href="Screenshots/settings-benchmark.png"><img src="Screenshots/settings-benchmark.png" alt="Benchmark settings tab" width="100%"></a><br>
-  <em><b>Benchmark</b> — compare every configured STT engine against a reference WAV + transcript to find the fastest and most accurate, with a Device column (CPU / GPU / remote).</em>
-</p>
-
-<p align="center">
-  <a href="Screenshots/settings-log.png"><img src="Screenshots/settings-log.png" alt="Log settings tab" width="100%"></a><br>
-  <em><b>Log</b> — the in-app log buffer: a live view of recording, transcription, routing, and wakeword events for quick troubleshooting.</em>
-</p>
-
-<p align="center">
-  <a href="Screenshots/settings-about.png"><img src="Screenshots/settings-about.png" alt="About settings tab" width="100%"></a><br>
-  <em><b>About</b> — version, source link, changelog, and licence.</em>
+  <em>Summary screen — ready to dictate.</em>
 </p>
 
 ---
