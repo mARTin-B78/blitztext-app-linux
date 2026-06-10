@@ -9,6 +9,27 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.37] - 2026-06-10
+
+### Fixed
+- **STT Engines page no longer appears empty.** `_refresh_status()` called
+  `_stt_commit()` / `_llm_commit()` and accessed `stt_dot` / `llm_dot`
+  unconditionally; if the STT page was opened before the LLM page was built
+  (lazy), the builder crashed silently with `AttributeError`. Added `hasattr`
+  guards so each section is only committed / updated when its widgets exist.
+- **Wakeword page no longer causes horizontal scrollbar.** The `ww_status`
+  label (showing model list like "7 models loaded: okay_nabu, hey_jarvis…")
+  had no width limit and expanded the page. Added `set_max_width_chars(30)`
+  and `set_ellipsize(END)`.
+- **Benchmark STT engine list no longer causes horizontal scrollbar.**
+  `sel_sw` used `NEVER` horizontal policy, propagating long engine-name labels
+  (~800 px) up through the paned. Changed to `AUTOMATIC` so content scrolls
+  internally.
+- **General page and LLM Engines no longer cause horizontal scrollbar.**
+  `_combo()` and `_type_combo()` lacked `set_size_request(10, -1)`, so
+  ComboBoxText widgets (e.g. long microphone device names) could not shrink
+  below their natural width. Added the size request to both helpers.
+
 ## [2.03.36] - 2026-06-10
 
 ### Changed

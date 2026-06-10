@@ -377,6 +377,7 @@ def _combo(options, active=None) -> Gtk.ComboBoxText:
         c.set_active(options.index(active))
     elif options:
         c.set_active(0)
+    c.set_size_request(10, -1)
     return c
 
 
@@ -407,6 +408,7 @@ def _type_combo(types: list[tuple[str, str]], stored: str = "") -> Gtk.ComboBoxT
         c.append_text(label)
     idx = next((i for i, (k, _) in enumerate(types) if k == stored), 0)
     c.set_active(idx)
+    c.set_size_request(10, -1)
     return c
 
 
@@ -1675,15 +1677,19 @@ class SettingsDialog:
     # -- status dots (threaded) ---
     def _refresh_status(self) -> None:
         s = self.cfg.stt_engines[self._stt_idx] if 0 <= self._stt_idx < len(self.cfg.stt_engines) else None
-        self._stt_commit()
+        if hasattr(self, "stt_combo"):
+            self._stt_commit()
         l = self.cfg.llm_engines[self._llm_idx] if 0 <= self._llm_idx < len(self.cfg.llm_engines) else None
-        self._llm_commit()
+        if hasattr(self, "llm_combo"):
+            self._llm_commit()
 
         def check():
             sc = GREEN if (s and stt.status(s)) else RED if s else GREY
             lc = GREEN if (l and llm.status(l)) else RED if l else GREY
-            GLib.idle_add(self.stt_dot.set_markup, _dot(sc))
-            GLib.idle_add(self.llm_dot.set_markup, _dot(lc))
+            if hasattr(self, "stt_dot"):
+                GLib.idle_add(self.stt_dot.set_markup, _dot(sc))
+            if hasattr(self, "llm_dot"):
+                GLib.idle_add(self.llm_dot.set_markup, _dot(lc))
         threading.Thread(target=check, daemon=True).start()
 
     def _probe_dot(self, dot: Gtk.Label, uri: str, fallback_port: int) -> None:
@@ -1921,6 +1927,8 @@ class SettingsDialog:
             b = Gtk.Button(label=label); b.set_tooltip_text(tip); b.connect("clicked", cb)
             ww_bar.pack_end(b, False, False, 0)
         self.ww_status = Gtk.Label(xalign=0.0)
+        self.ww_status.set_max_width_chars(30)
+        self.ww_status.set_ellipsize(Pango.EllipsizeMode.END)
         self.ww_status.get_style_context().add_class("dim-label")
         ww_bar.pack_end(self.ww_status, False, False, 4)
         page.pack_start(ww_bar, False, False, 2)
@@ -2360,7 +2368,7 @@ class SettingsDialog:
         page.pack_start(sel_hdr, False, False, 0)
 
         sel_sw = Gtk.ScrolledWindow()
-        sel_sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        sel_sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         sel_sw.set_min_content_height(80)
         sel_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
         sel_list.set_margin_start(4); sel_list.set_margin_end(4)
