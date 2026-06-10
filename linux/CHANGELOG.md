@@ -9,6 +9,21 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.33] - 2026-06-10
+
+### Fixed
+- **Settings window no longer resizes when switching pages.** Added
+  `Gtk.Stack.set_homogeneous(True)` so the dialog always allocates the
+  maximum page height, preventing the window from growing or shrinking
+  as pages are visited.
+- **Benchmark — Wakeword: "Engines to test" section no longer hidden.**
+  The paned divider position was raised from 260 to 390 px so all TTS
+  config fields, the engine checkboxes, wakeword model selector, sample
+  count, and run button are fully visible without scrolling. Both
+  benchmark pages also disable the page-level `ScrolledWindow` so the
+  paned correctly fills the viewport height rather than expanding
+  past it.
+
 ## [2.03.32] - 2026-06-10
 
 ### Changed
