@@ -359,8 +359,14 @@ def _entry(text="", placeholder="") -> Gtk.Entry:
     return e
 
 
+def _block_scroll(combo: Gtk.ComboBoxText) -> Gtk.ComboBoxText:
+    """Prevent accidental value changes from mouse-wheel hover-scrolling."""
+    combo.connect("scroll-event", lambda _w, _e: True)
+    return combo
+
+
 def _combo(options, active=None) -> Gtk.ComboBoxText:
-    c = Gtk.ComboBoxText()
+    c = _block_scroll(Gtk.ComboBoxText())
     for o in options:
         c.append_text(o)
     if active in options:
@@ -392,7 +398,7 @@ def _info_btn(text: str) -> Gtk.Button:
 
 def _type_combo(types: list[tuple[str, str]], stored: str = "") -> Gtk.ComboBoxText:
     """Combo that shows human-readable labels but maps to/from internal key values via index."""
-    c = Gtk.ComboBoxText()
+    c = _block_scroll(Gtk.ComboBoxText())
     for _, label in types:
         c.append_text(label)
     idx = next((i for i, (k, _) in enumerate(types) if k == stored), 0)
@@ -899,7 +905,7 @@ notebook.bt-nb tab:checked label {
         # ── Selector bar ──────────────────────────────────────────────────────
         bar = Gtk.Box(spacing=8)
         bar.set_margin_bottom(6)
-        self.wf_combo = Gtk.ComboBoxText()
+        self.wf_combo = _block_scroll(Gtk.ComboBoxText())
         for wf in self.cfg.workflows:
             self.wf_combo.append_text(wf.name)
         self.wf_combo.set_active(0)
@@ -1210,7 +1216,7 @@ notebook.bt-nb tab:checked label {
 
         # ── Selector bar ──────────────────────────────────────────────────────
         bar = Gtk.Box(spacing=6)
-        self.stt_combo = Gtk.ComboBoxText()
+        self.stt_combo = _block_scroll(Gtk.ComboBoxText())
         for e in self.cfg.stt_engines:
             self.stt_combo.append_text(e.name)
         self.stt_combo.set_active(self._index_of(self.cfg.stt_engines, self.cfg.stt_active))
@@ -1300,7 +1306,7 @@ notebook.bt-nb tab:checked label {
 
         # ── Selector bar ──────────────────────────────────────────────────────
         bar = Gtk.Box(spacing=6)
-        self.llm_combo = Gtk.ComboBoxText()
+        self.llm_combo = _block_scroll(Gtk.ComboBoxText())
         for e in self.cfg.llm_engines:
             self.llm_combo.append_text(e.name)
         self.llm_combo.set_active(self._index_of(self.cfg.llm_engines, self.cfg.llm_active))
@@ -1783,7 +1789,7 @@ notebook.bt-nb tab:checked label {
 
         # ── Engine selector bar ───────────────────────────────────────────────
         ww_bar = Gtk.Box(spacing=6); ww_bar.set_margin_top(6)
-        self.ww_combo = Gtk.ComboBoxText(); self.ww_combo.set_hexpand(True)
+        self.ww_combo = _block_scroll(Gtk.ComboBoxText()); self.ww_combo.set_hexpand(True)
         for e in self.cfg.wakeword_engines:
             self.ww_combo.append_text(e.name)
         active_idx = next((i for i, e in enumerate(self.cfg.wakeword_engines)
@@ -2982,7 +2988,7 @@ notebook.bt-nb tab:checked label {
 
         lvl_lbl = Gtk.Label(label="Level:"); lvl_lbl.set_margin_start(8)
         bar.pack_start(lvl_lbl, False, False, 0)
-        self.log_level = Gtk.ComboBoxText()
+        self.log_level = _block_scroll(Gtk.ComboBoxText())
         for lvl in ("Verbose", "Info", "Warning", "Error"):
             self.log_level.append_text(lvl)
         self.log_level.set_active(1)  # default: Info

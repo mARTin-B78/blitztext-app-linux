@@ -9,6 +9,13 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.28] - 2026-06-10
+
+### Fixed
+- **Dropdowns no longer change on accidental scroll.** All `ComboBoxText`
+  widgets in the settings dialog now swallow scroll events so hovering over
+  a combo and scrolling doesn't silently change the selected value.
+
 ## [2.03.27] - 2026-06-10
 
 ### Added
