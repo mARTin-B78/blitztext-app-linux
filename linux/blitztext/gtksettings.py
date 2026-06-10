@@ -840,7 +840,7 @@ class SettingsDialog:
         # Right stack
         self._stack = Gtk.Stack()
         self._stack.set_transition_type(Gtk.StackTransitionType.NONE)
-        self._stack.set_homogeneous(True)   # keep window size stable across pages
+        self._stack.set_homogeneous(False)
         _body.pack_start(self._stack, True, True, 0)
 
         # Resize-grip strip — sits below the body, above the button row, so
@@ -2497,11 +2497,6 @@ class SettingsDialog:
         self.bench_summary.set_margin_top(4); self.bench_summary.set_margin_bottom(2)
         results_box.pack_start(self.bench_summary, False, False, 0)
 
-        # Disable the page-level SW so the paned fills the viewport height
-        _psw = page.get_parent()
-        if isinstance(_psw, Gtk.ScrolledWindow):
-            _psw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
-
         paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
         paned.pack1(sel_sw, resize=True, shrink=False)
         paned.pack2(results_box, resize=True, shrink=False)
@@ -2647,11 +2642,6 @@ class SettingsDialog:
         results_box.pack_start(tb, False, False, 0)
         results_box.pack_start(ww_sw, True, True, 0)
         results_box.pack_start(self.wwb_summary, False, False, 0)
-
-        # Disable the page-level SW so the paned fills the viewport height
-        _psw = page.get_parent()
-        if isinstance(_psw, Gtk.ScrolledWindow):
-            _psw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
 
         # Wrap controls in a ScrolledWindow so the pane can shrink past its
         # natural height when the user drags the divider upward.

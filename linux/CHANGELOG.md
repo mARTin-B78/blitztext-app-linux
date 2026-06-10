@@ -9,6 +9,18 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.34] - 2026-06-10
+
+### Fixed
+- **Settings window no longer grows wide or tall when switching pages.**
+  `Stack.set_homogeneous(True)` was causing the Stack to request the maximum
+  natural size of all its children (both width and height), so pages like
+  Benchmark — STT (wide TreeView) inflated the dialog to 1000+ px wide for
+  every other page. Reverted to `False`; the dialog now stays at its default
+  860 × 700 and each page scrolls if its content is taller than the window.
+  Also removed the erroneous `NEVER/NEVER` ScrolledWindow policy on the two
+  benchmark pages that was propagating natural TreeView width to the Stack.
+
 ## [2.03.33] - 2026-06-10
 
 ### Fixed
