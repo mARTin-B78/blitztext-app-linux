@@ -1,13 +1,16 @@
-"""GTK settings: dropdown + editor managers for prompt presets and engines.
+"""GTK settings: sidebar + stack layout for prompt presets and engines.
 
-Tabs:
-  Presets  - prompt presets (select from a dropdown, edit, add, delete)
-  Engines  - STT and LLM engine presets with online/offline status + STT test
-  Input    - input scheme, keys, quality gate
-  General  - mic (with live level meter), output, language, notifications, autostart
-  Benchmark- compare STT engines against a reference clip
-  Log      - runtime log output
-  About    - version, source, changelog, and license
+Pages:
+  Presets           - prompt presets (select from a dropdown, edit, add, delete)
+  General           - mic (with live level meter), output, language, notifications, autostart
+  Keyboard          - input scheme, keys, quality gate, audio cues
+  Wakeword          - hands-free wakeword, engine config, wakeword sound cues
+  STT Engines       - STT and LLM engine presets with online/offline status + STT test
+  Benchmark — STT   - compare STT engines against a reference clip
+  Benchmark — WW    - stress-test wakeword engines with synthesized speech
+  Log               - runtime log output
+  Manual            - user manual
+  About             - version, source, changelog, and license
 """
 
 from __future__ import annotations
@@ -16,13 +19,14 @@ import os
 import sys
 import threading
 import time
+import unicodedata
 from pathlib import Path
 
 import gi
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
-from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402  # type: ignore[import-untyped]
 
 from . import __version__, audio, autostart, benchmark, llm, logbuffer, stt, wakeword_bench  # noqa: E402
 from .config import Config, save  # noqa: E402
@@ -33,6 +37,153 @@ from .config import Workflow  # noqa: E402
 RESP_SAVE = 1
 RESP_SAVE_RESTART = 2
 GREEN, RED, GREY = "#34c759", "#ff3b30", "#b8b8be"
+
+# (stored_value, display_label) pairs used by _type_combo / _type_key
+_STT_TYPES: list[tuple[str, str]] = [
+    ("local",         "Internal  —  faster-whisper, runs inside the app"),
+    ("openai",        "Server  —  OpenAI-compatible API (LAN or cloud)"),
+    ("riva_realtime", "Realtime  —  NVIDIA Riva / NIM streaming"),
+]
+_LLM_TYPES: list[tuple[str, str]] = [
+    ("local", "LAN server  —  runs on your machine or local network"),
+    ("cloud", "Cloud service  —  OpenAI, Groq, OpenRouter, …"),
+]
+_DEVICE_OPTIONS: list[tuple[str, str]] = [
+    ("auto", "Auto  (try GPU / CUDA first, fall back to CPU)"),
+    ("cpu",  "CPU"),
+    ("cuda", "GPU  (CUDA)"),
+]
+_COMPUTE_OPTIONS: list[tuple[str, str]] = [
+    ("auto",         "Auto"),
+    ("int8",         "int8  —  fast, less memory"),
+    ("float16",      "float16  —  accurate, needs more VRAM"),
+    ("int8_float16", "int8_float16  —  balanced"),
+]
+
+# (name, url, api_key_env, type_key, default_model) — quickstart templates
+_LLM_TEMPLATES: list[tuple[str, str, str, str, str]] = [
+    ("OpenAI",       "https://api.openai.com/v1",          "OPENAI_API_KEY",     "cloud", "gpt-4o-mini"),
+    ("Groq",         "https://api.groq.com/openai/v1",     "GROQ_API_KEY",       "cloud", "llama3-8b-8192"),
+    ("OpenRouter",   "https://openrouter.ai/api/v1",       "OPENROUTER_API_KEY", "cloud", "openai/gpt-4o-mini"),
+    ("Ollama",       "http://localhost:11434/v1",           "",                   "local", ""),
+    ("LM Studio",    "http://localhost:1234/v1",            "",                   "local", ""),
+    ("vLLM",         "http://localhost:8000/v1",            "",                   "local", ""),
+    ("llama-swap",   "http://localhost:28080/v1",           "",                   "local", ""),
+]
+_STT_TEMPLATES: list[tuple[str, str, str, str, str, int]] = [
+    # (name, url, api_key_env, type, model, timeout_s)
+    # ── Cloud / API services ──────────────────────────────────────────────────
+    ("OpenAI Whisper",          "https://api.openai.com/v1",      "OPENAI_API_KEY", "openai",        "whisper-1",              30),
+    ("Groq Whisper (free tier)","https://api.groq.com/openai/v1", "GROQ_API_KEY",   "openai",        "whisper-large-v3-turbo", 30),
+    # ── Local servers ─────────────────────────────────────────────────────────
+    ("faster-whisper-server",   "http://localhost:8010/v1",        "",               "openai",        "",                       30),
+    ("Speaches (docker)",       "http://localhost:8080/v1",        "",               "openai",        "",                       30),
+    ("whisper.cpp server",      "http://localhost:8081/v1",        "",               "openai",        "",                       30),
+    ("WhisperX server",         "http://localhost:8081/transcribe","",               "openai",        "whisper-large-v3",      120),
+    ("NVIDIA NIM / Parakeet",   "http://localhost:8007/v1",        "",               "openai",        "",                       30),
+    ("Realtime (Riva / NIM)",   "http://localhost:8006/v1",        "",               "riva_realtime", "",                       30),
+    # ── Built-in local models (no server needed) ──────────────────────────────
+    ("Local tiny  — fastest, ~39 MB",   "", "", "local", "tiny",     30),
+    ("Local base  — fast,    ~74 MB",   "", "", "local", "base",     30),
+    ("Local small — balanced, ~244 MB", "", "", "local", "small",    30),
+    ("Local medium — accurate, ~769 MB","", "", "local", "medium",   30),
+    ("Local large-v3 — best,  ~1.5 GB", "", "", "local", "large-v3", 30),
+]
+
+_WW_TEMPLATES: list[tuple[str, str, str]] = [
+    # (name, uri, model)
+    ("Local :10400 — okay_computer",   "tcp://127.0.0.1:10400", "okay_computer"),
+    ("Local :10401 — okay_computer",   "tcp://127.0.0.1:10401", "okay_computer"),
+    ("Local :10402 — okay_computer",   "tcp://127.0.0.1:10402", "okay_computer"),
+    ("Local :10403 — okay_computer",   "tcp://127.0.0.1:10403", "okay_computer"),
+    ("Local :10400 — hey_jarvis",      "tcp://127.0.0.1:10400", "hey_jarvis"),
+    ("Local :10400 — alexa",           "tcp://127.0.0.1:10400", "alexa"),
+    ("Home Assistant wyoming",         "tcp://homeassistant.local:10400", "okay_nabu"),
+]
+
+# (cat_emoji, label, [emojis]) — standard Unicode categories, WhatsApp-style
+_EMOJI_CATEGORIES: list[tuple[str, str, list[str]]] = [
+    ("😀", "Smileys", [
+        "😀","😃","😄","😁","😆","😅","🤣","😂","🙂","🙃","😉","😊","😇",
+        "🥰","😍","🤩","😘","😗","😚","😙","🥲","😋","😛","😜","🤪","😝",
+        "🤑","🤗","🤭","🤫","🤔","🤐","🤨","😐","😑","😶","😏","😒","🙄",
+        "😬","🤥","😌","😔","😪","🤤","😴","😷","🤒","🤕","🤢","🤮","🤧",
+        "🥵","🥶","🥴","😵","🤯","🤠","🥳","🥸","😎","🤓","🧐","😕","😟",
+        "🙁","😮","😯","😲","😳","🥺","😦","😧","😨","😰","😥","😢","😭",
+        "😱","😖","😣","😞","😓","😩","😫","🥱","😤","😡","😠","🤬","😈",
+        "👿","💀","☠️","💩","🤡","👹","👺","👻","👽","👾","🤖",
+    ]),
+    ("👋", "People", [
+        "👋","🤚","🖐️","✋","🖖","👌","🤌","🤏","✌️","🤞","🤟","🤘","🤙",
+        "👈","👉","👆","🖕","👇","☝️","👍","👎","✊","👊","🤛","🤜","👏",
+        "🙌","👐","🤲","🤝","🙏","✍️","💅","💪","🦾","👂","👃","👀","👅",
+        "👄","💋","👶","🧒","👦","👧","🧑","👱","👨","🧔","👩","🧓","👴",
+        "👵","🙍","🙎","🙅","🙆","💁","🙋","🧏","🙇","🤦","🤷","💆","💇",
+        "🚶","🏃","💃","🕺","🧖","🧗","🤸","⛹️","🏋️","🤼","🧘","🛀","🛌",
+        "👮","🕵️","💂","🥷","👷","🫅","🤴","👸","🧙","🧝","🧛","🧟","🧞",
+        "🧜","🧚","👼","🤶","🎅","🦸","🦹","🧑‍🍳","🧑‍🎓","🧑‍🏫","🧑‍⚕️","🧑‍💼","🧑‍🔧","🧑‍💻",
+    ]),
+    ("🐶", "Animals", [
+        "🐶","🐱","🐭","🐹","🐰","🦊","🐻","🐼","🐨","🐯","🦁","🐮","🐷",
+        "🐸","🐵","🙈","🙉","🙊","🐒","🐔","🐧","🐦","🐤","🦆","🦅","🦉",
+        "🦇","🐺","🐗","🐴","🦄","🐝","🐛","🦋","🐌","🐞","🐜","🦟","🦗",
+        "🕷️","🦂","🐢","🐍","🦎","🐙","🦑","🦐","🦀","🐡","🐠","🐟","🐬",
+        "🐳","🐋","🦈","🐊","🐅","🐆","🦓","🦍","🐘","🦏","🐪","🦒","🦘",
+        "🐃","🐄","🐎","🐖","🐏","🐑","🦙","🐐","🦌","🐕","🐩","🦮","🐈",
+        "🐓","🦃","🦚","🦜","🦢","🦩","🕊️","🐇","🦝","🦨","🦡","🦦","🦥",
+        "🐁","🐀","🐿️","🦔","🐉","🐲","🌵","🌲","🌳","🌴","🌿","☘️","🍀",
+        "🎋","🎍","🍃","🍂","🍁","🌾","🌺","🌸","🌼","🌻","🌹","🥀","🌷",
+    ]),
+    ("🍎", "Food", [
+        "🍏","🍎","🍐","🍊","🍋","🍌","🍉","🍇","🍓","🫐","🍒","🍑","🥭",
+        "🍍","🥥","🥝","🍅","🍆","🥑","🥦","🥬","🥒","🌶️","🧄","🧅","🥔",
+        "🌽","🥕","🍞","🥐","🥖","🥨","🧀","🥚","🍳","🧈","🥞","🥓","🥩",
+        "🍗","🍖","🌭","🍔","🍟","🍕","🌮","🌯","🥙","🥚","🍲","🥗","🍿",
+        "🧂","🍱","🍣","🍛","🍜","🍝","🍢","🥟","🥠","🥡","🍦","🍧","🍨",
+        "🍩","🍪","🎂","🍰","🧁","🍫","🍬","🍭","🍮","🍯","🥛","☕","🍵",
+        "🧃","🥤","🧋","🍺","🍻","🥂","🍷","🥃","🍸","🍹","🍾","🧊","🍴",
+    ]),
+    ("🏠", "Travel", [
+        "🚗","🚕","🚙","🚌","🏎️","🚓","🚑","🚒","🚐","🛻","🚚","🚛","🚜",
+        "🏍️","🛵","🚲","🛴","🛹","⚓","⛵","🚤","🛥️","🚢","✈️","🛩️","🚁",
+        "🚀","🛸","🪐","🌍","🌎","🌏","🗺️","🧭","🏔️","⛰️","🌋","🏕️","🏖️",
+        "🏜️","🏝️","🏟️","🏛️","🏗️","🏘️","🏠","🏡","🏢","🏣","🏤","🏥","🏦",
+        "🏨","🏪","🏫","🏬","🏭","🏯","🏰","💒","🗼","🗽","⛪","🕌","⛩️",
+        "🕋","⛲","⛺","🌁","🌃","🏙️","🌄","🌅","🌆","🌇","🌉","🌌","🌠",
+        "🎇","🎆","🎑","🗾",
+    ]),
+    ("⚽", "Activities", [
+        "⚽","🏀","🏈","⚾","🥎","🎾","🏐","🏉","🥏","🎱","🏓","🏸","🏒",
+        "🥍","🏑","🏏","⛳","🎣","🤿","🎽","🎿","🛷","🥌","🎯","🎮","🎰",
+        "🎲","♟️","🧩","🪄","🎭","🎨","🎪","🎤","🎧","🎼","🎹","🥁","🎷",
+        "🎺","🎸","🎻","🎬","🎥","📽️","🎞️","🎠","🎡","🎢","🎟️","🎫","🏆",
+        "🥇","🥈","🥉","🏅","🎖️","🎗️","🎀","🎁","🎊","🎉",
+    ]),
+    ("💡", "Objects", [
+        "📱","📲","💻","⌨️","🖥️","🖨️","🖱️","💾","💿","📀","🧮","🎥","📷",
+        "📹","📼","🔍","🔎","💡","🔦","🏮","🪔","📔","📒","📓","📕","📗",
+        "📘","📙","📚","📖","🔖","🏷️","💰","💳","🪙","📈","📉","📊","📋",
+        "📌","📍","✂️","🔒","🔓","🔏","🔐","🔑","🗝️","🔨","⛏️","⚒️","🛠️",
+        "🔧","🪛","🔩","⚙️","⚖️","🔗","🧲","🪜","🧪","🔭","🔬","💊","💉",
+        "🩹","🩺","🧴","🧷","🧹","🧺","🧻","🪣","🧼","🪒","🛒","🚪","🪞",
+        "🛏️","🛋️","🪑","🚽","🚿","🛁","🧸","🪆","👓","🕶️","🥽","👒","🎩",
+        "🧢","⛑️","📿","💍","💎","🌂","🧵","🧶","🪢","🎒","👜","👝","👛",
+        "💼","🧳","🌂","☂️","🛡️","🗡️","⚔️","🪃","🏹","🪤","🪬","🧿","🔮",
+    ]),
+    ("🔣", "Symbols", [
+        "❤️","🧡","💛","💚","💙","💜","🖤","🤍","🤎","💔","❣️","💕","💞",
+        "💓","💗","💖","💘","💝","☮️","✝️","☪️","🕉️","☸️","✡️","☯️","☦️","🛐",
+        "♈","♉","♊","♋","♌","♍","♎","♏","♐","♑","♒","♓","⛎",
+        "🔀","🔁","🔂","▶️","⏩","⏭️","⏯️","◀️","⏪","⏮️","🔼","⏫","🔽",
+        "⏬","⏸️","⏹️","⏺️","🎦","🔅","🔆","📶","🔇","🔈","🔉","🔊","📢",
+        "📣","🔔","🔕","⚠️","🚸","⛔","🚫","🚳","🚭","🚯","🚱","🚷","📵",
+        "🔞","💯","♻️","✅","❌","❎","➕","➖","➗","✖️","💲","™️","©️","®️",
+        "〰️","➰","➿","🔚","🔙","🔛","🔜","🔝","🔴","🟠","🟡","🟢","🔵",
+        "🟣","⚫","⚪","🟤","🔶","🔷","🔸","🔹","🔺","🔻","💠","🔘","⭕",
+        "⭐","🌟","💫","✨","🔥","💧","🌊","🌀","⚡","❄️","🌈","🎵","🎶",
+        "💬","💭","💤","❓","❗","⁉️","🔑","🎯","🏁","🚩","🎌","🏴","🏳️",
+    ]),
+]
 
 
 def _dot(color: str) -> str:
@@ -69,12 +220,15 @@ def _format_combo(tokens: list[str]) -> str:
     return "+".join(parts)
 
 
-def _labeled(parent: Gtk.Box, label: str, widget: Gtk.Widget, width: int = 130, tooltip: str = "") -> Gtk.Widget:
-    row = Gtk.Box(spacing=10)
-    row.set_margin_top(3); row.set_margin_bottom(3)
+def _labeled(parent, label: str, widget: Gtk.Widget, width: int = 130, tooltip: str = "") -> Gtk.Widget:
+    is_lb = isinstance(parent, Gtk.ListBox)
+    row_box = Gtk.Box(spacing=10)
+    mt, mb, ms, me = (6, 6, 12, 8) if is_lb else (3, 3, 0, 0)
+    row_box.set_margin_top(mt); row_box.set_margin_bottom(mb)
+    if is_lb:
+        row_box.set_margin_start(ms); row_box.set_margin_end(me)
+
     lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(width, -1)
-    
-    # ATK Accessibility linking
     if hasattr(lbl, "set_mnemonic_widget"):
         lbl.set_mnemonic_widget(widget)
     atk = widget.get_accessible()
@@ -85,21 +239,28 @@ def _labeled(parent: Gtk.Box, label: str, widget: Gtk.Widget, width: int = 130, 
         lbl.set_tooltip_text(tooltip)
         if atk:
             atk.set_description(tooltip)
-            
-    row.pack_start(lbl, False, False, 0)
-    row.pack_start(widget, True, True, 0)
-    parent.pack_start(row, False, False, 0)
+
+    row_box.pack_start(lbl, False, False, 0)
+    row_box.pack_start(widget, True, True, 0)
+    if tooltip:
+        row_box.pack_start(_info_btn(tooltip), False, False, 0)
+
+    if is_lb:
+        _lb_add(parent, row_box)
+    else:
+        parent.pack_start(row_box, False, False, 0)
     return widget
 
 
-def _switch_row(parent: Gtk.Box, label: str, switch: Gtk.Switch, description: str = "",
+def _switch_row(parent, label: str, switch: Gtk.Switch, description: str = "",
                 width: int = 130) -> Gtk.Switch:
-    """A settings row: [label] [grey description ……………] [switch, far right].
-
-    The description tells the user what the switch does without hovering.
-    """
+    """A settings row: [label] [grey description ……………] [ⓘ] [switch]."""
+    is_lb = isinstance(parent, Gtk.ListBox)
     row = Gtk.Box(spacing=10)
-    row.set_margin_top(3); row.set_margin_bottom(3)
+    mt, mb = (6, 6) if is_lb else (3, 3)
+    row.set_margin_top(mt); row.set_margin_bottom(mb)
+    if is_lb:
+        row.set_margin_start(12); row.set_margin_end(8)
 
     lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(width, -1)
     row.pack_start(lbl, False, False, 0)
@@ -109,11 +270,11 @@ def _switch_row(parent: Gtk.Box, label: str, switch: Gtk.Switch, description: st
     desc.get_style_context().add_class("dim-label")
     row.pack_start(desc, True, True, 0)
 
-    switch.set_halign(Gtk.Align.END)
-    switch.set_valign(Gtk.Align.CENTER)
+    switch.set_halign(Gtk.Align.END); switch.set_valign(Gtk.Align.CENTER)
     row.pack_end(switch, False, False, 0)
+    if description:
+        row.pack_end(_info_btn(description), False, False, 0)
 
-    # ATK accessibility + tooltips
     if hasattr(lbl, "set_mnemonic_widget"):
         lbl.set_mnemonic_widget(switch)
     atk = switch.get_accessible()
@@ -126,19 +287,26 @@ def _switch_row(parent: Gtk.Box, label: str, switch: Gtk.Switch, description: st
         lbl.set_tooltip_text(description)
         desc.set_tooltip_text(description)
 
-    parent.pack_start(row, False, False, 0)
+    if is_lb:
+        _lb_add(parent, row)
+    else:
+        parent.pack_start(row, False, False, 0)
     return switch
 
 
 def _infobox(parent: Gtk.Box, text: str) -> Gtk.Box:
-    """A plain-language help box at the top of a tab (read by screen readers)."""
-    box = Gtk.Box(spacing=8)
-    box.set_margin_top(2); box.set_margin_bottom(10)
+    """A styled banner at the top of each settings tab."""
+    box = Gtk.Box(spacing=10)
+    box.set_margin_top(0); box.set_margin_bottom(12)
+    box.set_margin_start(4); box.set_margin_end(4)
+    box.get_style_context().add_class("bt-infobox")
     icon = Gtk.Image.new_from_icon_name("dialog-information-symbolic", Gtk.IconSize.BUTTON)
-    icon.set_valign(Gtk.Align.START)
+    icon.set_valign(Gtk.Align.CENTER)
+    icon.set_margin_start(6); icon.set_margin_end(2)
     box.pack_start(icon, False, False, 0)
     lbl = Gtk.Label(label=text, xalign=0.0)
     lbl.set_line_wrap(True); lbl.set_xalign(0.0); lbl.set_max_width_chars(72)
+    lbl.set_margin_top(8); lbl.set_margin_bottom(8); lbl.set_margin_end(8)
     box.pack_start(lbl, True, True, 0)
     acc = box.get_accessible()
     if acc:
@@ -148,6 +316,45 @@ def _infobox(parent: Gtk.Box, text: str) -> Gtk.Box:
     return box
 
 
+def _section_title(parent: Gtk.Box, text: str, margin_top: int = 16,
+                   icon: str = "") -> None:
+    """A small bold uppercase section header, with optional symbolic icon."""
+    row = Gtk.Box(spacing=4)
+    row.set_margin_top(margin_top); row.set_margin_bottom(3)
+    row.get_style_context().add_class("bt-section")
+    if icon:
+        img = Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.MENU)
+        img.set_pixel_size(14)
+        img.set_valign(Gtk.Align.CENTER)
+        row.pack_start(img, False, False, 0)
+    lbl = Gtk.Label(xalign=0.0)
+    lbl.set_valign(Gtk.Align.CENTER)
+    lbl.set_markup(f"<b><small>{GLib.markup_escape_text(text.upper())}</small></b>")
+    row.pack_start(lbl, False, False, 0)
+    parent.pack_start(row, False, False, 0)
+
+
+def _card_section(parent: Gtk.Box, title: str = "", margin_top: int = 16,
+                  icon: str = "") -> Gtk.ListBox:
+    """A titled card group. Returns a ListBox styled as a card for packing rows into."""
+    if title:
+        _section_title(parent, title, margin_top, icon=icon)
+    lb = Gtk.ListBox()
+    lb.set_selection_mode(Gtk.SelectionMode.NONE)
+    lb.get_style_context().add_class("boxed-list")
+    lb.get_style_context().add_class("bt-card")
+    parent.pack_start(lb, False, False, 0)
+    return lb
+
+
+def _lb_add(lb: Gtk.ListBox, widget: Gtk.Widget) -> None:
+    """Add any widget as a non-interactive row inside a card ListBox."""
+    row = Gtk.ListBoxRow()
+    row.set_activatable(False); row.set_selectable(False)
+    row.add(widget)
+    lb.add(row)
+
+
 def _entry(text="", placeholder="") -> Gtk.Entry:
     e = Gtk.Entry(); e.set_text(str(text)); e.set_hexpand(True)
     if placeholder:
@@ -155,8 +362,14 @@ def _entry(text="", placeholder="") -> Gtk.Entry:
     return e
 
 
+def _block_scroll(combo: Gtk.ComboBoxText) -> Gtk.ComboBoxText:
+    """Prevent accidental value changes from mouse-wheel hover-scrolling."""
+    combo.connect("scroll-event", lambda _w, _e: True)
+    return combo
+
+
 def _combo(options, active=None) -> Gtk.ComboBoxText:
-    c = Gtk.ComboBoxText()
+    c = _block_scroll(Gtk.ComboBoxText())
     for o in options:
         c.append_text(o)
     if active in options:
@@ -164,6 +377,42 @@ def _combo(options, active=None) -> Gtk.ComboBoxText:
     elif options:
         c.set_active(0)
     return c
+
+
+def _info_btn(text: str) -> Gtk.Button:
+    """Small ⓘ button that shows a help popover when clicked."""
+    btn = Gtk.Button()
+    icon = Gtk.Image.new_from_icon_name("dialog-information-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
+    btn.add(icon)
+    btn.set_relief(Gtk.ReliefStyle.NONE)
+    btn.set_tooltip_text(text)
+    def _show(_b):
+        pop = Gtk.Popover(relative_to=btn)
+        lbl = Gtk.Label(label=text, xalign=0.0)
+        lbl.set_line_wrap(True)
+        lbl.set_max_width_chars(46)
+        lbl.set_margin_top(10); lbl.set_margin_bottom(10)
+        lbl.set_margin_start(12); lbl.set_margin_end(12)
+        pop.add(lbl)
+        pop.show_all()
+    btn.connect("clicked", _show)
+    return btn
+
+
+def _type_combo(types: list[tuple[str, str]], stored: str = "") -> Gtk.ComboBoxText:
+    """Combo that shows human-readable labels but maps to/from internal key values via index."""
+    c = _block_scroll(Gtk.ComboBoxText())
+    for _, label in types:
+        c.append_text(label)
+    idx = next((i for i, (k, _) in enumerate(types) if k == stored), 0)
+    c.set_active(idx)
+    return c
+
+
+def _type_key(combo: Gtk.ComboBoxText, types: list[tuple[str, str]], fallback: str = "") -> str:
+    """Read the stored key for a combo built with _type_combo."""
+    i = combo.get_active()
+    return types[i][0] if 0 <= i < len(types) else fallback
 
 
 class ModelPicker(Gtk.Box):
@@ -278,12 +527,25 @@ def _url_field(parent: Gtk.Box, label: str, placeholder: str, on_reload,
     return e
 
 
-def _page(nb: Gtk.Notebook, title: str) -> Gtk.Box:
+def _url_field_lb(lb: Gtk.ListBox, label: str, placeholder: str, on_reload,
+                  dot: Gtk.Label | None = None, width: int = 130,
+                  tooltip: str = "") -> Gtk.Entry:
+    """_url_field variant that adds the row as a ListBox card row."""
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-    for m in ("top", "bottom", "start", "end"):
-        getattr(box, f"set_margin_{m}")(12)
-    nb.append_page(box, Gtk.Label(label=title))
-    return box
+    _url_field(box, label, placeholder, on_reload, dot=dot, width=width)
+    row_box = box.get_children()[0]  # the row box built by _url_field
+    box.remove(row_box)
+    row_box.set_margin_top(6); row_box.set_margin_bottom(6)
+    row_box.set_margin_start(12); row_box.set_margin_end(8)
+    _lb_add(lb, row_box)
+    # return the Entry widget (second child of row_box after label [and optional dot])
+    for child in row_box.get_children():
+        if isinstance(child, Gtk.Entry):
+            if tooltip:
+                child.set_tooltip_text(tooltip)
+            return child
+    return row_box.get_children()[-2]  # fallback: second-to-last (before refresh btn)
+
 
 
 def _read_first(paths: list[Path], fallback: str = "Not available in this install.") -> str:
@@ -303,7 +565,148 @@ def _app_paths() -> dict[str, list[Path]]:
     return {
         "changelog": [linux_dir / "CHANGELOG.md", Path("/opt/blitztext/CHANGELOG.md")],
         "license": [repo_dir / "LICENSE", Path("/usr/share/doc/blitztext/copyright")],
+        "manual": [pkg_dir / "MANUAL.md", repo_dir / "MANUAL.md", Path("/opt/blitztext/MANUAL.md")],
     }
+
+
+def _md_panel(text: str, height: int = 420) -> Gtk.ScrolledWindow:
+    """Render a Markdown string into a read-only styled Gtk.TextView.
+
+    Handles: # h1/h2/h3, **bold**, *italic*, `inline code`,
+    > blockquotes, --- rules, bullet/numbered lists, and | tables |.
+    """
+    import re
+
+    sw = Gtk.ScrolledWindow()
+    sw.set_min_content_height(height)
+    sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+    view = Gtk.TextView()
+    view.set_editable(False)
+    view.set_cursor_visible(False)
+    view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+    view.set_left_margin(14)
+    view.set_right_margin(14)
+    view.set_top_margin(10)
+    view.set_bottom_margin(10)
+
+    buf = view.get_buffer()
+
+    t_h1    = buf.create_tag("h1",    weight=Pango.Weight.BOLD, size_points=17.0,
+                             pixels_above_lines=14, pixels_below_lines=4)
+    t_h2    = buf.create_tag("h2",    weight=Pango.Weight.BOLD, size_points=13.0,
+                             pixels_above_lines=10, pixels_below_lines=3)
+    t_h3    = buf.create_tag("h3",    weight=Pango.Weight.BOLD, size_points=11.0,
+                             pixels_above_lines=8,  pixels_below_lines=2)
+    t_bold  = buf.create_tag("bold",  weight=Pango.Weight.BOLD)
+    t_ital  = buf.create_tag("ital",  style=Pango.Style.ITALIC)
+    t_code  = buf.create_tag("code",  family="Monospace", size_points=10.0,
+                             background="#f0f0f4", foreground="#c7254e")
+    t_quote = buf.create_tag("quote", left_margin=20, foreground="#666",
+                             style=Pango.Style.ITALIC,
+                             pixels_above_lines=2, pixels_below_lines=2)
+    t_hr    = buf.create_tag("hr",    foreground="#aaa",
+                             pixels_above_lines=6, pixels_below_lines=6)
+    t_tbl   = buf.create_tag("tbl",   family="Monospace", size_points=10.0,
+                             pixels_above_lines=1, pixels_below_lines=1)
+    t_thdr  = buf.create_tag("thdr",  family="Monospace", size_points=10.0,
+                             weight=Pango.Weight.BOLD,
+                             pixels_above_lines=2, pixels_below_lines=1)
+
+    _inline_re = re.compile(r'(\*\*.*?\*\*|\*.*?\*|`.*?`)')
+
+    def _insert_inline(line: str, end_iter, *extra_tags) -> None:
+        for part in _inline_re.split(line):
+            if part.startswith("**") and part.endswith("**") and len(part) > 4:
+                buf.insert_with_tags(end_iter, part[2:-2], t_bold, *extra_tags)
+            elif part.startswith("*") and part.endswith("*") and len(part) > 2:
+                buf.insert_with_tags(end_iter, part[1:-1], t_ital, *extra_tags)
+            elif part.startswith("`") and part.endswith("`") and len(part) > 2:
+                buf.insert_with_tags(end_iter, part[1:-1], t_code, *extra_tags)
+            elif extra_tags:
+                buf.insert_with_tags(end_iter, part, *extra_tags)
+            else:
+                buf.insert(end_iter, part)
+
+    # Collect lines, detect table blocks so we can measure column widths
+    lines = text.splitlines()
+    # Pre-scan: mark which lines are table rows vs separators
+    _tbl_sep = re.compile(r'^\|[-| :]+\|$')
+
+    def _is_table_row(s: str) -> bool:
+        return s.strip().startswith("|") and s.strip().endswith("|")
+
+    first_line = True
+    i = 0
+    while i < len(lines):
+        raw = lines[i].rstrip()
+        end = buf.get_end_iter()
+
+        if not first_line:
+            buf.insert(end, "\n")
+            end = buf.get_end_iter()
+        first_line = False
+
+        # --- Table block: gather all consecutive table rows ---
+        if _is_table_row(raw):
+            tbl_rows: list[list[str]] = []
+            while i < len(lines) and (_is_table_row(lines[i].rstrip()) or _tbl_sep.match(lines[i].rstrip())):
+                row_line = lines[i].rstrip()
+                if not _tbl_sep.match(row_line):
+                    cells = [c.strip() for c in row_line.strip("|").split("|")]
+                    tbl_rows.append(cells)
+                i += 1
+
+            if tbl_rows:
+                # Column widths: max of each column (plain text length, stripped of markup)
+                n_cols = max(len(r) for r in tbl_rows)
+                widths = [0] * n_cols
+                for row in tbl_rows:
+                    for ci, cell in enumerate(row):
+                        plain = re.sub(r'\*\*|`|\*', '', cell)
+                        widths[ci] = max(widths[ci], len(plain))
+
+                for ri, row in enumerate(tbl_rows):
+                    end = buf.get_end_iter()
+                    tag = t_thdr if ri == 0 else t_tbl
+                    line_text = ""
+                    for ci in range(n_cols):
+                        cell = row[ci] if ci < len(row) else ""
+                        plain = re.sub(r'\*\*|`|\*', '', cell)
+                        line_text += plain.ljust(widths[ci] + 2)
+                    buf.insert_with_tags(end, line_text.rstrip(), tag)
+                    if ri < len(tbl_rows) - 1:
+                        end = buf.get_end_iter()
+                        buf.insert(end, "\n")
+            continue  # i already advanced
+
+        # --- Normal lines ---
+        if raw.startswith("### "):
+            buf.insert_with_tags(end, raw[4:], t_h3)
+        elif raw.startswith("## "):
+            buf.insert_with_tags(end, raw[3:], t_h2)
+        elif raw.startswith("# "):
+            buf.insert_with_tags(end, raw[2:], t_h1)
+        elif raw.startswith("> "):
+            _insert_inline(raw[2:], end, t_quote)
+        elif re.match(r'^-{3,}$', raw):
+            buf.insert_with_tags(end, "─" * 64, t_hr)
+        elif raw.startswith("- ") or raw.startswith("* "):
+            buf.insert(end, "  • ")
+            end = buf.get_end_iter()
+            _insert_inline(raw[2:], end)
+        elif re.match(r'^\d+\. ', raw):
+            m = re.match(r'^(\d+\. )(.*)', raw)
+            if m:
+                buf.insert(end, "  " + m.group(1))
+                end = buf.get_end_iter()
+                _insert_inline(m.group(2), end)
+        else:
+            _insert_inline(raw, end)
+
+        i += 1
+
+    sw.add(view)
+    return sw
 
 
 def _text_panel(text: str, *, monospace: bool = True, height: int = 180) -> Gtk.ScrolledWindow:
@@ -332,30 +735,191 @@ class SettingsDialog:
         self._tr_cache: dict = {}
         self._wf_idx = self._stt_idx = self._llm_idx = 0
 
-        self.dlg = Gtk.Dialog(title="Blitztext — Settings", transient_for=parent, modal=True)
-        self.dlg.set_default_size(620, 600)
-        self.dlg.add_button("Close", Gtk.ResponseType.CLOSE)
-        self.dlg.add_button("Save", RESP_SAVE)
-        self.dlg.add_button("Save & Restart", RESP_SAVE_RESTART)
+        self.dlg = Gtk.Dialog(transient_for=parent, modal=True)
 
-        nb = Gtk.Notebook()
-        self.dlg.get_content_area().pack_start(nb, True, True, 0)
-        # Build each tab lazily on first view so the dialog opens instantly. The
-        # heavy bits are the Gtk.FileChooserButton pickers in Input/Benchmark
-        # (~0.2s each to construct); deferring them until you visit that tab keeps
-        # the initial open near-instant. _collect() force-builds any unvisited tab
-        # before saving, so no field is ever missed.
-        self._pending_tabs: dict = {}
-        for title, builder in (("Presets", self._build_presets),
-                               ("Engines", self._build_engines),
-                               ("Input", self._build_input),
-                               ("General", self._build_general),
-                               ("Benchmark", self._build_benchmark),
-                               ("Log", self._build_log),
-                               ("About", self._build_about)):
-            self._pending_tabs[_page(nb, title)] = builder
-        self._build_tab(nb.get_nth_page(0))   # the visible tab, eagerly
-        nb.connect("switch-page", lambda _nb, page, _n: self._build_tab(page))
+        _header = Gtk.HeaderBar()
+        _header.set_show_close_button(True)
+        _header.set_title("Blitztext — Settings")
+        self._save_restart_btn = Gtk.Button(label="Save & Restart")
+        self._save_restart_btn.get_style_context().add_class("suggested-action")
+        self._save_restart_btn.connect("clicked", lambda _b: self.dlg.response(RESP_SAVE_RESTART))
+        self._save_restart_btn.set_tooltip_text(
+            "Save and restart the daemon — required when changing STT engine, hotkeys, "
+            "microphone, or wakeword server.")
+        _header.pack_end(self._save_restart_btn)
+        _wizard_btn = Gtk.Button(label="Setup Wizard…")
+        _wizard_btn.set_tooltip_text("Re-run the first-run setup wizard.")
+        _wizard_btn.connect("clicked", self._open_wizard)
+        _header.pack_start(_wizard_btn)
+        _save = Gtk.Button(label="Save")
+        _save.connect("clicked", lambda _b: self.dlg.response(RESP_SAVE))
+        _save.set_tooltip_text("Save settings and apply what can be applied without restarting.")
+        _header.pack_end(_save)
+        # Status label shown after Save — inline, no modal popup
+        self._status_lbl = Gtk.Label()
+        self._status_lbl.set_margin_start(8); self._status_lbl.set_margin_end(4)
+        _header.set_custom_title(self._status_lbl)
+        _header.show_all()
+        self._status_lbl.hide()   # hidden until first save
+        self.dlg.set_titlebar(_header)
+
+        _prov = Gtk.CssProvider()
+        _prov.load_from_data(b"""
+.bt-section {
+    font-weight: bold;
+    font-size: small;
+    letter-spacing: 1px;
+    color: mix(@theme_fg_color, @theme_bg_color, 0.45);
+}
+.bt-section image {
+    margin: 0;
+}
+.bt-card {
+    border-radius: 8px;
+    border: 1px solid mix(@theme_fg_color, @theme_bg_color, 0.8);
+    padding: 2px 0px;
+    margin-bottom: 4px;
+}
+.bt-card row {
+    padding: 0px;
+}
+.bt-infobox {
+    border-radius: 6px;
+    border: 1px solid rgba(66, 133, 244, 0.50);
+    background-color: rgba(66, 133, 244, 0.09);
+    padding: 4px;
+    margin-bottom: 10px;
+}
+.bt-infobox label {
+    color: @theme_fg_color;
+}
+.bt-sidebar-active {
+    background-color: alpha(@theme_selected_bg_color, 0.15);
+    border-radius: 6px;
+}
+.sidebar {
+    background-color: mix(@theme_bg_color, @theme_fg_color, 0.03);
+}
+.bt-emoji-btn {
+    font-size: 20px;
+    min-width: 38px;
+    min-height: 38px;
+    padding: 2px;
+}
+.bt-emoji-cat-btn {
+    font-size: 18px;
+    min-width: 34px;
+    min-height: 34px;
+    padding: 2px;
+}
+""")
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), _prov,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
+        # Widen dialog for sidebar
+        self.dlg.set_default_size(860, 700)
+
+        # Outer horizontal container
+        _body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        self.dlg.get_content_area().pack_start(_body, True, True, 0)
+
+        # Left sidebar
+        _sidebar_scroll = Gtk.ScrolledWindow()
+        _sidebar_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
+        _sidebar_scroll.set_size_request(170, -1)
+        _sidebar_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        _sidebar_scroll.add(_sidebar_box)
+        _sidebar_scroll.get_style_context().add_class("sidebar")
+        _body.pack_start(_sidebar_scroll, False, False, 0)
+
+        _vsep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+        _body.pack_start(_vsep, False, False, 0)
+
+        # Right stack
+        self._stack = Gtk.Stack()
+        self._stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        _body.pack_start(self._stack, True, True, 0)
+
+        # Resize-grip strip — sits below the body, above the button row, so
+        # users notice the window is resizable.
+        _grip_strip = Gtk.Box()
+        _grip = Gtk.DrawingArea()
+        _grip.set_size_request(18, 10)
+        _grip.set_halign(Gtk.Align.END)
+        _grip.set_can_focus(False)
+        _grip.connect("draw", self._draw_resize_grip)
+        _grip_strip.pack_end(_grip, False, False, 0)
+        self.dlg.get_content_area().pack_end(_grip_strip, False, False, 0)
+
+        # Sidebar helpers
+        def _add_sidebar_section(label: str) -> None:
+            lbl = Gtk.Label(xalign=0.0)
+            lbl.set_markup(f'<span size="small" weight="bold" alpha="65%">{GLib.markup_escape_text(label.upper())}</span>')
+            lbl.set_margin_top(14); lbl.set_margin_bottom(2)
+            lbl.set_margin_start(12); lbl.set_margin_end(8)
+            _sidebar_box.pack_start(lbl, False, False, 0)
+
+        def _add_sidebar_row(label: str, icon: str, page_widget) -> Gtk.Button:
+            btn = Gtk.Button()
+            btn.get_style_context().add_class("flat")
+            btn_box = Gtk.Box(spacing=8)
+            btn_box.set_margin_top(3); btn_box.set_margin_bottom(3)
+            btn_box.set_margin_start(8); btn_box.set_margin_end(8)
+            if icon:
+                img = Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.MENU)
+                img.set_pixel_size(16)
+                btn_box.pack_start(img, False, False, 0)
+            lbl = Gtk.Label(label=label, xalign=0.0)
+            btn_box.pack_start(lbl, True, True, 0)
+            btn.add(btn_box)
+            btn.connect("clicked", lambda _b, pw=page_widget: self._show_page(pw))
+            _sidebar_box.pack_start(btn, False, False, 0)
+            return btn
+
+        def _stack_page(title: str) -> Gtk.Box:
+            outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            sw = Gtk.ScrolledWindow()
+            sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.ALWAYS)
+            sw.set_overlay_scrolling(False)
+            outer.pack_start(sw, True, True, 0)
+            inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            for m in ("top", "bottom", "start", "end"):
+                getattr(inner, f"set_margin_{m}")(15)
+            sw.add(inner)
+            outer._bt_inner = inner
+            self._stack.add_named(outer, title)
+            return outer
+
+        # Build pages lazily on first visit — heavy bits (FileChooserButton etc.)
+        # are deferred so the dialog opens instantly.
+        self._pending_pages: dict = {}   # page widget → builder
+        self._sidebar_btns: dict = {}    # page widget → sidebar button
+
+        def _reg(section_label, sidebar_label, icon, builder):
+            if section_label:
+                _add_sidebar_section(section_label)
+            pg = _stack_page(sidebar_label)
+            btn = _add_sidebar_row(sidebar_label, icon, pg)
+            self._pending_pages[pg] = builder
+            self._sidebar_btns[pg] = btn
+            return pg
+
+        _reg(None,          "Presets",              "document-properties-symbolic",     self._build_presets)
+        _reg("General",     "General",              "preferences-system-symbolic",       self._build_general)
+        _reg("Input",       "Keyboard",             "input-keyboard-symbolic",           self._build_keyboard)
+        _reg(None,          "Wakeword",             "audio-input-microphone-symbolic",   self._build_wakeword)
+        _reg("Engines",     "STT Engines",          "network-server-symbolic",           self._build_engines)
+        _reg("Benchmark",   "Benchmark — STT",      "utilities-system-monitor-symbolic", self._build_benchmark_stt)
+        _reg(None,          "Benchmark — Wakeword", "audio-input-microphone-symbolic",   self._build_benchmark_ww)
+        _reg("System",      "Log",                  "text-x-generic-symbolic",           self._build_log)
+        _reg(None,          "Manual",               "help-contents-symbolic",            self._build_manual)
+        _reg(None,          "About",                "help-about-symbolic",               self._build_about)
+
+        # Show the first page on open
+        first_page = list(self._pending_pages)[0]
+        self._show_page(first_page)
 
         self._bind_entry = None
         self._bind_pressed: list[str] = []
@@ -364,17 +928,29 @@ class SettingsDialog:
         self.dlg.connect("response", self._on_response)
         self.dlg.connect("destroy", lambda *_: self._cleanup())
 
-    def _build_tab(self, page: Gtk.Box) -> None:
-        """Build a notebook tab's contents the first time it's shown (lazy)."""
-        builder = self._pending_tabs.pop(page, None)
+    def _show_page(self, page) -> None:
+        """Switch to page, build it on first visit, update sidebar highlight."""
+        self._build_page(page)
+        self._stack.set_visible_child(page)
+        for pw, btn in self._sidebar_btns.items():
+            ctx = btn.get_style_context()
+            if pw is page:
+                ctx.add_class("bt-sidebar-active")
+            else:
+                ctx.remove_class("bt-sidebar-active")
+
+    def _build_page(self, page) -> None:
+        """Build a page's contents the first time it's shown (lazy)."""
+        builder = self._pending_pages.pop(page, None)
         if builder is not None:
-            builder(page)
-            page.show_all()   # the dialog may already be on-screen
+            content = getattr(page, "_bt_inner", page)
+            builder(content)
+            page.show_all()
 
     def _force_build_tabs(self) -> None:
-        """Build any not-yet-visited tabs so _collect() sees every field."""
-        for page in list(self._pending_tabs):
-            self._build_tab(page)
+        """Build any not-yet-visited pages so _collect() sees every field."""
+        for page in list(self._pending_pages):
+            self._build_page(page)
 
     # ===== Presets ==========================================================
     def _build_presets(self, page: Gtk.Box) -> None:
@@ -383,44 +959,58 @@ class SettingsDialog:
                        "(for example into a polished email). Trigger it by speaking its "
                        "keyword, or with an optional keyboard shortcut.")
         self._wf_idx = 0
+
+        # ── Selector bar ──────────────────────────────────────────────────────
         bar = Gtk.Box(spacing=8)
-        self.wf_combo = Gtk.ComboBoxText()
+        bar.set_margin_bottom(6)
+        self.wf_combo = _block_scroll(Gtk.ComboBoxText())
         for wf in self.cfg.workflows:
             self.wf_combo.append_text(wf.name)
         self.wf_combo.set_active(0)
         self.wf_combo.connect("changed", self._wf_changed)
         bar.pack_start(self.wf_combo, True, True, 0)
         add = Gtk.Button(label="+ Add"); add.connect("clicked", self._wf_add)
-        rm = Gtk.Button(label="Delete"); rm.connect("clicked", self._wf_delete)
+        rm  = Gtk.Button(label="Delete"); rm.connect("clicked", self._wf_delete)
         bar.pack_start(add, False, False, 0); bar.pack_start(rm, False, False, 0)
-        page.pack_start(bar, False, False, 4)
+        page.pack_start(bar, False, False, 0)
 
-        form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        page.pack_start(form, True, True, 6)
-        self.wf_name = _labeled(form, "Name", _entry(placeholder="Preset name"),
+        # ── Identity card ─────────────────────────────────────────────────────
+        id_card = _card_section(page, "Identity", margin_top=4, icon="emblem-system-symbolic")
+        self.wf_name = _labeled(id_card, "Name", _entry(placeholder="Preset name"),
                                 tooltip="A short name for this action, shown in the main panel.")
-        self.wf_icon = _labeled(form, "Icon (emoji)", _entry(placeholder="⚡  (shown in the ‘matched preset’ notification)"),
-                                tooltip="An emoji shown next to this preset when a voice command matches it — "
-                                        "give each preset a distinct one so you can tell at a glance which fired.")
-        self.wf_desc = _labeled(form, "Description", _entry(placeholder="Short description shown in the panel"),
+        self.wf_icon = self._icon_field_lb(id_card, "Icon (emoji)")
+        self.wf_desc = _labeled(id_card, "Description", _entry(placeholder="Short description shown in the panel"),
                                 tooltip="One line explaining what this preset does.")
-        self.wf_keywords = _labeled(form, "Keywords (comma)", _entry(placeholder="nicer email, bessere email"),
-                                    tooltip="Spoken trigger words. Say one at the start or end of your speech to use this preset.")
-        self.wf_hotkey = self._key_field(form, "Hotkey (optional)", "", placeholder="click Set, or e.g. <ctrl>+<alt>+e", width=130)
-        self.wf_mode = _labeled(form, "Mode", _combo(["transcribe", "rewrite", "stream"]),
-                                tooltip="‘transcribe’ types your words as-is. ‘rewrite’ sends them to the language model first. ‘stream’ shows live text from a realtime engine.")
-        self.wf_model = _labeled(form, "LLM model (opt.)", _entry(placeholder="blank = use the active LLM engine's model"),
-                                 tooltip="Override the language model just for this preset. Leave blank to use the active LLM engine.")
-        self.wf_temp = _labeled(form, "Temperature (opt.)", _entry(placeholder="blank = engine default (e.g. 0.3)"),
-                                tooltip="Creativity of the rewrite, 0–1. Lower is more predictable. Blank uses the engine default.")
 
-        form.pack_start(Gtk.Label(label="Prompt sent to the LLM (rewrite mode):", xalign=0.0), False, False, 6)
+        # ── Trigger card ──────────────────────────────────────────────────────
+        trig_card = _card_section(page, "Trigger", icon="input-keyboard-symbolic")
+        self.wf_keywords = _labeled(trig_card, "Keywords", _entry(placeholder="nicer email, bessere email"),
+                                    tooltip="Spoken trigger words, comma-separated. Say one at the start or end of your speech to activate this preset.")
+        self.wf_hotkey = self._key_field_lb(trig_card, "Hotkey (optional)", "", placeholder="click Set, or e.g. <ctrl>+<alt>+e")
+
+        # ── Behaviour card ────────────────────────────────────────────────────
+        beh_card = _card_section(page, "Behaviour", icon="system-run-symbolic")
+        self.wf_mode = _labeled(beh_card, "Mode", _combo(["transcribe", "rewrite", "stream"]),
+                                tooltip="’transcribe’ types your words as-is. ‘rewrite’ sends them to the language model first. ‘stream’ shows live text from a realtime engine.")
+        # Engine dropdown — "(active engine)" + one entry per configured LLM engine.
+        llm_names = [e.name for e in self.cfg.llm_engines]
+        self.wf_llm_engine = _labeled(
+            beh_card, "LLM engine",
+            _combo(["(active engine)"] + llm_names),
+            tooltip="Which LLM engine to use for the rewrite step. ‘(active engine)’ follows whatever is selected in the Engines tab.",
+        )
+        self.wf_temp  = _labeled(beh_card, "Temperature (opt.)", _entry(placeholder="blank = engine default (e.g. 0.3)"),
+                                 tooltip="Creativity of the rewrite, 0–1. Lower is more predictable. Blank uses the engine default.")
+
+        # ── Prompt ────────────────────────────────────────────────────────────
+        _section_title(page, "Prompt sent to the LLM (rewrite mode)", margin_top=14, icon="applications-science-symbolic")
         frame = Gtk.Frame(); frame.set_shadow_type(Gtk.ShadowType.IN)
-        sw = Gtk.ScrolledWindow(); sw.set_min_content_height(150)
+        sw = Gtk.ScrolledWindow(); sw.set_min_content_height(140)
         self.wf_prompt = Gtk.TextView(); self.wf_prompt.set_wrap_mode(Gtk.WrapMode.WORD)
-        self.wf_prompt.set_left_margin(6); self.wf_prompt.set_top_margin(6)
+        self.wf_prompt.set_left_margin(8); self.wf_prompt.set_top_margin(6)
+        self.wf_prompt.set_right_margin(8); self.wf_prompt.set_bottom_margin(6)
         sw.add(self.wf_prompt); frame.add(sw)
-        form.pack_start(frame, True, True, 0)
+        page.pack_start(frame, True, True, 0)
         self._wf_load(0)
 
     def _wf_load(self, idx: int) -> None:
@@ -433,7 +1023,10 @@ class SettingsDialog:
         self.wf_keywords.set_text(", ".join(wf.keywords))
         self.wf_hotkey.set_text(wf.hotkey)
         self.wf_mode.set_active(["transcribe", "rewrite", "stream"].index(wf.mode) if wf.mode in ("transcribe", "rewrite", "stream") else 0)
-        self.wf_model.set_text(wf.model or "")
+        llm_names = [e.name for e in self.cfg.llm_engines]
+        engine = getattr(wf, "llm_engine", "") or ""
+        idx_e = (llm_names.index(engine) + 1) if engine in llm_names else 0
+        self.wf_llm_engine.set_active(idx_e)
         self.wf_temp.set_text("" if wf.temperature is None else str(wf.temperature))
         self.wf_prompt.get_buffer().set_text(wf.prompt)
         self._wf_idx = idx
@@ -449,7 +1042,8 @@ class SettingsDialog:
         wf.keywords = [k.strip() for k in self.wf_keywords.get_text().split(",") if k.strip()]
         wf.hotkey = self.wf_hotkey.get_text().strip()
         wf.mode = self.wf_mode.get_active_text() or "transcribe"
-        wf.model = self.wf_model.get_text().strip() or None
+        engine_text = self.wf_llm_engine.get_active_text() or ""
+        wf.llm_engine = "" if engine_text == "(active engine)" else engine_text
         t = self.wf_temp.get_text().strip()
         wf.temperature = float(t) if _isfloat(t) else None
         b = self.wf_prompt.get_buffer()
@@ -483,23 +1077,204 @@ class SettingsDialog:
         self.wf_combo.set_active(0)
         self._wf_load(0)
 
+    def _icon_field(self, page: Gtk.Box, label: str, width: int = 130) -> Gtk.Entry:
+        TOOLTIP = ("An emoji shown next to this preset when a voice command matches it — "
+                   "give each preset a distinct one so you can tell at a glance which fired.")
+        row = Gtk.Box(spacing=10); row.set_margin_top(3); row.set_margin_bottom(3)
+        lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(width, -1)
+        lbl.set_tooltip_text(TOOLTIP)
+        row.pack_start(lbl, False, False, 0)
+        entry = Gtk.Entry(); entry.set_hexpand(True)
+        entry.set_placeholder_text("⚡")
+        entry.set_tooltip_text(TOOLTIP)
+        atk = entry.get_accessible()
+        if atk:
+            atk.set_name(label.replace("_", ""))
+            atk.set_description(TOOLTIP)
+        row.pack_start(entry, True, True, 0)
+        btn = Gtk.Button(label="😀")
+        btn.set_tooltip_text("Pick an emoji")
+        btn.connect("clicked", lambda _b: self._show_emoji_picker(btn, entry))
+        row.pack_start(btn, False, False, 0)
+        page.pack_start(row, False, False, 0)
+        return entry
+
+    def _icon_field_lb(self, lb: Gtk.ListBox, label: str, width: int = 130) -> Gtk.Entry:
+        """_icon_field variant for use inside a card ListBox."""
+        TOOLTIP = ("An emoji shown next to this preset when a voice command matches it — "
+                   "give each preset a distinct one so you can tell at a glance which fired.")
+        box = Gtk.Box(spacing=10)
+        box.set_margin_top(6); box.set_margin_bottom(6)
+        box.set_margin_start(12); box.set_margin_end(8)
+        lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(width, -1)
+        lbl.set_tooltip_text(TOOLTIP)
+        box.pack_start(lbl, False, False, 0)
+        entry = Gtk.Entry(); entry.set_hexpand(True)
+        entry.set_placeholder_text("⚡"); entry.set_tooltip_text(TOOLTIP)
+        box.pack_start(entry, True, True, 0)
+        btn = Gtk.Button(label="😀"); btn.set_tooltip_text("Pick an emoji")
+        btn.connect("clicked", lambda _b: self._show_emoji_picker(btn, entry))
+        box.pack_start(btn, False, False, 0)
+        box.pack_start(_info_btn(TOOLTIP), False, False, 0)
+        _lb_add(lb, box)
+        return entry
+
+    def _key_field_lb(self, lb: Gtk.ListBox, label: str, value: str,
+                      placeholder: str = "", width: int = 130) -> Gtk.Entry:
+        """_key_field variant for use inside a card ListBox."""
+        box = Gtk.Box(spacing=10)
+        box.set_margin_top(6); box.set_margin_bottom(6)
+        box.set_margin_start(12); box.set_margin_end(8)
+        lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(width, -1)
+        box.pack_start(lbl, False, False, 0)
+        entry = Gtk.Entry(); entry.set_text(value); entry.set_hexpand(True)
+        if placeholder:
+            entry.set_placeholder_text(placeholder)
+        box.pack_start(entry, True, True, 0)
+        btn = Gtk.Button(label="Set")
+        btn.connect("clicked", lambda _b, e=entry: self._bind_key(e))
+        box.pack_start(btn, False, False, 0)
+        _lb_add(lb, box)
+        return entry
+
+    def _show_emoji_picker(self, anchor: Gtk.Widget, entry: Gtk.Entry) -> None:
+        pop = Gtk.Popover(relative_to=anchor)
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+
+        # -- Search bar -------------------------------------------------------
+        search = Gtk.SearchEntry()
+        search.set_placeholder_text("Search emoji…")
+        search.set_margin_top(6); search.set_margin_bottom(4)
+        search.set_margin_start(6); search.set_margin_end(6)
+        vbox.pack_start(search, False, False, 0)
+        vbox.pack_start(Gtk.Separator(), False, False, 0)
+
+        # Flat emoji list (all categories) used by search
+        all_emojis: list[str] = [e for _, _, es in _EMOJI_CATEGORIES for e in es]
+
+        def _keywords(e: str) -> str:
+            try:
+                return unicodedata.name(e[0], "").lower()
+            except Exception:
+                return ""
+
+        # -- Category view ----------------------------------------------------
+        cat_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+
+        stack = Gtk.Stack()
+        stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        stack.set_size_request(420, 230)
+
+        cat_bar = Gtk.Box(spacing=0)
+        cat_bar.set_margin_top(4); cat_bar.set_margin_bottom(4)
+        cat_bar.set_margin_start(4); cat_bar.set_margin_end(4)
+
+        first_name: str | None = None
+        active_btn: list[Gtk.Button] = [None]
+
+        def _select(name: str, btn: Gtk.Button) -> None:
+            stack.set_visible_child_name(name)
+            if active_btn[0]:
+                active_btn[0].get_style_context().remove_class("suggested-action")
+            btn.get_style_context().add_class("suggested-action")
+            active_btn[0] = btn
+
+        for cat_emoji, cat_name, emojis in _EMOJI_CATEGORIES:
+            flow = Gtk.FlowBox()
+            flow.set_max_children_per_line(10)
+            flow.set_selection_mode(Gtk.SelectionMode.NONE)
+            flow.set_margin_top(4); flow.set_margin_bottom(4)
+            flow.set_margin_start(4); flow.set_margin_end(4)
+            for emoji in emojis:
+                eb = Gtk.Button(label=emoji)
+                eb.set_relief(Gtk.ReliefStyle.NONE)
+                eb.get_style_context().add_class("bt-emoji-btn")
+                eb.connect("clicked", lambda _b, e=emoji: (entry.set_text(e), pop.popdown()))
+                flow.add(eb)
+            sw = Gtk.ScrolledWindow()
+            sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+            sw.add(flow)
+            stack.add_named(sw, cat_name)
+
+            cb = Gtk.Button(label=cat_emoji)
+            cb.set_relief(Gtk.ReliefStyle.NONE)
+            cb.get_style_context().add_class("bt-emoji-cat-btn")
+            cb.set_tooltip_text(cat_name)
+            cb.connect("clicked", lambda _b, n=cat_name, b=cb: _select(n, b))
+            cat_bar.pack_start(cb, True, True, 0)
+
+            if first_name is None:
+                first_name = cat_name
+                active_btn[0] = cb
+                cb.get_style_context().add_class("suggested-action")
+
+        if first_name:
+            stack.set_visible_child_name(first_name)
+
+        cat_scroll = Gtk.ScrolledWindow()
+        cat_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        cat_scroll.set_min_content_height(44)
+        cat_scroll.add(cat_bar)
+        cat_container.pack_start(cat_scroll, False, False, 0)
+        cat_container.pack_start(Gtk.Separator(), False, False, 0)
+        cat_container.pack_start(stack, True, True, 0)
+
+        # -- Search results view ----------------------------------------------
+        search_sw = Gtk.ScrolledWindow()
+        search_sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        search_sw.set_size_request(420, 274)
+        search_flow = Gtk.FlowBox()
+        search_flow.set_max_children_per_line(10)
+        search_flow.set_selection_mode(Gtk.SelectionMode.NONE)
+        search_flow.set_margin_top(4); search_flow.set_margin_bottom(4)
+        search_flow.set_margin_start(4); search_flow.set_margin_end(4)
+        search_sw.add(search_flow)
+
+        def _on_search(_e: Gtk.SearchEntry) -> None:
+            query = search.get_text().strip().lower()
+            for child in search_flow.get_children():
+                search_flow.remove(child)
+            if query:
+                cat_container.set_visible(False)
+                search_sw.set_visible(True)
+                for emoji in all_emojis:
+                    if query in _keywords(emoji) or query in emoji:
+                        btn = Gtk.Button(label=emoji)
+                        btn.set_relief(Gtk.ReliefStyle.NONE)
+                        btn.get_style_context().add_class("bt-emoji-btn")
+                        btn.connect("clicked", lambda _b, e=emoji: (entry.set_text(e), pop.popdown()))
+                        search_flow.add(btn)
+                search_flow.show_all()
+            else:
+                search_sw.set_visible(False)
+                cat_container.set_visible(True)
+
+        search.connect("search-changed", _on_search)
+
+        vbox.pack_start(cat_container, True, True, 0)
+        vbox.pack_start(search_sw, True, True, 0)
+        pop.add(vbox)
+        pop.show_all()
+        search_sw.set_visible(False)  # hide search results until user types
+
     # ===== Engines ==========================================================
     def _build_engines(self, page: Gtk.Box) -> None:
         _infobox(page, "Engines do the work. The speech-to-text engine turns your voice into "
-                       "text; the language model rewrites it. Each can run locally on this "
-                       "computer or on a server you enter. A green dot means it is reachable, "
-                       "red means offline. Use Test to try the speech engine.")
-        page.pack_start(self._stt_section(), False, False, 4)
-        page.pack_start(Gtk.Separator(), False, False, 8)
-        page.pack_start(self._llm_section(), False, False, 4)
+                       "text; the language model rewrites it. Each can run locally or on "
+                       "a server you enter. A green dot means it is reachable, red means offline.")
+        _section_title(page, "Speech-to-text engine", margin_top=4, icon="audio-input-microphone-symbolic")
+        page.pack_start(self._stt_section(), False, False, 0)
+        _section_title(page, "Language model (rewrite)", icon="applications-science-symbolic")
+        page.pack_start(self._llm_section(), False, False, 0)
         self._refresh_status()
 
     def _stt_section(self) -> Gtk.Box:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        box.pack_start(Gtk.Label(label="Speech-to-text engine", xalign=0.0), False, False, 2)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self._stt_idx = 0
-        bar = Gtk.Box(spacing=8)
-        self.stt_combo = Gtk.ComboBoxText()
+
+        # ── Selector bar ──────────────────────────────────────────────────────
+        bar = Gtk.Box(spacing=6)
+        self.stt_combo = _block_scroll(Gtk.ComboBoxText())
         for e in self.cfg.stt_engines:
             self.stt_combo.append_text(e.name)
         self.stt_combo.set_active(self._index_of(self.cfg.stt_engines, self.cfg.stt_active))
@@ -507,39 +1282,89 @@ class SettingsDialog:
         self.stt_dot = Gtk.Label(); self.stt_dot.set_markup(_dot(GREY))
         bar.pack_start(self.stt_dot, False, False, 0)
         bar.pack_start(self.stt_combo, True, True, 0)
-        for label, cb in (("+ Add", self._stt_add), ("+ Stream", self._stt_add_stream),
-                          ("Delete", self._stt_delete), ("Test", self._stt_test),
-                          ("Refresh", lambda _b: self._refresh_status())):
-            b = Gtk.Button(label=label); b.connect("clicked", cb); bar.pack_start(b, False, False, 0)
+        # Left: creation
+        for label, cb in (("+ Add", self._stt_add), ("+ Stream", self._stt_add_stream)):
+            b = Gtk.Button(label=label); b.connect("clicked", cb)
+            bar.pack_start(b, False, False, 0)
+        qs = Gtk.Button(label="Quickstart ▾")
+        qs.set_tooltip_text("Fill the form from a common service template")
+        qs.connect("clicked", self._show_stt_templates)
+        bar.pack_start(qs, False, False, 0)
+        # Right: actions (Test moved to its own row below the config)
+        for label, cb, tip in (
+            ("Delete",  self._stt_delete,                "Remove this engine preset"),
+            ("⟳",       lambda _b: self._refresh_status(), "Re-check connection status"),
+        ):
+            b = Gtk.Button(label=label); b.set_tooltip_text(tip); b.connect("clicked", cb)
+            bar.pack_end(b, False, False, 0)
         box.pack_start(bar, False, False, 2)
 
-        form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL); box.pack_start(form, False, False, 2)
-        self.stt_name = _labeled(form, "Name", _entry(placeholder="e.g. faster-whisper GPU"))
-        self.stt_type = _labeled(form, "Type", _combo(["local", "openai", "riva_realtime"]))
-        self.stt_url = _url_field(form, "URL", "http://localhost:8010/v1  ·  realtime: http://localhost:8006/v1",
-                                  lambda: self._populate_models(self.stt_model, self.stt_url.get_text().strip(), self.stt_key.get_text().strip()))
-        self.stt_model = _labeled(form, "Model", _model_combo("blank = server default  ·  tiny/base/small… for local"))
-        self.stt_key = _labeled(form, "API key env", _entry(placeholder="env var name, e.g. GROQ_API_KEY   (optional)"))
+        # ── Engine config card ────────────────────────────────────────────────
+        cfg_card = _card_section(box, "", margin_top=6)
+        self.stt_name = _labeled(cfg_card, "Name", _entry(placeholder="e.g. faster-whisper GPU"),
+                                 tooltip="A label for this engine, shown in the dropdown.")
+        self.stt_type = _labeled(cfg_card, "Type", _type_combo(_STT_TYPES, "local"),
+                                 tooltip="Internal: faster-whisper runs inside Blitztext, no server needed. "
+                                         "Server: any OpenAI-compatible /v1 endpoint on your LAN or a cloud API. "
+                                         "Realtime: live streaming via NVIDIA Riva or NIM.")
+        self.stt_url  = _url_field_lb(cfg_card, "URL",
+                                      "http://localhost:8010/v1  ·  realtime: http://localhost:8006/v1",
+                                      lambda: self._populate_models(self.stt_model, self.stt_url.get_text().strip(), self.stt_key.get_text().strip()),
+                                      tooltip="Base URL of the server including /v1 for OpenAI-compatible servers "
+                                              "(e.g. http://host:8010/v1). For WhisperX or other non-standard servers, "
+                                              "enter the full transcription endpoint directly "
+                                              "(e.g. http://host:8081/transcribe).")
+        self.stt_model = _labeled(cfg_card, "Model", _model_combo("tiny/base/small… or server model"),
+                                  tooltip="Which Whisper model to load. For Internal: tiny (fastest) → large-v3 (most accurate). "
+                                          "For a server, press ⟳ to fetch available models from its URL.")
+        self.stt_key  = _labeled(cfg_card, "API key env", _entry(placeholder="e.g. GROQ_API_KEY   (optional)"),
+                                 tooltip="Name of the environment variable that holds your API key. Leave blank for local servers.")
+        self.stt_timeout = _labeled(cfg_card, "Timeout (s)", _entry(placeholder="30"),
+                                    tooltip="Seconds to wait for a transcription response. "
+                                            "Increase for slow servers (e.g. WhisperX with diarization can take 60–120 s). "
+                                            "Default: 30.")
         self.stt_url.connect("changed", lambda _e: self._schedule_models("stt"))
         self.stt_key.connect("changed", lambda _e: self._schedule_models("stt"))
         self.stt_type.connect("changed", self._stt_type_changed)
 
-        sep = Gtk.Separator(); sep.set_margin_top(4); form.pack_start(sep, False, False, 4)
-        form.pack_start(Gtk.Label(label="Local engine (faster-whisper) — device & precision", xalign=0.0), False, False, 0)
-        self.stt_device = _labeled(form, "Device", _combo(["auto", "cpu", "cuda"], self.cfg.device))
-        self.stt_compute = _labeled(form, "Compute type", _combo(["auto", "int8", "float16", "int8_float16"], self.cfg.compute_type))
+        # ── Device & precision card (local engines only) ─────────────────────
+        self.stt_dev_card = _card_section(box, "", margin_top=4)
+        self.stt_device  = _labeled(self.stt_dev_card, "Device", _type_combo(_DEVICE_OPTIONS, self.cfg.device),
+                                    tooltip="Which processor runs the speech model. "
+                                            "Auto tries your GPU first. GPU (CUDA) requires NVIDIA — much faster than CPU.")
+        self.stt_compute = _labeled(self.stt_dev_card, "Compute type", _type_combo(_COMPUTE_OPTIONS, self.cfg.compute_type),
+                                    tooltip="Precision of the model. int8 is fastest and uses least memory. "
+                                            "float16 is most accurate. Auto lets Blitztext decide.")
 
-        self.stt_result = Gtk.Label(xalign=0.0); self.stt_result.set_line_wrap(True)
-        box.pack_start(self.stt_result, False, False, 2)
+        test_row = Gtk.Box(spacing=10)
+        test_row.set_margin_top(6)
+        stt_test_btn = Gtk.Button(label="Test")
+        stt_test_btn.set_tooltip_text("Record 4 s and transcribe to test this engine")
+        stt_test_btn.connect("clicked", self._stt_test)
+        stt_test_btn.set_valign(Gtk.Align.START)
+        test_row.pack_start(stt_test_btn, False, False, 0)
+        self.stt_result = Gtk.Label(xalign=0.0)
+        self.stt_result.set_line_wrap(True)
+        self.stt_result.set_selectable(True)
+        self.stt_result.set_valign(Gtk.Align.START)
+        test_row.pack_start(self.stt_result, True, True, 0)
+        box.pack_start(test_row, False, False, 2)
+
+        self.stt_bench_info = Gtk.Label(xalign=0.0)
+        self.stt_bench_info.set_use_markup(True)
+        self.stt_bench_info.set_margin_top(2)
+        box.pack_start(self.stt_bench_info, False, False, 0)
+
         self._stt_load(self.stt_combo.get_active())
         return box
 
     def _llm_section(self) -> Gtk.Box:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        box.pack_start(Gtk.Label(label="Language model (rewrite)", xalign=0.0), False, False, 2)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self._llm_idx = 0
-        bar = Gtk.Box(spacing=8)
-        self.llm_combo = Gtk.ComboBoxText()
+
+        # ── Selector bar ──────────────────────────────────────────────────────
+        bar = Gtk.Box(spacing=6)
+        self.llm_combo = _block_scroll(Gtk.ComboBoxText())
         for e in self.cfg.llm_engines:
             self.llm_combo.append_text(e.name)
         self.llm_combo.set_active(self._index_of(self.cfg.llm_engines, self.cfg.llm_active))
@@ -547,19 +1372,36 @@ class SettingsDialog:
         self.llm_dot = Gtk.Label(); self.llm_dot.set_markup(_dot(GREY))
         bar.pack_start(self.llm_dot, False, False, 0)
         bar.pack_start(self.llm_combo, True, True, 0)
-        for label, cb in (("+ Add", self._llm_add), ("Delete", self._llm_delete),
-                          ("Refresh", lambda _b: self._refresh_status())):
-            b = Gtk.Button(label=label); b.connect("clicked", cb); bar.pack_start(b, False, False, 0)
+        add = Gtk.Button(label="+ Add"); add.connect("clicked", self._llm_add)
+        bar.pack_start(add, False, False, 0)
+        qs = Gtk.Button(label="Quickstart ▾")
+        qs.set_tooltip_text("Fill the form from a common service template")
+        qs.connect("clicked", self._show_llm_templates)
+        bar.pack_start(qs, False, False, 0)
+        for label, cb, tip in (
+            ("Delete", self._llm_delete,                "Remove this engine preset"),
+            ("⟳",      lambda _b: self._refresh_status(), "Re-check connection status"),
+        ):
+            b = Gtk.Button(label=label); b.set_tooltip_text(tip); b.connect("clicked", cb)
+            bar.pack_end(b, False, False, 0)
         box.pack_start(bar, False, False, 2)
 
-        form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL); box.pack_start(form, False, False, 2)
-        self.llm_name = _labeled(form, "Name", _entry(placeholder="e.g. Local Qwen"))
-        self.llm_type = _labeled(form, "Type", _combo(["local", "cloud"]))
-        self.llm_url = _url_field(form, "Base URL", "http://localhost:28080/v1  ·  https://api.openai.com/v1",
-                                  lambda: self._populate_models(self.llm_model, self.llm_url.get_text().strip(), self.llm_key.get_text().strip()))
-        self.llm_model = _labeled(form, "Model", _model_combo("pick after entering URL"))
-        self.llm_key = _labeled(form, "API key env", _entry(placeholder="env var name, e.g. OPENAI_API_KEY   (blank for local)"))
-        self.llm_temp = _labeled(form, "Temperature", _entry(placeholder="0.3"))
+        # ── Engine config card ────────────────────────────────────────────────
+        cfg_card = _card_section(box, "", margin_top=6)
+        self.llm_name = _labeled(cfg_card, "Name", _entry(placeholder="e.g. Local Qwen"),
+                                 tooltip="A label for this language model engine, shown in the dropdown.")
+        self.llm_type = _labeled(cfg_card, "Type", _type_combo(_LLM_TYPES, "cloud"),
+                                 tooltip="LAN server: a model on your own machine or network (Ollama, vLLM, LM Studio, …). "
+                                         "Cloud service: a remote paid API like OpenAI or Groq.")
+        self.llm_url  = _url_field_lb(cfg_card, "Base URL",
+                                      "http://localhost:28080/v1  ·  https://api.openai.com/v1",
+                                      lambda: self._populate_models(self.llm_model, self.llm_url.get_text().strip(), self.llm_key.get_text().strip()))
+        self.llm_model = _labeled(cfg_card, "Model", _model_combo("pick after entering URL"),
+                                  tooltip="Which language model to use for rewriting. Press ⟳ on the URL field to fetch available models.")
+        self.llm_key  = _labeled(cfg_card, "API key env", _entry(placeholder="e.g. OPENAI_API_KEY   (blank for local)"),
+                                 tooltip="Name of the environment variable holding your API key. Leave blank for local servers.")
+        self.llm_temp = _labeled(cfg_card, "Temperature", _entry(placeholder="0.3"),
+                                 tooltip="How creative the rewrite is, 0.0–1.0. 0.3 is a good default.")
         self.llm_url.connect("changed", lambda _e: self._schedule_models("llm"))
         self.llm_key.connect("changed", lambda _e: self._schedule_models("llm"))
         self._llm_load(self.llm_combo.get_active())
@@ -571,8 +1413,9 @@ class SettingsDialog:
             return
         e = self.cfg.stt_engines[idx]
         self.stt_name.set_text(e.name)
-        self.stt_type.set_active(["local", "openai", "riva_realtime"].index(e.type) if e.type in ("local", "openai", "riva_realtime") else 0)
+        self.stt_type.set_active(next((i for i, (k, _) in enumerate(_STT_TYPES) if k == e.type), 0))
         self.stt_url.set_text(e.url); self.stt_key.set_text(e.api_key_env)
+        self.stt_timeout.set_text("" if e.timeout == 30 else str(e.timeout))
         if e.type == "local":
             _fill_combo(self.stt_model, ["tiny", "base", "small", "medium", "large-v3"], e.model or self.cfg.model)
         elif e.type == "openai":
@@ -581,6 +1424,24 @@ class SettingsDialog:
         else:
             _fill_combo(self.stt_model, [], e.model)
         self._stt_idx = idx
+        if hasattr(self, "stt_dev_card"):
+            self.stt_dev_card.set_visible(e.type == "local")
+        self._stt_update_bench_info(e.name)
+
+    def _stt_update_bench_info(self, engine_name: str) -> None:
+        if not hasattr(self, "stt_bench_info"):
+            return
+        last = self.cfg.bench_last.get(engine_name)
+        if not last:
+            self.stt_bench_info.set_markup("")
+            return
+        if last.get("ok"):
+            self.stt_bench_info.set_markup(
+                f'<span foreground="#888" size="small">Last benchmark: '
+                f'<b>{last["seconds"]:.2f}s</b> · <b>{last["accuracy"]:.1f}%</b> accuracy</span>')
+        else:
+            self.stt_bench_info.set_markup(
+                '<span foreground="#888" size="small">Last benchmark: <b>failed</b></span>')
 
     def _stt_commit(self) -> None:
         idx = self._stt_idx
@@ -589,10 +1450,14 @@ class SettingsDialog:
         e = self.cfg.stt_engines[idx]
         new_name = self.stt_name.get_text().strip() or e.name
         e.name = new_name
-        e.type = self.stt_type.get_active_text() or "local"
+        e.type = _type_key(self.stt_type, _STT_TYPES, "local")
         e.url = self.stt_url.get_text().strip().rstrip("/")
         e.model = _combo_text(self.stt_model)
         e.api_key_env = self.stt_key.get_text().strip()
+        try:
+            e.timeout = max(5, int(self.stt_timeout.get_text().strip() or "30"))
+        except ValueError:
+            e.timeout = 30
         if self.stt_combo.get_active_text() != new_name:
             self.stt_combo.remove(idx); self.stt_combo.insert_text(idx, new_name); self.stt_combo.set_active(idx)
 
@@ -672,7 +1537,7 @@ class SettingsDialog:
             return
         e = self.cfg.llm_engines[idx]
         self.llm_name.set_text(e.name)
-        self.llm_type.set_active(["local", "cloud"].index(e.type) if e.type in ("local", "cloud") else 1)
+        self.llm_type.set_active(next((i for i, (k, _) in enumerate(_LLM_TYPES) if k == e.type), 0))
         self.llm_url.set_text(e.url)
         self.llm_key.set_text(e.api_key_env); self.llm_temp.set_text(str(e.temperature))
         _fill_combo(self.llm_model, [], e.model)
@@ -686,7 +1551,7 @@ class SettingsDialog:
         e = self.cfg.llm_engines[idx]
         new_name = self.llm_name.get_text().strip() or e.name
         e.name = new_name
-        e.type = self.llm_type.get_active_text() or "cloud"
+        e.type = _type_key(self.llm_type, _LLM_TYPES, "cloud")
         e.url = self.llm_url.get_text().strip().rstrip("/")
         e.model = _combo_text(self.llm_model)
         e.api_key_env = self.llm_key.get_text().strip()
@@ -715,14 +1580,57 @@ class SettingsDialog:
         self.llm_combo.remove(self._llm_idx); self._llm_idx = -1
         self.llm_combo.set_active(0); self._llm_load(0)
 
+    def _show_stt_templates(self, btn: Gtk.Button) -> None:
+        menu = Gtk.Menu()
+        for tpl in _STT_TEMPLATES:
+            item = Gtk.MenuItem(label=tpl[0])
+            item.connect("activate", lambda _i, t=tpl: self._stt_apply_template(t))
+            menu.append(item)
+        menu.show_all()
+        menu.popup_at_widget(btn, Gdk.Gravity.SOUTH_WEST, Gdk.Gravity.NORTH_WEST, None)
+
+    def _stt_apply_template(self, tpl: tuple) -> None:
+        name, url, key, type_key, model, timeout = tpl
+        self.stt_name.set_text(name)
+        self.stt_url.set_text(url)
+        self.stt_key.set_text(key)
+        self.stt_type.set_active(next((i for i, (k, _) in enumerate(_STT_TYPES) if k == type_key), 0))
+        self.stt_timeout.set_text("" if timeout == 30 else str(timeout))
+        if model:
+            _fill_combo(self.stt_model, [model], model)
+        elif url:
+            self._populate_models(self.stt_model, url, key)
+
+    def _show_llm_templates(self, btn: Gtk.Button) -> None:
+        menu = Gtk.Menu()
+        for tpl in _LLM_TEMPLATES:
+            item = Gtk.MenuItem(label=tpl[0])
+            item.connect("activate", lambda _i, t=tpl: self._llm_apply_template(t))
+            menu.append(item)
+        menu.show_all()
+        menu.popup_at_widget(btn, Gdk.Gravity.SOUTH_WEST, Gdk.Gravity.NORTH_WEST, None)
+
+    def _llm_apply_template(self, tpl: tuple) -> None:
+        name, url, key, type_key, model = tpl
+        self.llm_name.set_text(name)
+        self.llm_url.set_text(url)
+        self.llm_key.set_text(key)
+        self.llm_type.set_active(next((i for i, (k, _) in enumerate(_LLM_TYPES) if k == type_key), 0))
+        if model:
+            _fill_combo(self.llm_model, [model], model)
+        elif url:
+            self._populate_models(self.llm_model, url, key)
+
     def _stt_type_changed(self, _c) -> None:
-        typ = self.stt_type.get_active_text()
+        typ = _type_key(self.stt_type, _STT_TYPES, "local")
         if typ == "local":
             _fill_combo(self.stt_model, ["tiny", "base", "small", "medium", "large-v3"], _combo_text(self.stt_model))
         elif typ == "openai":
             self._schedule_models("stt")
         else:
             _fill_combo(self.stt_model, [], _combo_text(self.stt_model))
+        if hasattr(self, "stt_dev_card"):
+            self.stt_dev_card.set_visible(typ == "local")
 
     # -- model dropdowns (fetched from {url}/models) ---
     def _populate_models(self, combo, url: str, key_env: str) -> None:
@@ -732,6 +1640,8 @@ class SettingsDialog:
             def apply():
                 cur = _combo_text(combo)
                 _fill_combo(combo, models, cur)
+                if not models and not cur:
+                    combo.entry.set_placeholder_text("type model name manually")
                 return False
             GLib.idle_add(apply)
         threading.Thread(target=work, daemon=True).start()
@@ -744,7 +1654,7 @@ class SettingsDialog:
 
         def fire():
             setattr(self, attr, 0)
-            if which == "stt" and self.stt_type.get_active_text() == "openai":
+            if which == "stt" and _type_key(self.stt_type, _STT_TYPES) == "openai":
                 self._populate_models(self.stt_model, self.stt_url.get_text().strip(),
                                       self.stt_key.get_text().strip())
             elif which == "llm":
@@ -802,6 +1712,51 @@ class SettingsDialog:
         return False
 
     # -- key binding ("Set" button captures the next keypress) ---
+    def _kw_shortcut_row(self, lb, label: str, kw_value: str, kw_placeholder: str,
+                         key_value: str, *, tooltip_kw: str = "", tooltip_key: str = "",
+                         width: int = 150):
+        """Combined row: [label][keywords entry] | [shortcut label][shortcut entry][Set]."""
+        row_box = Gtk.Box(spacing=8)
+        row_box.set_margin_top(6); row_box.set_margin_bottom(6)
+        row_box.set_margin_start(12); row_box.set_margin_end(8)
+
+        lbl = Gtk.Label(label=label, xalign=0.0)
+        lbl.set_size_request(width, -1)
+        row_box.pack_start(lbl, False, False, 0)
+
+        kw_entry = Gtk.Entry()
+        kw_entry.set_text(kw_value)
+        kw_entry.set_placeholder_text(kw_placeholder)
+        kw_entry.set_hexpand(True)
+        if tooltip_kw:
+            kw_entry.set_tooltip_text(tooltip_kw)
+            lbl.set_tooltip_text(tooltip_kw)
+        row_box.pack_start(kw_entry, True, True, 0)
+
+        sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+        sep.set_margin_start(4); sep.set_margin_end(4)
+        row_box.pack_start(sep, False, False, 0)
+
+        key_lbl = Gtk.Label(label="Shortcut", xalign=0.0)
+        key_lbl.get_style_context().add_class("dim-label")
+        row_box.pack_start(key_lbl, False, False, 0)
+
+        key_entry = Gtk.Entry()
+        key_entry.set_text(key_value)
+        key_entry.set_placeholder_text("<esc>")
+        key_entry.set_size_request(100, -1)
+        if tooltip_key:
+            key_entry.set_tooltip_text(tooltip_key)
+            key_lbl.set_tooltip_text(tooltip_key)
+        row_box.pack_start(key_entry, False, False, 0)
+
+        set_btn = Gtk.Button(label="Set")
+        set_btn.connect("clicked", lambda _b, e=key_entry: self._bind_key(e))
+        row_box.pack_start(set_btn, False, False, 0)
+
+        _lb_add(lb, row_box)
+        return kw_entry, key_entry
+
     def _key_field(self, page: Gtk.Box, label: str, value: str, placeholder: str = "", width: int = 150) -> Gtk.Entry:
         row = Gtk.Box(spacing=10); row.set_margin_top(3); row.set_margin_bottom(3)
         lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(width, -1)
@@ -839,190 +1794,311 @@ class SettingsDialog:
         self._bind_entry = None
         return True
 
-    # ===== Input ============================================================
-    def _build_input(self, page: Gtk.Box) -> None:
+    # ===== Keyboard =========================================================
+    def _build_keyboard(self, page: Gtk.Box) -> None:
         _infobox(page, "Choose how you start and stop dictating. With the default "
-                       "‘modifiers’ mode: hold Ctrl and the Windows key to talk, then press "
-                       "Ctrl to stop and paste. Below you can tune the noise filter, set up "
-                       "hands-free wakeword, and pick sounds that confirm start and stop.")
-        LW = 175  # uniform label width for all rows in this tab
-        self.in_mode = _labeled(page, "Input mode", _combo(["modifiers", "hotkeys"], self.cfg.input_mode),
+                       "’modifiers’ mode: hold Ctrl and the Windows key to talk, then press "
+                       "Ctrl to stop and paste. Below you can tune the noise filter and "
+                       "pick sounds that confirm start and stop.")
+        LW = 170
+
+        # ── Input mode card ───────────────────────────────────────────────────
+        mode_card = _card_section(page, "Input mode & keys", margin_top=4, icon="input-keyboard-symbolic")
+        self.in_mode = _labeled(mode_card, "Input mode", _combo(["modifiers", "hotkeys"], self.cfg.input_mode),
                                 width=LW,
-                                tooltip="’modifiers’: hold/press the keys below. ‘hotkeys’: each preset has its own shortcut combo.")
-        self.in_ptt = Gtk.Switch(); self.in_ptt.set_active(self.cfg.push_to_talk); self.in_ptt.set_halign(Gtk.Align.START)
-        _labeled(page, "Push-to-talk", self.in_ptt, width=LW)
-        self.in_start = self._key_field(page, "Start", self.cfg.key_start, width=LW)
-        self.in_stop = self._key_field(page, "Stop + paste", self.cfg.key_stop, width=LW)
-        self.in_send = self._key_field(page, "Stop + paste + Enter", self.cfg.key_send, width=LW)
-        self.in_cancel = self._key_field(page, "Cancel", self.cfg.key_cancel, width=LW)
-        page.pack_start(Gtk.Separator(), False, False, 8)
-        page.pack_start(Gtk.Label(label="Quality gate", xalign=0.0), False, False, 2)
-        self.q_min = _labeled(page, "Min seconds", _entry(self.cfg.min_speech_seconds), width=LW,
-                              tooltip="Minimum audio length. Shorter clips are ignored.")
-        self.q_rms = _labeled(page, "Silence RMS", _entry(self.cfg.silence_rms), width=LW,
-                              tooltip="Microphone volume threshold to ignore background noise.")
-        self.q_halluc = Gtk.Switch(); self.q_halluc.set_active(self.cfg.reject_hallucinations); self.q_halluc.set_halign(Gtk.Align.START)
-        _labeled(page, "Reject hallucinations", self.q_halluc, width=LW,
-                 tooltip="Automatically drop STT ghost outputs like ‘Thank you.’ or ‘Bye.’")
-        self.q_strip = Gtk.Switch(); self.q_strip.set_active(self.cfg.strip_trailing_punctuation); self.q_strip.set_halign(Gtk.Align.START)
-        _labeled(page, "Strip trailing punctuation", self.q_strip, width=LW,
-                 tooltip="Remove ending periods from pasted text, useful for code inserts.")
-        page.pack_start(Gtk.Separator(), False, False, 8)
-        page.pack_start(Gtk.Label(label="Hands-free (Wakeword)", xalign=0.0), False, False, 2)
-        self.ww_enabled = Gtk.Switch(); self.ww_enabled.set_active(self.cfg.wakeword_enabled); self.ww_enabled.set_halign(Gtk.Align.START)
-        _labeled(page, "Enable wakeword", self.ww_enabled, width=LW)
-        self.ww_dot = Gtk.Label(); self.ww_dot.set_markup(_dot(GREY))
-        self.ww_dot.set_tooltip_text("Wakeword (Wyoming / openWakeWord) server: "
-                                     "green = reachable, red = unreachable")
-        self.ww_uri = _url_field(page, "Wakeword engine", "tcp://127.0.0.1:10400",
-                                 self._ww_load, dot=self.ww_dot, width=LW)
-        self.ww_uri.set_text(self.cfg.wakeword_uri)
-        self.ww_uri.connect("focus-out-event", self._on_ww_uri_leave)
-        self._probe_dot(self.ww_dot, self.cfg.wakeword_uri, 10400)
-        self.ww_model = _labeled(page, "Model name", _model_combo("Search models…"), width=LW)
-        _fill_combo(self.ww_model, [], self.cfg.wakeword_model)
+                                tooltip="’modifiers’: hold/press the keys below — easiest for most people. "
+                                        "’hotkeys’: each preset has its own shortcut combo (set per preset).")
+        self.in_ptt = Gtk.Switch(); self.in_ptt.set_active(self.cfg.push_to_talk)
+        _switch_row(mode_card, "Push-to-talk", self.in_ptt, width=LW,
+                    description="Hold the Start key to record; release to stop. "
+                                "Off = the key toggles recording on/off.")
+        self.in_start  = self._key_field_lb(mode_card, "Start",              self.cfg.key_start,  width=LW)
+        self.in_stop   = self._key_field_lb(mode_card, "Stop + paste",       self.cfg.key_stop,   width=LW)
+        self.in_send   = self._key_field_lb(mode_card, "Stop + paste + Enter", self.cfg.key_send, width=LW)
+        self.in_cancel = self._key_field_lb(mode_card, "Cancel",             self.cfg.key_cancel, width=LW)
 
-        self.ww_mic_level = Gtk.LevelBar(); self.ww_mic_level.set_min_value(0); self.ww_mic_level.set_max_value(1)
-        _labeled(page, "Input level", self.ww_mic_level, width=LW)
+        # ── Quality gate card ─────────────────────────────────────────────────
+        q_card = _card_section(page, "Quality gate", icon="security-high-symbolic")
+        self.q_min = _labeled(q_card, "Min seconds", _entry(str(self.cfg.min_speech_seconds)), width=LW,
+                              tooltip="Minimum audio length. Shorter clips are silently ignored (avoids pasting nothing).")
+        self.q_rms = _labeled(q_card, "Silence RMS", _entry(str(self.cfg.silence_rms)), width=LW,
+                              tooltip="Microphone volume threshold below which a clip is considered silent and dropped.")
+        self.q_halluc = Gtk.Switch(); self.q_halluc.set_active(self.cfg.reject_hallucinations)
+        _switch_row(q_card, "Reject hallucinations", self.q_halluc, width=LW,
+                    description="Drop STT ghost outputs like ‘Thank you.’ or ‘Bye.’ that Whisper invents from silence.")
+        self.q_strip = Gtk.Switch(); self.q_strip.set_active(self.cfg.strip_trailing_punctuation)
+        _switch_row(q_card, "Strip trailing . / ,", self.q_strip, width=LW,
+                    description="Remove ending punctuation from pasted text — handy for code insertion.")
 
-        self.ww_test_btn = Gtk.Button(label="Test Wakeword"); self.ww_test_btn.set_halign(Gtk.Align.START)
+        # ── Manual dictation sounds card ──────────────────────────────────────
+        snd_card = _card_section(page, "Audio cues (keyboard / hotkey dictation)", icon="audio-speakers-symbolic")
+        self.snd_enabled = Gtk.Switch(); self.snd_enabled.set_active(self.cfg.sounds_enabled)
+        _switch_row(snd_card, "Play audio cues", self.snd_enabled, width=LW,
+                    description="On/off for the manual start/stop chimes below. Does not affect wakeword sounds.")
+        self.snd_before = self._sound_field(snd_card, "Start sound", self.cfg.sound_before,
+            "Plays when manual recording starts.", width=LW)
+        self.snd_after  = self._sound_field(snd_card, "Stop sound", self.cfg.sound_after,
+            "Plays when manual recording stops (paste, paste+Enter, or auto-stop).", width=LW)
+
+        # Start meter if not already running (covers the case where Keyboard is
+        # visited before General, which is where _start_meter() normally fires).
+        if self._meter is None:
+            self._start_meter()
+
+    # ===== Wakeword =========================================================
+    def _build_wakeword(self, page: Gtk.Box) -> None:
+        _infobox(page,
+            "Set up hands-free wakeword dictation. Each preset connects to one "
+            "wyoming-openwakeword server instance. Add one preset per server. "
+            "Press ⟳ to auto-detect the available wakeword models from that server.\n\n"
+            "To add new wakeword models: place your .onnx model files in the server’s "
+            "model directory and restart it, e.g.:\n"
+            "  docker run … -v ~/wakewords:/data/models  homeassistant/wyoming-openwakeword\n"
+            "Common built-in models: okay_computer · hey_jarvis · alexa · hey_mycroft · computer")
+        LW = 170
+
+        # ── Wakeword enable card ──────────────────────────────────────────────
+        ww_card = _card_section(page, "Hands-free wakeword", margin_top=4, icon="audio-input-microphone-symbolic")
+        self.ww_enabled = Gtk.Switch(); self.ww_enabled.set_active(self.cfg.wakeword_enabled)
+        _switch_row(ww_card, "Enable wakeword", self.ww_enabled, width=LW,
+                    description="Start dictation with a spoken keyword via an external openWakeWord server.")
+
+        self.ww_mic_level = Gtk.LevelBar()
+        self.ww_mic_level.set_min_value(0); self.ww_mic_level.set_max_value(1)
+        _labeled(ww_card, "Input level", self.ww_mic_level, width=LW,
+                 tooltip="Live microphone level — the bar should move when you speak.")
+
+        self.ww_test_btn = Gtk.Button(label="Test wakeword"); self.ww_test_btn.set_halign(Gtk.Align.START)
         self.ww_test_btn.connect("clicked", self._ww_test)
         self.ww_test_lbl = Gtk.Label(label=""); self.ww_test_lbl.set_xalign(0.0)
-        box = Gtk.Box(spacing=10); box.pack_start(self.ww_test_btn, False, False, 0); box.pack_start(self.ww_test_lbl, False, False, 0)
-        _labeled(page, "", box, width=LW)
+        test_box = Gtk.Box(spacing=10)
+        test_box.pack_start(self.ww_test_btn, False, False, 0)
+        test_box.pack_start(self.ww_test_lbl, False, False, 0)
+        _labeled(ww_card, "", test_box, width=LW)
 
-        self.ww_silence = _labeled(page, "Silence to stop (s)", _entry(self.cfg.wakeword_silence_seconds), width=LW,
-                                   tooltip="After the wakeword starts recording, end it this many seconds "
-                                           "after you stop speaking. Hands-free auto-stop — the wakeword "
-                                           "can’t be released like a key. Default 2.0.")
-
-        self.cancel_keywords = _labeled(
-            page, "Cancel words (comma)",
-            _entry(", ".join(self.cfg.cancel_keywords), placeholder="abbrechen, cancel"),
-            width=LW,
-            tooltip="Say one of these at the start or end of a clip to DISCARD it — "
-                    "nothing is transcribed onward, routed, rewritten, or typed. "
-                    "Rescues an accidentally triggered dictation. Empty = off.")
-
-        self.send_keywords = _labeled(
-            page, "Send words (comma)",
-            _entry(", ".join(self.cfg.send_keywords), placeholder="computer send, computer abschicken"),
-            width=LW,
-            tooltip="Say one of these at the start or end of a clip to SEND it: the word is "
-                    "stripped and the rest is typed AND submitted with Enter (spoken "
-                    "’stop+paste+Enter’). Because it presses Enter, use a distinctive "
-                    "multi-word phrase (e.g. your wakeword + ‘send’). Empty = off.")
-
-        self.ww_snd_detected = self._sound_field(
-            page, "Sound: detected", self.cfg.wakeword_sound_detected,
-            "HANDS-FREE ONLY. Plays the instant the wake word is recognised and recording starts "
-            "— your ‘speak now’ cue. (Keyboard/hotkey dictation ignores this and uses ‘Play before’.)",
-            empty_note="Leave empty for no sound. These wakeword cues are independent of the "
-                       "’Play audio cues’ switch below.",
-            clear_tip="Clear — no sound", width=LW)
-        self.ww_snd_done = self._sound_field(
-            page, "Sound: captured", self.cfg.wakeword_sound_done,
-            "HANDS-FREE ONLY. Plays when your spoken command is captured and recording stops "
-            "(on silence or stop). (Keyboard/hotkey dictation ignores this and uses ‘Play after’.)",
-            empty_note="Leave empty for no sound.",
-            clear_tip="Clear — no sound", width=LW)
-
-        page.pack_start(Gtk.Separator(), False, False, 8)
-        page.pack_start(Gtk.Label(label="Audio cues (manual dictation)", xalign=0.0), False, False, 2)
-        self.snd_enabled = Gtk.Switch(); self.snd_enabled.set_active(self.cfg.sounds_enabled); self.snd_enabled.set_halign(Gtk.Align.START)
-        _labeled(page, "Play audio cues", self.snd_enabled, width=LW,
-                 tooltip="On/off for the MANUAL start/stop chimes below (keyboard/hotkey dictation). "
-                         "The hands-free wakeword sounds above are separate and always play when set.")
-        self.snd_before = self._sound_field(
-            page, "Play before", self.cfg.sound_before,
-            "MANUAL (keyboard/hotkey) dictation only. Plays when recording starts. "
-            "(Hands-free sessions use ‘Sound: detected’ instead.)", width=LW)
-        self.snd_after = self._sound_field(
-            page, "Play after", self.cfg.sound_after,
-            "MANUAL (keyboard/hotkey) dictation only. Plays when recording stops "
-            "(paste, paste+Enter, or auto-stop on silence). (Hands-free uses ‘Sound: captured’ instead.)",
+        self.ww_silence = _labeled(ww_card, "Silence to stop (s)", _entry(str(self.cfg.wakeword_silence_seconds)), width=LW,
+                                   tooltip="After the wakeword fires, stop recording this many seconds after you stop speaking. Default 2.0.")
+        self.cancel_keywords, self.ww_key_cancel = self._kw_shortcut_row(
+            ww_card, "Cancel words", ", ".join(self.cfg.cancel_keywords),
+            "abbrechen, cancel", self.cfg.key_cancel,
+            tooltip_kw="Say one of these at the start or end of a clip to DISCARD it — nothing is typed. Empty = off.",
+            tooltip_key="Keyboard shortcut that cancels dictation (works even during wakeword recording).",
+            width=LW)
+        self.send_keywords, self.ww_key_send = self._kw_shortcut_row(
+            ww_card, "Send words", ", ".join(self.cfg.send_keywords),
+            "computer send, computer abschicken", self.cfg.key_send,
+            tooltip_kw="Say one of these to type AND press Enter (spoken ‘submit’). Use a distinctive multi-word phrase. Empty = off.",
+            tooltip_key="Keyboard shortcut that stops recording and pastes with Enter.",
             width=LW)
 
-    def _sound_field(self, page: Gtk.Box, label: str, value: str, tooltip: str = "",
+        # ── Engine selector bar ───────────────────────────────────────────────
+        ww_bar = Gtk.Box(spacing=6); ww_bar.set_margin_top(6)
+        self.ww_combo = _block_scroll(Gtk.ComboBoxText()); self.ww_combo.set_hexpand(True)
+        for e in self.cfg.wakeword_engines:
+            self.ww_combo.append_text(e.name)
+        active_idx = next((i for i, e in enumerate(self.cfg.wakeword_engines)
+                           if e.name == self.cfg.wakeword_active), 0)
+        self.ww_combo.set_active(active_idx)
+        ww_bar.pack_start(self.ww_combo, True, True, 0)
+        for label, cb in (("+ Add", self._ww_add),):
+            b = Gtk.Button(label=label); b.connect("clicked", cb); ww_bar.pack_start(b, False, False, 0)
+        qs = Gtk.Button(label="Quickstart ▾")
+        qs.set_tooltip_text("Fill the form from a common wakeword server template")
+        qs.connect("clicked", self._show_ww_templates); ww_bar.pack_start(qs, False, False, 0)
+        for label, cb, tip in (
+            ("Delete", self._ww_delete, "Remove this wakeword engine preset"),
+            ("⟳",      lambda _b: self._ww_reload(), "Re-check connection and reload models from the server"),
+        ):
+            b = Gtk.Button(label=label); b.set_tooltip_text(tip); b.connect("clicked", cb)
+            ww_bar.pack_end(b, False, False, 0)
+        self.ww_status = Gtk.Label(xalign=0.0)
+        self.ww_status.get_style_context().add_class("dim-label")
+        ww_bar.pack_end(self.ww_status, False, False, 4)
+        page.pack_start(ww_bar, False, False, 2)
+
+        # ── Engine config card ────────────────────────────────────────────────
+        ww_cfg_card = _card_section(page, "", margin_top=6)
+        self.ww_name = _labeled(ww_cfg_card, "Name", _entry(placeholder="e.g. Home server"),
+                                tooltip="A label for this wakeword server preset.", width=LW)
+        self.ww_dot = Gtk.Label(); self.ww_dot.set_markup(_dot(GREY))
+        self.ww_dot.set_tooltip_text("openWakeWord server: green = reachable, red = unreachable")
+        self.ww_uri = _url_field_lb(ww_cfg_card, "Wakeword server", "tcp://127.0.0.1:10400",
+                                    self._ww_reload, dot=self.ww_dot, width=LW)
+        self.ww_uri.connect("focus-out-event", self._on_ww_uri_leave)
+        self.ww_model = _labeled(ww_cfg_card, "Model name", _model_combo("Search models…"), width=LW,
+                                 tooltip="Which wake model to listen for (e.g. okay_computer, hey_jarvis). Press ⟳ on the URI field to load models from the server.")
+        self.ww_cancel_model = _labeled(ww_cfg_card, "Cancel model", _model_combo("none — use text keywords"), width=LW,
+                                        tooltip="Optional: a wakeword model that immediately cancels the recording when heard (e.g. a ‘stop’ model). Faster than the Whisper-based text cancel.")
+        self.ww_send_model = _labeled(ww_cfg_card, "Send model", _model_combo("none — use text keywords"), width=LW,
+                                      tooltip="Optional: a wakeword model that finishes recording and presses Enter (e.g. a ‘send it’ model).")
+        self.ww_combo.connect("changed", self._ww_changed)
+
+        self._ww_load_idx(active_idx)
+
+        # ── Wakeword sound cues ───────────────────────────────────────────────
+        ww_snd_card = _card_section(page, "Wakeword sound cues (hands-free only)", icon="audio-speakers-symbolic")
+        self.ww_snd_detected = self._sound_field(ww_snd_card, "Wakeword detected", self.cfg.wakeword_sound_detected,
+            "Plays the instant the wake word fires — your ‘speak now’ cue. Leave empty for no sound.", width=LW)
+        self.ww_snd_done = self._sound_field(ww_snd_card, "Speech captured", self.cfg.wakeword_sound_done,
+            "Plays when your spoken command is captured and recording stops.", width=LW)
+
+        # Start meter if not already running (covers the case where Wakeword is
+        # visited before General, which is where _start_meter() normally fires).
+        if self._meter is None:
+            self._start_meter()
+
+    def _sound_field(self, page, label: str, value: str, tooltip: str = "",
                      empty_note: str = "Leave empty to use the built-in system sound.",
                      clear_tip: str = "Clear — use the built-in system sound",
-                     width: int = 150) -> Gtk.FileChooserButton:
-        row = Gtk.Box(spacing=10); row.set_margin_top(3); row.set_margin_bottom(3)
+                     width: int = 150):
+        """Sound file picker row. Returns an object with get_filename()."""
+        row = Gtk.Box(spacing=6); row.set_margin_top(3); row.set_margin_bottom(3)
         lbl = Gtk.Label(label=label, xalign=0.0); lbl.set_size_request(width, -1)
         if tooltip:
-            lbl.set_tooltip_text(tooltip)
+            lbl.set_tooltip_text(f"{tooltip} {empty_note}")
         row.pack_start(lbl, False, False, 0)
-        chooser = Gtk.FileChooserButton(title=label, action=Gtk.FileChooserAction.OPEN)
-        af = Gtk.FileFilter(); af.set_name("Audio")
-        for pat in ("*.wav", "*.oga", "*.ogg", "*.flac"):
-            af.add_pattern(pat)
-        chooser.add_filter(af)
+
+        path_entry = Gtk.Entry()
+        path_entry.set_hexpand(True)
+        path_entry.set_editable(False)
+        path_entry.set_placeholder_text(empty_note)
         if value:
-            chooser.set_filename(value)
-        chooser.set_hexpand(True)
-        if tooltip:
-            chooser.set_tooltip_text(f"{tooltip} {empty_note}")
-        row.pack_start(chooser, True, True, 0)
-        play = Gtk.Button.new_from_icon_name("media-playback-start-symbolic", Gtk.IconSize.BUTTON)
-        play.set_tooltip_text("Play this sound now")
-        play.connect("clicked", lambda _b, c=chooser: self._play_sound_file(c.get_filename()))
-        row.pack_start(play, False, False, 0)
+            path_entry.set_text(value)
+        row.pack_start(path_entry, True, True, 0)
+
+        browse = Gtk.Button.new_from_icon_name("document-open-symbolic", Gtk.IconSize.BUTTON)
+        browse.set_tooltip_text("Browse for audio file (WAV, MP3, OGG, FLAC, …)")
+        browse.connect("clicked", lambda _b, e=path_entry, t=label: self._browse_sound(e, t))
+        row.pack_start(browse, False, False, 0)
+
+        play_btn = Gtk.Button.new_from_icon_name("media-playback-start-symbolic", Gtk.IconSize.BUTTON)
+        play_btn.set_tooltip_text("Play this sound now")
+        play_btn.connect("clicked", lambda _b, e=path_entry: self._play_sound_file(e.get_text()))
+        row.pack_start(play_btn, False, False, 0)
+
         clr = Gtk.Button.new_from_icon_name("edit-clear-symbolic", Gtk.IconSize.BUTTON)
         clr.set_tooltip_text(clear_tip)
-        clr.connect("clicked", lambda _b, c=chooser: c.unselect_all())
+        clr.connect("clicked", lambda _b, e=path_entry: e.set_text(""))
         row.pack_start(clr, False, False, 0)
-        page.pack_start(row, False, False, 0)
-        return chooser
+
+        if isinstance(page, Gtk.ListBox):
+            row.set_margin_start(12); row.set_margin_end(8)
+            row.set_margin_top(6); row.set_margin_bottom(6)
+            _lb_add(page, row)
+        else:
+            page.pack_start(row, False, False, 0)
+
+        # Return a thin wrapper so callers use .get_filename() as before.
+        class _Picker:
+            def get_filename(self_):
+                t = path_entry.get_text().strip()
+                return t if t else None
+        return _Picker()
+
+    def _browse_sound(self, entry: Gtk.Entry, title: str) -> None:
+        dlg = Gtk.FileChooserDialog(
+            title=f"Choose sound — {title}",
+            parent=self.dlg,
+            action=Gtk.FileChooserAction.OPEN,
+        )
+        dlg.add_buttons("_Cancel", Gtk.ResponseType.CANCEL,
+                        "_Select", Gtk.ResponseType.OK)
+        af = Gtk.FileFilter(); af.set_name("Audio files (WAV, MP3, OGG, FLAC, …)")
+        for pat in ("*.wav", "*.mp3", "*.ogg", "*.oga", "*.flac", "*.m4a", "*.aac",
+                    "*.aif", "*.aiff", "*.opus"):
+            af.add_pattern(pat)
+        dlg.add_filter(af)
+        af_all = Gtk.FileFilter(); af_all.set_name("All files"); af_all.add_pattern("*")
+        dlg.add_filter(af_all)
+        cur = entry.get_text().strip()
+        if cur:
+            dlg.set_filename(cur)
+
+        # Auto-preview each file as the selection changes.
+        def _on_selection(d):
+            fn = d.get_filename()
+            if fn and os.path.isfile(fn):
+                self._play_sound_file(fn)
+        dlg.connect("selection-changed", _on_selection)
+
+        if dlg.run() == Gtk.ResponseType.OK:
+            fn = dlg.get_filename()
+            if fn:
+                entry.set_text(fn)
+        self._stop_preview()
+        dlg.destroy()
 
     def _play_sound_file(self, path) -> None:
         from . import sound
-        if path:
-            sound.play(path)
+        self._stop_preview()
+        if path and os.path.isfile(os.path.expanduser(path)):
+            self._preview_proc = sound.play(path)
+
+    def _stop_preview(self) -> None:
+        proc = getattr(self, "_preview_proc", None)
+        if proc is not None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            self._preview_proc = None
 
     # ===== General ==========================================================
     def _build_general(self, page: Gtk.Box) -> None:
-        _infobox(page, "General options: choose your microphone and watch its level bar move "
-                       "when you speak, set how the text is delivered, the spoken language, "
-                       "desktop notifications, and whether Blitztext starts automatically "
-                       "when you log in.")
+        _infobox(page, "Choose your microphone, how text is delivered, the spoken language, "
+                       "and whether Blitztext starts automatically when you log in.")
+
+        # ── Microphone card ───────────────────────────────────────────────────
+        mic_card = _card_section(page, "Microphone", margin_top=4, icon="audio-input-microphone-symbolic")
         self._mics = audio.list_mics()
         names = [label for _, label in self._mics]
-        cur = next((lbl for nm, lbl in self._mics if nm == self.cfg.mic), names[0])
-        self.gen_mic = _labeled(page, "Microphone", _combo(names, cur),
+        cur   = next((lbl for nm, lbl in self._mics if nm == self.cfg.mic), names[0] if names else "")
+        self.gen_mic = _labeled(mic_card, "Device", _combo(names, cur),
                                 tooltip="Which microphone Blitztext records from.")
-
-        self.mic_level = Gtk.LevelBar(); self.mic_level.set_min_value(0); self.mic_level.set_max_value(1)
-        _labeled(page, "Input level", self.mic_level,
-                 tooltip="Live microphone level. The bar should move when you speak.")
+        self.mic_level = Gtk.LevelBar()
+        self.mic_level.set_min_value(0); self.mic_level.set_max_value(1)
+        _labeled(mic_card, "Input level", self.mic_level,
+                 tooltip="Live microphone level — should move when you speak.")
         self.gen_mic.connect("changed", lambda _c: self._restart_meter())
 
-        self.gen_output = _labeled(page, "Output", _combo(["type", "paste"], self.cfg.output),
-                                   tooltip="‘type’ types the text key by key. ‘paste’ copies it and presses Ctrl+V (faster for long text).")
-        self.gen_lang = _labeled(page, "Language hint", _entry(self.cfg.language, placeholder="de, en, …   (blank = autodetect)"),
+        # ── Output card ───────────────────────────────────────────────────────
+        out_card = _card_section(page, "Text output & language", icon="insert-text-symbolic")
+        self.gen_output = _labeled(out_card, "Output mode", _combo(["type", "paste"], self.cfg.output),
+                                   tooltip="’type’ types the text key by key via xdotool. "
+                                           "’paste’ copies it to the clipboard and presses Ctrl+V (faster for long text).")
+        self.gen_lang = _labeled(out_card, "Language hint", _entry(self.cfg.language, placeholder="de, en, …   (blank = autodetect)"),
                                  tooltip="Spoken language code (de, en, …). Leave blank to auto-detect.")
+
+        # ── Notifications card ────────────────────────────────────────────────
+        notif_card = _card_section(page, "Notifications & overlay", icon="dialog-information-symbolic")
         self.gen_notify = Gtk.Switch(); self.gen_notify.set_active(self.cfg.notify)
-        _switch_row(page, "Notifications", self.gen_notify,
+        _switch_row(notif_card, "Notifications", self.gen_notify,
                     "Desktop pop-ups for recording, transcription, and errors (manual dictation).")
         self.gen_notify_routing = Gtk.Switch(); self.gen_notify_routing.set_active(self.cfg.notify_routing)
-        _switch_row(page, "Announce matched preset", self.gen_notify_routing,
+        _switch_row(notif_card, "Announce preset", self.gen_notify_routing,
                     "After a voice command, show which preset and keyword matched — even hands-free.")
         self.gen_overlay = Gtk.Switch(); self.gen_overlay.set_active(self.cfg.overlay_enabled)
-        _switch_row(page, "Visual overlay", self.gen_overlay,
-                    "Show a microphone, a live waveform, and the recognised text in a bubble "
-                    "at the cursor while you dictate (also gives hands-free sessions feedback).")
+        _switch_row(notif_card, "Visual overlay", self.gen_overlay,
+                    "Show a microphone, live waveform, and recognised text in a bubble at the cursor while you dictate.")
+
+        # ── Startup card ──────────────────────────────────────────────────────
+        start_card = _card_section(page, "Startup", icon="system-reboot-symbolic")
         self.gen_boot = Gtk.Switch(); self.gen_boot.set_active(autostart.is_enabled())
-        _switch_row(page, "Launch on login", self.gen_boot,
+        _switch_row(start_card, "Launch on login", self.gen_boot,
                     "Start Blitztext automatically when you log in.")
         self._start_meter()
 
     def _selected_mic_name(self) -> str:
+        if not hasattr(self, "gen_mic"):
+            return ""  # General tab not yet built; use default device
         i = self.gen_mic.get_active()
         return self._mics[i][0] if 0 <= i < len(self._mics) else ""
 
     def _start_meter(self) -> None:
         self._stop_meter()
         def on_level(v):
-            GLib.idle_add(self.mic_level.set_value, v)
+            if hasattr(self, "mic_level"):
+                GLib.idle_add(self.mic_level.set_value, v)
             if hasattr(self, "ww_mic_level"):
                 GLib.idle_add(self.ww_mic_level.set_value, v)
         self._meter = audio.LevelMeter(self._selected_mic_name(), on_level=on_level)
@@ -1035,24 +2111,106 @@ class SettingsDialog:
         if self._meter is not None:
             self._meter.stop(); self._meter = None
 
-    def _ww_load(self) -> None:
-        self._probe_dot(self.ww_dot, self.ww_uri.get_text(), 10400)
+    # ── Wakeword engine CRUD ─────────────────────────────────────────────────
 
+    def _ww_load_idx(self, idx: int) -> None:
+        """Load engine at idx into the form fields and probe the server."""
+        if not (0 <= idx < len(self.cfg.wakeword_engines)):
+            return
+        e = self.cfg.wakeword_engines[idx]
+        self._ww_idx = idx
+        self.ww_name.set_text(e.name)
+        self.ww_uri.set_text(e.uri)
+        _fill_combo(self.ww_model, [], e.model)
+        if hasattr(self, "ww_cancel_model"):
+            _fill_combo(self.ww_cancel_model, [], self.cfg.wakeword_cancel_model)
+        if hasattr(self, "ww_send_model"):
+            _fill_combo(self.ww_send_model, [], self.cfg.wakeword_send_model)
+        self._probe_dot(self.ww_dot, e.uri, 10400)
+        self._ww_fetch_models()
+
+    def _ww_commit(self) -> None:
+        """Save current form fields back to the active WakewordEngine."""
+        idx = getattr(self, "_ww_idx", 0)
+        if not (0 <= idx < len(self.cfg.wakeword_engines)):
+            return
+        e = self.cfg.wakeword_engines[idx]
+        new_name = self.ww_name.get_text().strip() or e.name
+        e.name = new_name
+        e.uri = self.ww_uri.get_text().strip()
+        e.model = _combo_text(self.ww_model)
+        if self.ww_combo.get_active_text() != new_name:
+            self.ww_combo.remove(idx)
+            self.ww_combo.insert_text(idx, new_name)
+            self.ww_combo.set_active(idx)
+
+    def _ww_changed(self, combo) -> None:
+        new = combo.get_active()
+        if new < 0 or new == getattr(self, "_ww_idx", -1):
+            return
+        self._ww_commit()
+        self._ww_load_idx(new)
+
+    def _ww_add(self, _b=None) -> None:
+        self._ww_commit()
+        from .config import WakewordEngine
+        e = WakewordEngine(name="New wakeword server", uri="tcp://127.0.0.1:10400", model="okay_computer")
+        self.cfg.wakeword_engines.append(e)
+        self.ww_combo.append_text(e.name)
+        new_idx = len(self.cfg.wakeword_engines) - 1
+        self.ww_combo.set_active(new_idx)
+        self._ww_load_idx(new_idx)
+
+    def _ww_delete(self, _b=None) -> None:
+        if len(self.cfg.wakeword_engines) <= 1:
+            return
+        idx = getattr(self, "_ww_idx", 0)
+        del self.cfg.wakeword_engines[idx]
+        self.ww_combo.remove(idx)
+        self._ww_idx = -1
+        self.ww_combo.set_active(0)
+        self._ww_load_idx(0)
+
+    def _show_ww_templates(self, btn: Gtk.Button) -> None:
+        menu = Gtk.Menu()
+        for tpl in _WW_TEMPLATES:
+            item = Gtk.MenuItem(label=tpl[0])
+            item.connect("activate", lambda _i, t=tpl: self._ww_apply_template(t))
+            menu.append(item)
+        menu.show_all()
+        menu.popup_at_widget(btn, Gdk.Gravity.SOUTH_WEST, Gdk.Gravity.NORTH_WEST, None)
+
+    def _ww_apply_template(self, tpl: tuple) -> None:
+        name, uri, model = tpl
+        self.ww_name.set_text(name)
+        self.ww_uri.set_text(uri)
+        _fill_combo(self.ww_model, [model], model)
+        self._probe_dot(self.ww_dot, uri, 10400)
+
+    def _ww_reload(self) -> None:
+        """Probe the dot and fetch models from the server (⟳ button)."""
+        if hasattr(self, "ww_status"):
+            self.ww_status.set_text("Connecting…")
+        self._probe_dot(self.ww_dot, self.ww_uri.get_text(), 10400)
+        self._ww_fetch_models()
+
+    def _ww_fetch_models(self) -> None:
+        """Background fetch of model list from wyoming server."""
+        uri = self.ww_uri.get_text().strip()  # capture on GTK thread
         def work():
             import socket, json
             from urllib.parse import urlparse
-            uri = self.ww_uri.get_text().strip()
             parsed = urlparse(uri)
             host = parsed.hostname or "127.0.0.1"
             port = parsed.port or 10400
             try:
-                with socket.create_connection((host, port), timeout=2.0) as s:
+                with socket.create_connection((host, port), timeout=3.0) as s:
                     s.sendall(json.dumps({"type": "describe"}).encode() + b"\n")
                     line = b""
                     while not line.endswith(b"\n"):
-                        b = s.recv(1)
-                        if not b: break
-                        line += b
+                        chunk = s.recv(1)
+                        if not chunk: break
+                        line += chunk
                     info = json.loads(line.decode("utf-8"))
                     payload_len = info.get("data_length", info.get("payload_length", 0))
                     payload = b""
@@ -1061,16 +2219,36 @@ class SettingsDialog:
                         if not chunk: break
                         payload += chunk
                     data = json.loads(payload.decode("utf-8"))
-                    models = []
-                    for w in data.get("wake", []):
-                        for m in w.get("models", []):
-                            models.append(m.get("name"))
-                    def apply():
-                        _fill_combo(self.ww_model, models, models[0] if models else "")
-                        self._info("Loaded models successfully.")
+                    models = [m.get("name") for w in data.get("wake", [])
+                              for m in w.get("models", []) if m.get("name")]
+                    def apply(models=models):
+                        if models:
+                            cur = _combo_text(self.ww_model)
+                            _fill_combo(self.ww_model, models, cur or models[0])
+                            # Also populate cancel/send model pickers with the same list.
+                            # Preserve whatever the user already typed; empty stays empty.
+                            if hasattr(self, "ww_cancel_model"):
+                                cur_c = _combo_text(self.ww_cancel_model)
+                                _fill_combo(self.ww_cancel_model, models, cur_c)
+                            if hasattr(self, "ww_send_model"):
+                                cur_s = _combo_text(self.ww_send_model)
+                                _fill_combo(self.ww_send_model, models, cur_s)
+                            if hasattr(self, "ww_status"):
+                                self.ww_status.set_markup(
+                                    f'<span foreground="#4a8" size="small">'
+                                    f'{len(models)} model{"s" if len(models) != 1 else ""} loaded: '
+                                    f'{", ".join(models)}</span>')
+                        else:
+                            if hasattr(self, "ww_status"):
+                                self.ww_status.set_markup(
+                                    '<span foreground="#888" size="small">Connected — no models found</span>')
                     GLib.idle_add(apply)
-            except Exception as e:
-                GLib.idle_add(lambda e=e: self._error(f"Failed to load models:\n{e}"))
+            except Exception as exc:
+                def show_err(exc=exc):
+                    if hasattr(self, "ww_status"):
+                        self.ww_status.set_markup(
+                            f'<span foreground="#c44" size="small">Unreachable: {exc}</span>')
+                GLib.idle_add(show_err)
         threading.Thread(target=work, daemon=True).start()
 
     def _ww_test(self, _b) -> None:
@@ -1110,53 +2288,223 @@ class SettingsDialog:
         threading.Thread(target=work, daemon=True).start()
 
     # ===== Benchmark ========================================================
-    def _build_benchmark(self, page: Gtk.Box) -> None:
+    # ===== Benchmark — STT ==================================================
+    def _build_benchmark_stt(self, page: Gtk.Box) -> None:
         _infobox(page, "Compare your speech-to-text engines. Pick a recording (.wav) and a "
                        "text file (.txt) containing exactly what is said, then press Run "
                        "benchmark. The table shows how fast each engine is and how accurate, "
                        "and names the fastest and most accurate. Add an engine preset for "
                        "each model you want in the comparison.")
 
-        wavf = Gtk.FileChooserButton(title="WAV file", action=Gtk.FileChooserAction.OPEN)
-        fa = Gtk.FileFilter(); fa.set_name("Audio (.wav)"); fa.add_pattern("*.wav"); wavf.add_filter(fa)
+        wavf = Gtk.FileChooserButton(title="Audio file", action=Gtk.FileChooserAction.OPEN)
+        fa = Gtk.FileFilter(); fa.set_name("Audio (WAV, MP3, OGG, FLAC, …)")
+        for _p in ("*.wav", "*.mp3", "*.ogg", "*.oga", "*.flac", "*.m4a", "*.opus"):
+            fa.add_pattern(_p)
+        wavf.add_filter(fa)
         self.bench_wav = _labeled(page, "Audio (.wav)", wavf)
         reff = Gtk.FileChooserButton(title="Reference transcript", action=Gtk.FileChooserAction.OPEN)
         ft = Gtk.FileFilter(); ft.set_name("Text (.txt)"); ft.add_pattern("*.txt"); reff.add_filter(ft)
         self.bench_ref = _labeled(page, "Reference (.txt)", reff)
 
+        # Restore saved paths
+        if self.cfg.bench_wav and Path(self.cfg.bench_wav).exists():
+            wavf.set_filename(self.cfg.bench_wav)
+        if self.cfg.bench_ref and Path(self.cfg.bench_ref).exists():
+            reff.set_filename(self.cfg.bench_ref)
+
         def _on_wav_set(_b):
             fn = wavf.get_filename()
             if not fn: return
+            self.cfg.bench_wav = fn
             p = Path(fn)
             for ext in (".reference.txt", ".txt"):
                 cand = p.with_name(p.stem + ext)
                 if cand.exists():
                     reff.set_filename(str(cand))
+                    self.cfg.bench_ref = str(cand)
                     break
+            save(self.cfg)
         wavf.connect("file-set", _on_wav_set)
 
+        def _on_ref_set(_b):
+            fn = reff.get_filename()
+            if fn:
+                self.cfg.bench_ref = fn
+                save(self.cfg)
+        reff.connect("file-set", _on_ref_set)
+
+        # ── Engine / model selector ───────────────────────────────────────────
+        _section_title(page, "Engines to benchmark", margin_top=10, icon="utilities-system-monitor-symbolic")
+
+        sel_hdr = Gtk.Box(spacing=6); sel_hdr.set_margin_bottom(4)
+        self._bench_filter = Gtk.SearchEntry()
+        self._bench_filter.set_placeholder_text("Filter by name, model or URL…")
+        sel_hdr.pack_start(self._bench_filter, True, True, 0)
+        all_b = Gtk.Button(label="All")
+        all_b.connect("clicked", lambda _: [cb.set_active(True)
+                                             for cb in self._bench_checks.values()])
+        none_b = Gtk.Button(label="None")
+        none_b.connect("clicked", lambda _: [cb.set_active(False)
+                                              for cb in self._bench_checks.values()])
+        sel_hdr.pack_start(all_b, False, False, 0)
+        sel_hdr.pack_start(none_b, False, False, 0)
+        page.pack_start(sel_hdr, False, False, 0)
+
+        sel_sw = Gtk.ScrolledWindow()
+        sel_sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        sel_sw.set_min_content_height(80)
+        sel_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        sel_list.set_margin_start(4); sel_list.set_margin_end(4)
+        sel_list.set_margin_top(2); sel_list.set_margin_bottom(2)
+        sel_sw.add(sel_list)
+
+        self._bench_checks: dict[str, Gtk.CheckButton] = {}
+        self._bench_dots: dict[str, Gtk.Label] = {}
+        self._bench_lang_labels: dict[str, Gtk.Label] = {}
+        self._bench_sel_rows: list[tuple[Gtk.Box, str, list[str]]] = []  # (row, name, mutable_search)
+
+        for e in self.cfg.stt_engines:
+            row = Gtk.Box(spacing=6)
+            dot = Gtk.Label(); dot.set_markup(_dot(GREY))
+            self._bench_dots[e.name] = dot
+            row.pack_start(dot, False, False, 0)
+            label = e.name
+            if e.model:
+                label += f"  [{e.model}]"
+            cb = Gtk.CheckButton(label=label)
+            cb.set_active(True)
+            self._bench_checks[e.name] = cb
+            row.pack_start(cb, True, True, 0)
+            lang_lbl = Gtk.Label(xalign=1.0)
+            lang_lbl.set_markup(f"<small><span foreground='{GREY}'>—</span></small>")
+            lang_lbl.set_margin_end(4)
+            self._bench_lang_labels[e.name] = lang_lbl
+            row.pack_end(lang_lbl, False, False, 0)
+            sel_list.pack_start(row, False, False, 2)
+            search_parts = [e.name, e.model, e.url]
+            self._bench_sel_rows.append((row, e.name, search_parts))
+
+        def _filter_bench(_e=None):
+            q = self._bench_filter.get_text().lower()
+            for row, _name, parts in self._bench_sel_rows:
+                row.set_visible(not q or any(q in p.lower() for p in parts))
+        self._bench_filter.connect("changed", _filter_bench)
+
+        # Background: reachability + language metadata
+        def _check_bench_status():
+            meta_cache: dict[str, list] = {}
+            for e in self.cfg.stt_engines:
+                ok = stt.status(e, timeout=2.0)
+                color = GREEN if ok else RED
+                dot = self._bench_dots.get(e.name)
+                if dot:
+                    GLib.idle_add(dot.set_markup, _dot(color))
+                # Fetch language metadata for remote engines
+                if not e.is_local and e.url:
+                    if e.url not in meta_cache:
+                        meta_cache[e.url] = stt.list_models_meta(e.url, e.api_key_env, timeout=4.0)
+                    langs: list[str] = []
+                    for m in meta_cache[e.url]:
+                        if not e.model or m.id == e.model or m.id.endswith("/" + e.model):
+                            langs = m.languages
+                            break
+                    if not langs and meta_cache[e.url]:
+                        langs = meta_cache[e.url][0].languages
+                    if langs:
+                        # Update search parts so filter works on language codes
+                        for row, name, parts in self._bench_sel_rows:
+                            if name == e.name:
+                                parts.extend(langs)
+                        lang_str = stt.fmt_languages(langs)
+                        lbl = self._bench_lang_labels.get(e.name)
+                        if lbl:
+                            GLib.idle_add(lbl.set_markup,
+                                f"<small><span foreground='{GREY}'>{GLib.markup_escape_text(lang_str)}</span></small>")
+        threading.Thread(target=_check_bench_status, daemon=True).start()
+
+        # ── Run controls ──────────────────────────────────────────────────────
+        run_row = Gtk.Box(spacing=16)
+        run_row.set_margin_top(6); run_row.set_margin_bottom(4)
         run = Gtk.Button(label="Run benchmark"); run.connect("clicked", self._run_bench)
         run.set_halign(Gtk.Align.START)
-        page.pack_start(run, False, False, 6)
+        run_row.pack_start(run, False, False, 0)
+        self.bench_expand = Gtk.CheckButton(label="Test all models per engine")
+        self.bench_expand.set_tooltip_text(
+            "Fetch every available model from each remote engine and run a separate "
+            "benchmark row per model — useful to compare models on the same server.")
+        self.bench_expand.set_active(self.cfg.bench_expand_models)
+        self.bench_expand.connect("toggled",
+            lambda cb: setattr(self.cfg, "bench_expand_models", cb.get_active()))
+        run_row.pack_start(self.bench_expand, False, False, 0)
+        page.pack_start(run_row, False, False, 0)
 
-        self.bench_store = Gtk.ListStore(str, str, str, str, str, str)
-        tree = Gtk.TreeView(model=self.bench_store)
-        for title, i, expand in [("Engine", 0, False), ("Model", 1, False), ("Device", 2, False),
-                                 ("Time (s)", 3, False), ("Accuracy", 4, False), ("Output", 5, True)]:
+        # ── Resizable pane: engine list (top) ↕ results table (bottom) ───────
+        # engine, url, model, device, best_for, lang, time, accuracy, ram, output, tooltip
+        self.bench_store = Gtk.ListStore(str, str, str, str, str, str, str, str, str, str, str)
+        bench_sort = Gtk.TreeModelSort(model=self.bench_store)
+        tree = Gtk.TreeView(model=bench_sort)
+        tree.set_has_tooltip(True)
+        tree.set_tooltip_column(10)
+
+        # Numeric sort: strip %, "server", "—" then compare as float (non-numeric → inf)
+        def _num_cmp(model, a, b, col):
+            def _f(v):
+                try:
+                    return float(v.rstrip("%"))
+                except (ValueError, AttributeError):
+                    return float("inf")
+            va, vb = _f(model.get_value(a, col)), _f(model.get_value(b, col))
+            return (va > vb) - (va < vb)
+
+        for title, i, expand, max_w in [
+                ("Engine",   0, False, 0),
+                ("URL",      1, False, 180),
+                ("Model",    2, False, 0),
+                ("Device",   3, False, 0),
+                ("Best for", 4, False, 0),
+                ("Lang",     5, False, 160),
+                ("Time (s)", 6, False, 0),
+                ("Accuracy", 7, False, 0),
+                ("RAM (MB)", 8, False, 0),
+                ("Output",   9, True,  0)]:
             r = Gtk.CellRendererText()
-            if i == 5:
-                r.set_property("ellipsize", Pango.EllipsizeMode.END)
+            r.set_property("ellipsize", Pango.EllipsizeMode.END)
             col = Gtk.TreeViewColumn(title, r, text=i); col.set_resizable(True)
+            col.set_sort_column_id(i)
             col.set_expand(expand)
+            if max_w:
+                col.set_max_width(max_w)
+            if i == 8:
+                col.set_widget(Gtk.Label(label="RAM (MB)", tooltip_text=
+                    "RAM used by the engine during the benchmark.\n"
+                    "Local engines: RSS delta measured on this machine.\n"
+                    "Remote engines: current RSS read from the server's Prometheus /metrics endpoint.\n"
+                    "'server' = server does not expose /metrics — RAM not measurable.\n"
+                    "'—' = local model was already loaded, no delta to measure."))
+                col.get_widget().show()
             tree.append_column(col)
-        sw = Gtk.ScrolledWindow(); sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        sw.add(tree); page.pack_start(sw, True, True, 4)
+            if i in (6, 7, 8):  # Time, Accuracy, RAM — sort numerically
+                bench_sort.set_sort_func(i, _num_cmp, i)
+        tree_sw = Gtk.ScrolledWindow()
+        tree_sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        tree_sw.add(tree)
 
+        # Wrap tree + summary in a box so summary stays below the table inside the pane
+        results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        results_box.pack_start(tree_sw, True, True, 0)
         self.bench_summary = Gtk.Label(xalign=0.0); self.bench_summary.set_line_wrap(True)
-        page.pack_start(self.bench_summary, False, False, 4)
+        self.bench_summary.set_margin_top(4); self.bench_summary.set_margin_bottom(2)
+        results_box.pack_start(self.bench_summary, False, False, 0)
 
-        # --- Wakeword benchmark ---------------------------------------------
-        page.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), False, False, 10)
+        paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
+        paned.pack1(sel_sw, resize=True, shrink=False)
+        paned.pack2(results_box, resize=True, shrink=False)
+        paned.set_position(180)  # default: engine list gets ~180px, rest goes to results
+        paned.set_size_request(-1, 320)  # never collapse below 320px total
+        page.pack_start(paned, True, True, 4)
+
+    # ===== Benchmark — Wakeword =============================================
+    def _build_benchmark_ww(self, page: Gtk.Box) -> None:
         _infobox(page, "Stress-test the wakeword. It synthesizes short sentences with your "
                        "wakeword spoken in random voices (plus filler with none), streams them to "
                        "your wyoming-openwakeword server, and reports how reliably it fires "
@@ -1164,26 +2512,27 @@ class SettingsDialog:
                        "TTS server (Kokoro, XTTS, OpenAI …) — set its URL, model and voices, then "
                        "Connect to test it.")
 
-        # URL with a ⟳ reload that loads models + voices from the server (like the
-        # Engines tab). Set the saved URL after building the field.
+        # ---- Controls pane (top half of the Paned) ----
+        ctrl = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        # URL with a ⟳ reload that loads models + voices from the server
         self.tts_dot = Gtk.Label(); self.tts_dot.set_markup(_dot(GREY))
         self.tts_dot.set_tooltip_text("TTS server: green = reachable, red = unreachable")
-        self.wwb_url = _url_field(page, "TTS URL", "http://localhost:8880/v1",
+        self.wwb_url = _url_field(ctrl, "TTS URL", "http://localhost:8880/v1",
                                   self._tts_reload, dot=self.tts_dot)
         self.wwb_url.set_text(self.cfg.tts_url)
         self.wwb_url.connect("focus-out-event", self._on_tts_url_leave)
         self._probe_dot(self.tts_dot, self.cfg.tts_url, 80)
         self.wwb_key = _labeled(
-            page, "API key env", _entry(self.cfg.tts_api_key_env, placeholder="(optional, e.g. OPENAI_API_KEY)"),
+            ctrl, "API key env", _entry(self.cfg.tts_api_key_env, placeholder="(optional, e.g. OPENAI_API_KEY)"),
             tooltip="Name of an environment variable holding a bearer token. Leave empty for "
                     "no-auth local servers. The key itself is never stored in the config.")
         self.wwb_model = _model_combo("press ⟳ to load, or type a model id")
         self.wwb_model.set_text(self.cfg.tts_model)
-        _labeled(page, "TTS model", self.wwb_model,
+        _labeled(ctrl, "TTS model", self.wwb_model,
                  tooltip="The TTS model id your endpoint serves (from {url}/models). Required.")
         self.wwb_voices = MultiPicker("press ⟳ to load voices, or type names")
         self.wwb_voices.set_text(", ".join(self.cfg.tts_voices))
-        _labeled(page, "Voices (comma)", self.wwb_voices,
+        _labeled(ctrl, "Voices (comma)", self.wwb_voices,
                  tooltip="Voices to cycle through at random so the test covers different timbres. "
                          "⟳ fills these from the server; the ▾ dropdown appends one at a time.")
 
@@ -1194,51 +2543,223 @@ class SettingsDialog:
         connect_box = Gtk.Box(spacing=10)
         connect_box.pack_start(self.wwb_test_btn, False, False, 0)
         connect_box.pack_start(self.wwb_test_lbl, False, False, 0)
-        _labeled(page, "", connect_box)
+        _labeled(ctrl, "", connect_box)
 
+        # ---- Wakeword engine checkboxes ----
+        _section_title(ctrl, "Engines to test", margin_top=10,
+                       icon="audio-input-microphone-symbolic")
+        self._wwb_checks: dict[str, Gtk.CheckButton] = {}
+        eng_row = Gtk.Box(spacing=16)
+        eng_row.set_margin_bottom(4)
+        for e in self.cfg.wakeword_engines:
+            cb = Gtk.CheckButton(label=e.name)
+            cb.set_active(True)
+            self._wwb_checks[e.name] = cb
+            eng_row.pack_start(cb, False, False, 0)
+        if not self.cfg.wakeword_engines:
+            eng_row.pack_start(Gtk.Label(label="(no wakeword engines configured — add one in the Wakeword page)"),
+                               False, False, 0)
+        ctrl.pack_start(eng_row, False, False, 0)
+
+        # ---- Wakeword model selector ----
+        all_ww_models = list(dict.fromkeys(
+            e.model for e in self.cfg.wakeword_engines if e.model))
+        self.wwb_wakeword = _model_combo("auto — each engine's own model")
+        self.wwb_wakeword.set_models(all_ww_models)
+        _labeled(ctrl, "Wakeword", self.wwb_wakeword,
+                 tooltip="Which wakeword model to test. Leave empty to use each engine's own "
+                         "configured model. Select a specific model to override all engines "
+                         "and test that phrase (e.g. okay_computer on all servers).")
+
+        # ---- Samples + run ----
         adj = Gtk.Adjustment(value=12, lower=1, upper=200, step_increment=1, page_increment=10)
         self.wwb_count = Gtk.SpinButton(adjustment=adj, climb_rate=1, digits=0)
         self.wwb_count.set_halign(Gtk.Align.START); self.wwb_count.set_size_request(90, -1)
-        _labeled(page, "Wakeword samples", self.wwb_count,
+        _labeled(ctrl, "Wakeword samples", self.wwb_count,
                  tooltip="How many wakeword utterances to synthesize and test (filler-only "
                          "utterances for false-fire checking are added on top).")
 
         wrun = Gtk.Button(label="Run wakeword benchmark"); wrun.connect("clicked", self._run_wakeword_bench)
         wrun.set_halign(Gtk.Align.START)
-        page.pack_start(wrun, False, False, 6)
+        ctrl.pack_start(wrun, False, False, 6)
+
+        # ---- Results pane (bottom half of the Paned) ----
+        # col 8 = foreground colour (not displayed)
+        self.wwb_store = Gtk.ListStore(str, str, str, str, str, str, str, str, str)
+        wwb_sort = Gtk.TreeModelSort(model=self.wwb_store)
+
+        def _num_cmp_wwb(model, a, b, col):
+            def _f(v):
+                try:
+                    return float(str(v).rstrip("%"))
+                except (ValueError, AttributeError):
+                    return float("inf")
+            va, vb = _f(model.get_value(a, col)), _f(model.get_value(b, col))
+            return (va > vb) - (va < vb)
+
+        self.wwb_tree = Gtk.TreeView(model=wwb_sort)
+        self.wwb_tree.set_grid_lines(Gtk.TreeViewGridLines.HORIZONTAL)
+        for title, i, expand in [
+                ("Engine",       0, False),
+                ("Wakeword",     1, False),
+                ("Voice",        2, True),
+                ("Detected",     3, False),
+                ("Total",        4, False),
+                ("Recall %",     5, False),
+                ("False fires",  6, False),
+                ("Time (s)",     7, False)]:
+            r = Gtk.CellRendererText()
+            r.set_property("ellipsize", Pango.EllipsizeMode.END)
+            col = Gtk.TreeViewColumn(title, r, text=i, foreground=8)
+            col.set_resizable(True); col.set_expand(expand)
+            col.set_sort_column_id(i)
+            self.wwb_tree.append_column(col)
+            if i in (3, 4, 5, 6, 7):
+                wwb_sort.set_sort_func(i, _num_cmp_wwb, i)
+
+        ww_sw = Gtk.ScrolledWindow()
+        ww_sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        ww_sw.add(self.wwb_tree)
+
         self.wwb_summary = Gtk.Label(xalign=0.0); self.wwb_summary.set_line_wrap(True)
         self.wwb_summary.set_selectable(True)
-        page.pack_start(self.wwb_summary, False, False, 4)
+        self.wwb_summary.set_margin_top(4); self.wwb_summary.set_margin_bottom(2)
+
+        # Toolbar: Copy CSV + Save CSV
+        tb = Gtk.Box(spacing=6)
+        tb.set_margin_bottom(4)
+        _copy_btn = Gtk.Button(label="Copy as CSV")
+        _copy_btn.set_tooltip_text("Copy results to clipboard as comma-separated values")
+        _copy_btn.connect("clicked", self._wwbench_copy_csv)
+        _save_btn = Gtk.Button(label="Save CSV…")
+        _save_btn.set_tooltip_text("Save results to a .csv file")
+        _save_btn.connect("clicked", self._wwbench_save_csv)
+        tb.pack_start(_copy_btn, False, False, 0)
+        tb.pack_start(_save_btn, False, False, 0)
+
+        results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        results_box.pack_start(tb, False, False, 0)
+        results_box.pack_start(ww_sw, True, True, 0)
+        results_box.pack_start(self.wwb_summary, False, False, 0)
+
+        # Wrap controls in a ScrolledWindow so the pane can shrink past its
+        # natural height when the user drags the divider upward.
+        ctrl_sw = Gtk.ScrolledWindow()
+        ctrl_sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        ctrl_sw.set_min_content_height(120)
+        ctrl_sw.add(ctrl)
+
+        # ---- Paned: drag the divider to give more space to the table ----
+        ww_paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
+        ww_paned.pack1(ctrl_sw, resize=True, shrink=True)
+        ww_paned.pack2(results_box, resize=True, shrink=False)
+        ww_paned.set_position(260)
+        page.pack_start(ww_paned, True, True, 4)
 
     def _run_bench(self, _b) -> None:
         wav = self.bench_wav.get_filename()
         refp = self.bench_ref.get_filename()
+        # Persist to disk so paths survive without clicking Save
+        changed = False
+        if wav and wav != self.cfg.bench_wav:
+            self.cfg.bench_wav = wav; changed = True
+        if refp and refp != self.cfg.bench_ref:
+            self.cfg.bench_ref = refp; changed = True
+        if changed:
+            save(self.cfg)
         if not wav or not refp:
             self._error("Pick a .wav file and a matching reference .txt file.")
             return
         reference = Path(refp).read_text(errors="replace")
         self.bench_store.clear()
+        if hasattr(self, "stt_name"):   # only if Engines tab has been built
+            self._stt_commit()
+
+        # Filter to checked engines (deduplicate by name as safety net)
+        checks = getattr(self, "_bench_checks", {})
+        seen: set[str] = set()
+        engines: list = []
+        for e in self.cfg.stt_engines:
+            if e.name in seen:
+                continue
+            seen.add(e.name)
+            if not checks or checks.get(e.name, None) is None or checks[e.name].get_active():
+                engines.append(e)
+
+        if not engines:
+            self.bench_summary.set_markup(
+                f'<span foreground="{RED}">No engines selected — tick at least one above.</span>')
+            return
         self.bench_summary.set_markup("<i>Running… (local models load on first use)</i>")
-        self._stt_commit()
-        engines = list(self.cfg.stt_engines)
+
+        expand = self.bench_expand.get_active()
 
         def work():
             def prog(row):
                 GLib.idle_add(self._bench_add_row, row)
             rows = benchmark.run(engines, Path(wav), reference, language=self.cfg.language,
-                                 get_local_transcriber=self._transcriber_for, progress=prog)
+                                 get_local_transcriber=self._transcriber_for, progress=prog,
+                                 expand_models=expand)
             GLib.idle_add(self._bench_done, rows)
         threading.Thread(target=work, daemon=True).start()
 
+    @staticmethod
+    def _bench_friendly_error(err: str) -> str:
+        """Short human-readable reason from a raw STT error string."""
+        e = err.lower()
+        if "bad model" in e or ("400" in e and "model" in e):
+            return "Wrong model name — clear the model field to use server default"
+        if "connection refused" in e or "errno 111" in e:
+            return "Server offline — check the URL and that the service is running"
+        if "timed out" in e or "time out" in e:
+            return "Timed out — server too slow or not responding (>60 s)"
+        if "500" in e or "internal server error" in e:
+            return "Server-side error — check the server logs"
+        if "401" in e or "unauthorized" in e:
+            return "Authentication failed — check the API key environment variable"
+        if "404" in e or "not found" in e:
+            return "Endpoint not found — check the URL (needs /v1 suffix?)"
+        if "cannot reach" in e:
+            return "Unreachable — check URL / firewall"
+        return err[:120]
+
     def _bench_add_row(self, row) -> bool:
         acc = f"{row.accuracy:.1f}%" if row.ok else "—"
-        out = row.text if row.ok else f"⚠ {row.error}"
-        self.bench_store.append([row.engine, row.model, row.device, f"{row.seconds:.2f}", acc, out])
+        if row.ok:
+            out_friendly = row.text
+            tooltip = row.text
+        else:
+            out_friendly = f"⚠ {self._bench_friendly_error(row.error)}"
+            tooltip = row.error
+        # Strip scheme from URL for display brevity (http://192.168.1.1:8080 → 192.168.1.1:8080)
+        url_display = row.url.removeprefix("https://").removeprefix("http://").rstrip("/")
+        lang_display = stt.fmt_languages(row.languages)
+        if row.ram_mb >= 1.0:
+            ram_display = f"{row.ram_mb:.0f}"
+        elif row.url:
+            if row.srv_ram_mb is not None:
+                ram_display = f"{row.srv_ram_mb:.0f}"  # from server /metrics
+            else:
+                ram_display = "server"  # metrics not exposed
+        else:
+            ram_display = "—"  # local model already loaded, no delta
+        self.bench_store.append([row.engine, url_display, row.model, row.device, row.best_for,
+                                 lang_display, f"{row.seconds:.2f}", acc, ram_display, out_friendly, tooltip])
+        # Persist result so Engines tab can show it
+        self.cfg.bench_last[row.engine] = {
+            "seconds": row.seconds, "accuracy": row.accuracy, "ok": row.ok,
+        }
+        save(self.cfg)
+        # Refresh info label if this engine is currently selected in Engines tab
+        if hasattr(self, "stt_name"):
+            cur = self.cfg.stt_engines[self._stt_idx].name if 0 <= self._stt_idx < len(self.cfg.stt_engines) else ""
+            if cur == row.engine:
+                self._stt_update_bench_info(row.engine)
         return False
 
     def _bench_done(self, rows) -> bool:
         fastest, acc = benchmark.best(rows)
-        if not fastest:
+        if not fastest or not acc:
             self.bench_summary.set_markup('<span foreground="#ff3b30">All engines failed — check the Log tab.</span>')
             return False
         self.bench_summary.set_markup(
@@ -1270,15 +2791,22 @@ class SettingsDialog:
         def work():
             models = stt.list_models(url, key)
             voices = wakeword_bench.list_voices(url, api_key_env=key)
+            # Kokoro and similar servers expose each voice as a /models entry.
+            # Skip populating the model combo when all "models" are also voices.
+            voices_set = set(voices)
+            real_models = [m for m in models if m not in voices_set]
 
             def apply():
-                _fill_combo(self.wwb_model, models, self.wwb_model.get_text())
+                if real_models:
+                    _fill_combo(self.wwb_model, real_models, self.wwb_model.get_text())
                 self.wwb_voices.set_models(voices)
                 if voices and not self.wwb_voices.get_text().strip():
                     self.wwb_voices.set_text(", ".join(voices))   # default: test them all
-                colour = "#34c759" if (models or voices) else "#ff9f0a"
+                colour = "#34c759" if (real_models or voices) else "#ff9f0a"
+                model_hint = (f"{len(real_models)} models, " if real_models
+                              else "type model id manually, ")
                 self.wwb_test_lbl.set_markup(
-                    f"<span foreground='{colour}'>Loaded {len(models)} models, "
+                    f"<span foreground='{colour}'>Loaded {model_hint}"
                     f"{len(voices)} voices.</span>")
                 return False
             GLib.idle_add(apply)
@@ -1316,53 +2844,171 @@ class SettingsDialog:
         if not voices:
             self._error("Add at least one voice (or press Connect to fetch them).")
             return
+
+        # Filter engines by checkboxes
+        checks = getattr(self, "_wwb_checks", {})
+        engines = [e for e in self.cfg.wakeword_engines
+                   if not checks or checks.get(e.name, Gtk.CheckButton(active=True)).get_active()]
+        if not engines:
+            self._error("Select at least one wakeword engine to benchmark.")
+            return
+
+        # Override wakeword model if the user picked a specific one
+        ww_override = self.wwb_wakeword.get_text().strip() if hasattr(self, "wwb_wakeword") else ""
+        if ww_override:
+            import copy as _copy
+            engines = [_copy.copy(e) for e in engines]
+            for e in engines:
+                e.model = ww_override
+
+        if hasattr(self, "wwb_store"):
+            self.wwb_store.clear()
         self.wwb_summary.set_markup("<i>Synthesizing and streaming… this talks to your TTS "
                                     "and wyoming-openwakeword servers.</i>")
 
         def work():
-            def prog(done, total, u):
-                GLib.idle_add(self._wwbench_progress, done, total, u)
+            def prog(ei, n_eng, eng_name, ui, total, u):
+                GLib.idle_add(self._wwbench_progress, ei, n_eng, eng_name, ui, total, u)
             try:
-                res = wakeword_bench.run(
+                runs = wakeword_bench.run(
+                    engines,
                     tts_url=url, tts_api_key_env=key, tts_model=model, voices=voices,
-                    wakeword_model=self.cfg.wakeword_model, wakeword_uri=self.cfg.wakeword_uri,
                     language=self.cfg.language, count=count, progress=prog)
             except Exception as exc:  # noqa: BLE001 - surface setup errors
                 GLib.idle_add(self._wwbench_error, str(exc))
                 return
-            GLib.idle_add(self._wwbench_done, res)
+            GLib.idle_add(self._wwbench_done, runs)
         threading.Thread(target=work, daemon=True).start()
 
-    def _wwbench_progress(self, done, total, u) -> bool:
+    def _wwbench_progress(self, ei, n_eng, eng_name, ui, total, u) -> bool:
         tag = "✓" if (u.ok and (u.detections > 0) == u.has_wakeword) else ("•" if u.ok else "⚠")
         kind = "wake" if u.has_wakeword else "filler"
+        eng_prefix = (f"[{ei}/{n_eng}] <b>{GLib.markup_escape_text(eng_name)}</b>  "
+                      if n_eng > 1 else "")
         self.wwb_summary.set_markup(
-            f"<i>{done}/{total}</i>  {tag} {kind} · {GLib.markup_escape_text(u.voice)}"
-            + (f" · <span foreground='#ff3b30'>{GLib.markup_escape_text(u.error)}</span>" if u.error else ""))
+            f"{eng_prefix}<i>{ui}/{total}</i>  {tag} {kind} · {GLib.markup_escape_text(u.voice)}"
+            + (f" · <span foreground='#ff3b30'>{GLib.markup_escape_text(u.error)}</span>"
+               if u.error else ""))
         return False
 
     def _wwbench_error(self, msg: str) -> bool:
         self.wwb_summary.set_markup(f"<span foreground='#ff3b30'>{GLib.markup_escape_text(msg)}</span>")
         return False
 
-    def _wwbench_done(self, res) -> bool:
-        if res.expected == 0:
-            errs = {u.error for u in res.utterances if u.error}
+    def _wwbench_done(self, runs: list) -> bool:
+        self.wwb_store.clear()
+        if not runs:
+            self.wwb_summary.set_markup(
+                '<span foreground="#ff3b30">No engines configured — add one in the Wakeword page.</span>')
+            return False
+        if all(er.result.expected == 0 for er in runs):
+            errs = {u.error for er in runs for u in er.result.utterances if u.error}
             hint = ("  " + GLib.markup_escape_text(next(iter(errs)))) if errs else ""
             self.wwb_summary.set_markup(
                 f"<span foreground='#ff3b30'>No utterances synthesized — check the TTS model/endpoint.</span>{hint}")
             return False
-        by_voice = res.recall_by_voice()
-        voice_bits = "  ".join(
-            f"{GLib.markup_escape_text(v)} {d}/{t}" for v, (d, t) in sorted(by_voice.items()))
-        colour = "#34c759" if res.recall >= 0.9 and res.false_fires == 0 else (
-            "#ff9f0a" if res.recall >= 0.6 else "#ff3b30")
-        self.wwb_summary.set_markup(
-            f"<b><span foreground='{colour}'>Recall {res.recall * 100:.0f}%</span></b> "
-            f"({res.detected}/{res.expected} fired)   ·   "
-            f"<b>False fires:</b> {res.false_fires} in {len(res.filler)} filler   ·   "
-            f"{res.seconds:.0f}s\n<small>per voice: {voice_bits}</small>")
+
+        GREEN, ORANGE, RED_C = "#34c759", "#ff9f0a", "#ff3b30"
+        summary_parts = []
+        for er in runs:
+            r = er.result
+            phrase = wakeword_bench.wakeword_phrase(er.model)
+            if r.expected == 0:
+                self.wwb_store.append([er.name, phrase, "—", "—", "—", "—", "—", "—", RED_C])
+                summary_parts.append(f"{er.name}: no samples")
+                continue
+            # Per-voice rows
+            by_voice = r.recall_by_voice()
+            filler_fires = {v: sum(u.detections for u in r.filler
+                                   if u.ok and u.voice == v)
+                            for v in by_voice}
+            for voice, (det, tot) in sorted(by_voice.items()):
+                recall_pct = det / tot * 100 if tot else 0.0
+                col = GREEN if recall_pct >= 90 else (ORANGE if recall_pct >= 60 else RED_C)
+                ff = filler_fires.get(voice, 0)
+                self.wwb_store.append([
+                    er.name, phrase, voice,
+                    str(det), str(tot),
+                    f"{recall_pct:.0f}%",
+                    str(ff),
+                    f"{r.seconds:.1f}",
+                    col])
+            # Engine summary row (bold aggregates via colour only)
+            overall_col = GREEN if r.recall >= 0.9 and r.false_fires == 0 else (
+                ORANGE if r.recall >= 0.6 else RED_C)
+            self.wwb_store.append([
+                er.name, phrase, f"ALL ({len(by_voice)} voices)",
+                str(r.detected), str(r.expected),
+                f"{r.recall * 100:.0f}%",
+                str(r.false_fires),
+                f"{r.seconds:.1f}",
+                overall_col])
+            summary_parts.append(
+                f"{er.name}: {r.recall*100:.0f}% recall, {r.false_fires} false fires")
+
+        self.wwb_summary.set_markup("  ·  ".join(
+            GLib.markup_escape_text(p) for p in summary_parts))
         return False
+
+    _WWB_CSV_HEADERS = ["Engine", "Wakeword", "Voice", "Detected", "Total",
+                        "Recall %", "False fires", "Time (s)"]
+
+    def _wwbench_csv_text(self) -> str:
+        import csv, io
+        out = io.StringIO()
+        w = csv.writer(out)
+        w.writerow(self._WWB_CSV_HEADERS)
+        store = self.wwb_store
+        it = store.get_iter_first()
+        while it:
+            w.writerow([store.get_value(it, c) for c in range(8)])
+            it = store.iter_next(it)
+        return out.getvalue()
+
+    def _wwbench_copy_csv(self, _b) -> None:
+        if not self.wwb_store.get_iter_first():
+            return
+        Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(self._wwbench_csv_text(), -1)
+
+    def _wwbench_save_csv(self, _b) -> None:
+        if not self.wwb_store.get_iter_first():
+            return
+        dlg = Gtk.FileChooserDialog(
+            title="Save wakeword results as CSV",
+            transient_for=self.dlg,
+            action=Gtk.FileChooserAction.SAVE)
+        dlg.add_button("_Cancel", Gtk.ResponseType.CANCEL)
+        dlg.add_button("_Save",   Gtk.ResponseType.ACCEPT)
+        dlg.set_do_overwrite_confirmation(True)
+        dlg.set_current_name("wakeword_benchmark.csv")
+        f = Gtk.FileFilter(); f.set_name("CSV files (*.csv)"); f.add_pattern("*.csv")
+        dlg.add_filter(f)
+        if dlg.run() == Gtk.ResponseType.ACCEPT:
+            path = dlg.get_filename()
+            if path and not path.endswith(".csv"):
+                path += ".csv"
+            try:
+                with open(path, "w", encoding="utf-8", newline="") as fh:
+                    fh.write(self._wwbench_csv_text())
+            except OSError as exc:
+                self._error(f"Could not save: {exc}")
+        dlg.destroy()
+
+    # ===== Manual ===========================================================
+    def _build_manual(self, page: Gtk.Box) -> None:
+        text = _read_first(_app_paths()["manual"])
+        if text == "Not available in this install.":
+            # Show a clickable link instead of raw text
+            lbl = Gtk.Label(xalign=0.0)
+            lbl.set_line_wrap(True)
+            lbl.set_markup("Manual not bundled in this install.\n\n"
+                           "Read it online: "
+                           "<a href='https://github.com/mARTin-B78/blitztext-app-linux'>"
+                           "github.com/mARTin-B78/blitztext-app-linux</a>")
+            lbl.set_margin_top(20); lbl.set_margin_start(20)
+            page.pack_start(lbl, False, False, 0)
+        else:
+            page.pack_start(_md_panel(text, height=420), True, True, 0)
 
     # ===== About ============================================================
     def _build_about(self, page: Gtk.Box) -> None:
@@ -1399,11 +3045,11 @@ class SettingsDialog:
         page.pack_start(nb, True, True, 0)
 
         changelog_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        changelog_box.pack_start(_text_panel(changelog, height=300), True, True, 0)
+        changelog_box.pack_start(_md_panel(changelog, height=300), True, True, 0)
         nb.append_page(changelog_box, Gtk.Label(label="Changelog"))
 
         license_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        license_box.pack_start(_text_panel(license_text, height=300), True, True, 0)
+        license_box.pack_start(_md_panel(license_text, height=300), True, True, 0)
         nb.append_page(license_box, Gtk.Label(label="License"))
 
 
@@ -1422,6 +3068,17 @@ class SettingsDialog:
         bar = Gtk.Box(spacing=8); bar.set_margin_top(6)
         self.log_autoscroll = Gtk.CheckButton(label="Auto-scroll"); self.log_autoscroll.set_active(True)
         bar.pack_start(self.log_autoscroll, False, False, 0)
+
+        lvl_lbl = Gtk.Label(label="Level:"); lvl_lbl.set_margin_start(8)
+        bar.pack_start(lvl_lbl, False, False, 0)
+        self.log_level = _block_scroll(Gtk.ComboBoxText())
+        for lvl in ("Verbose", "Info", "Warning", "Error"):
+            self.log_level.append_text(lvl)
+        self.log_level.set_active(1)  # default: Info
+        self.log_level.set_tooltip_text("Show log entries at or above this severity level")
+        self.log_level.connect("changed", lambda _: (setattr(self, "_log_last", None), self._log_refresh()))
+        bar.pack_start(self.log_level, False, False, 0)
+
         clear = Gtk.Button(label="Clear"); clear.connect("clicked", lambda _b: (logbuffer.clear(), self._log_refresh()))
         copy = Gtk.Button(label="Copy"); copy.connect("clicked", lambda _b: self._log_copy())
         bar.pack_end(clear, False, False, 0); bar.pack_end(copy, False, False, 0)
@@ -1431,12 +3088,16 @@ class SettingsDialog:
         self._log_refresh()
         self._log_timer = GLib.timeout_add(1000, self._log_tick)
 
+    def _log_min_level(self) -> str:
+        idx = self.log_level.get_active() if hasattr(self, "log_level") else 1
+        return ("DEBUG", "INFO", "WARNING", "ERROR")[max(0, min(idx, 3))]
+
     def _log_tick(self) -> bool:
         self._log_refresh()
         return True
 
     def _log_refresh(self) -> None:
-        text = "\n".join(logbuffer.lines())
+        text = "\n".join(logbuffer.lines(self._log_min_level()))
         if text == getattr(self, "_log_last", None):
             return
         self._log_last = text
@@ -1447,7 +3108,27 @@ class SettingsDialog:
 
     def _log_copy(self) -> None:
         cb = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
-        cb.set_text("\n".join(logbuffer.lines()), -1)
+        cb.set_text("\n".join(logbuffer.lines(self._log_min_level())), -1)
+
+    def _draw_resize_grip(self, _da, cr) -> None:
+        """Draw a 3×3 dotted SE resize-grip in the DrawingArea."""
+        import math
+        w = _da.get_allocated_width()
+        h = _da.get_allocated_height()
+        cr.set_source_rgba(0.55, 0.55, 0.55, 0.65)
+        spacing, radius = 5, 1.5
+        for row in range(3):
+            for col in range(3):
+                if row + col >= 2:   # lower-right triangle only
+                    cx = w - 3 + (col - 2) * spacing
+                    cy = h - 3 + (row - 2) * spacing
+                    cr.arc(cx, cy, radius, 0, 2 * math.pi)
+                    cr.fill()
+
+    def _open_wizard(self, _btn=None) -> None:
+        from .setup_wizard import SetupWizard
+        wiz = SetupWizard(self.cfg, parent=self.dlg)
+        wiz.run()
 
     def _cleanup(self) -> None:
         self._stop_meter()
@@ -1477,13 +3158,27 @@ class SettingsDialog:
             c.sound_before = self.snd_before.get_filename() or ""
             c.sound_after = self.snd_after.get_filename() or ""
             c.wakeword_enabled = self.ww_enabled.get_active()
-            c.wakeword_uri = self.ww_uri.get_text().strip()
-            c.wakeword_model = _combo_text(self.ww_model)
+            self._ww_commit()
+            idx = getattr(self, "_ww_idx", 0)
+            if 0 <= idx < len(self.cfg.wakeword_engines):
+                e = self.cfg.wakeword_engines[idx]
+                c.wakeword_active = e.name
+                c.wakeword_uri = e.uri
+                c.wakeword_model = e.model
+            else:
+                c.wakeword_uri = self.ww_uri.get_text().strip()
+                c.wakeword_model = _combo_text(self.ww_model)
             c.wakeword_sound_detected = self.ww_snd_detected.get_filename() or ""
             c.wakeword_sound_done = self.ww_snd_done.get_filename() or ""
             c.wakeword_silence_seconds = float(self.ww_silence.get_text())
+            c.wakeword_cancel_model = _combo_text(self.ww_cancel_model) if hasattr(self, "ww_cancel_model") else ""
+            c.wakeword_send_model = _combo_text(self.ww_send_model) if hasattr(self, "ww_send_model") else ""
             c.cancel_keywords = [k.strip() for k in self.cancel_keywords.get_text().split(",") if k.strip()]
             c.send_keywords = [k.strip() for k in self.send_keywords.get_text().split(",") if k.strip()]
+            if hasattr(self, "ww_key_cancel"):
+                c.key_cancel = self.ww_key_cancel.get_text().strip() or c.key_cancel
+            if hasattr(self, "ww_key_send"):
+                c.key_send = self.ww_key_send.get_text().strip() or c.key_send
             c.tts_url = self.wwb_url.get_text().strip().rstrip("/")
             c.tts_api_key_env = self.wwb_key.get_text().strip()
             c.tts_model = self.wwb_model.get_text().strip()
@@ -1494,22 +3189,25 @@ class SettingsDialog:
             c.notify = self.gen_notify.get_active()
             c.notify_routing = self.gen_notify_routing.get_active()
             c.overlay_enabled = self.gen_overlay.get_active()
-            c.device = self.stt_device.get_active_text() or "auto"
-            c.compute_type = self.stt_compute.get_active_text() or "auto"
+            c.device = _type_key(self.stt_device, _DEVICE_OPTIONS, "auto")
+            c.compute_type = _type_key(self.stt_compute, _COMPUTE_OPTIONS, "auto")
             autostart.set_enabled(self.gen_boot.get_active())
             
             if c.wakeword_enabled:
-                import socket
-                from urllib.parse import urlparse
-                parsed = urlparse(c.wakeword_uri)
-                host = parsed.hostname or "127.0.0.1"
-                port = parsed.port or 10400
-                try:
-                    with socket.create_connection((host, port), timeout=1.5):
-                        pass
-                except OSError as e:
-                    self._error(f"Cannot connect to Wakeword server at {c.wakeword_uri}:\n{e}\n\nPlease check your server or disable wakeword.")
-                    return False
+                # Check reachability in background — don't block the GTK thread
+                uri = c.wakeword_uri
+                def _bg_ww_check(uri=uri):
+                    import socket
+                    from urllib.parse import urlparse
+                    parsed = urlparse(uri)
+                    host = parsed.hostname or "127.0.0.1"
+                    port = parsed.port or 10400
+                    try:
+                        with socket.create_connection((host, port), timeout=2.0):
+                            logbuffer.log(f"[wakeword] server reachable at {uri}", level="INFO")
+                    except OSError as e:
+                        logbuffer.log(f"[wakeword] cannot reach {uri}: {e}", level="WARNING")
+                threading.Thread(target=_bg_ww_check, daemon=True).start()
         except ValueError as exc:
             self._error(f"Check numeric fields: {exc}")
             return False
@@ -1520,18 +3218,62 @@ class SettingsDialog:
                               buttons=Gtk.ButtonsType.OK, text=msg)
         d.run(); d.destroy()
 
-    def _info(self, msg: str) -> None:
-        d = Gtk.MessageDialog(transient_for=self.dlg, modal=True, message_type=Gtk.MessageType.INFO,
-                              buttons=Gtk.ButtonsType.OK, text=msg)
-        d.run(); d.destroy()
+    # ---- restart-diff fields ---------------------------------------------------
+    # Human-readable label → tuple of Config field names that must match.
+    _RESTART_FIELDS: list[tuple[str, tuple]] = [
+        ("active STT engine",   ("stt_active",)),
+        ("STT engine settings", ("stt_engines",)),
+        ("device / compute",    ("device", "compute_type")),
+        ("wakeword",            ("wakeword_enabled", "wakeword_active",
+                                 "wakeword_engines")),
+        ("hotkeys",             ("input_mode", "push_to_talk",
+                                 "key_start", "key_stop", "key_send", "key_cancel")),
+        ("microphone",          ("mic",)),
+    ]
+
+    @staticmethod
+    def _cfg_snapshot(cfg) -> dict:
+        import dataclasses
+        return dataclasses.asdict(cfg)
+
+    def _diff_requires_restart(self, snap_before: dict, snap_after: dict) -> list[str]:
+        reasons = []
+        for label, fields in self._RESTART_FIELDS:
+            if any(snap_before.get(f) != snap_after.get(f) for f in fields):
+                reasons.append(label)
+        return reasons
+
+    def _set_status(self, msg: str, *, warning: bool = False) -> None:
+        colour = "#e67e00" if warning else "#2a7d2a"
+        self._status_lbl.set_markup(
+            f'<span foreground="{colour}" size="small">{GLib.markup_escape_text(msg)}</span>')
+        self._status_lbl.show()
+        if warning:
+            self._save_restart_btn.get_style_context().add_class("suggested-action")
+        else:
+            self._save_restart_btn.get_style_context().remove_class("suggested-action")
+
+    def _clear_status(self) -> bool:
+        self._status_lbl.hide()
+        return False  # don't repeat the timeout
 
     def _on_response(self, dlg, resp):
         if resp in (RESP_SAVE, RESP_SAVE_RESTART):
-            self._force_build_tabs()   # ensure every tab's fields exist
+            self._force_build_tabs()
         if resp == RESP_SAVE:
+            import copy
+            snap_before = self._cfg_snapshot(self.cfg)
             if self._collect():
                 save(self.cfg)
-                self._info("Saved. Restart Blitztext to apply engine/hotkey changes.")
+                snap_after = self._cfg_snapshot(self.cfg)
+                needs = self._diff_requires_restart(snap_before, snap_after)
+                if needs:
+                    self._set_status(
+                        f"⚠ Saved — restart needed for: {', '.join(needs)}",
+                        warning=True)
+                else:
+                    self._set_status("✓ Settings applied")
+                    GLib.timeout_add(4000, self._clear_status)
             return
         if resp == RESP_SAVE_RESTART:
             if self._collect():
@@ -1539,6 +3281,7 @@ class SettingsDialog:
                 self._cleanup()
                 os.execv(sys.executable, [sys.executable, "-m", "blitztext", "tray"])
             return
+        # X button / window close
         self._cleanup()
         dlg.destroy()
 

@@ -9,6 +9,400 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.32] - 2026-06-10
+
+### Changed
+- **Settings dialog navigation redesigned.** Replaced the `Gtk.Notebook` tab bar
+  with a 170 px left sidebar (`Gtk.ListBox` of flat buttons with section headers)
+  and a `Gtk.Stack` for the content area. The dialog is now 860 × 700 px by default.
+  Lazy-loading is preserved: each page is built only on first visit.
+- **Input page split into Keyboard and Wakeword.** The former "Input" tab is now
+  two separate pages — "Keyboard" (input mode, hotkeys, quality gate, audio cues)
+  and "Wakeword" (enable switch, mic level, test button, silence timeout, cancel/send
+  words, engine preset selector, engine config card, wakeword sound cues). Either
+  page may be visited first; the mic level-meter starts on whichever is opened.
+- **Benchmark page split into Benchmark — STT and Benchmark — Wakeword.** The
+  single "Benchmark" tab is now two dedicated pages. All field names and collect
+  logic are unchanged.
+
+## [2.03.31] - 2026-06-10
+
+### Added
+- **First-run setup wizard.** A paged GTK dialog (`setup_wizard.py`) guides
+  new users through five steps: trigger method (keyboard / wakeword / both),
+  keyboard shortcut assignment (with live key capture), wakeword server
+  configuration (with connection test), speech-to-text engine selection
+  (local Whisper model size or remote API), and optional AI rewriting (LLM
+  endpoint + model). Navigation has Back, Next, and Skip buttons. The wizard
+  shows automatically on first launch (before the daemon starts) and can be
+  reopened via the "Setup Wizard…" button in the Settings header bar.
+  Completing the wizard sets `setup_complete = true` in the config so it
+  does not reappear.
+
+## [2.03.30] - 2026-06-10
+
+### Added
+- **Dedicated wakeword models for cancel and send.** Two new optional fields in
+  the wakeword settings card — "Cancel model" and "Send model" — let you assign
+  a specific wakeword model (e.g. a custom "stop" or "send it" ONNX model) to
+  each action. When configured, a `WakewordActionListener` opens a second
+  Wyoming connection during recording and fires the action the instant the model
+  triggers — no Whisper pass, no silence timer. The Whisper-based cancel watcher
+  from v2.03.29 remains as a fallback when no cancel wakeword model is set.
+  Model dropdowns are populated from the same server fetch as the trigger model.
+
+## [2.03.29] - 2026-06-10
+
+### Changed
+- **Cancel keywords now fire immediately during wakeword recording.** A
+  real-time `_CancelWatcher` accumulates raw PCM from the VAD level-meter,
+  then every ~0.6 s of new audio runs a fast `beam_size=1` local transcription
+  pass to check for cancel keywords. When one is found it calls
+  `cancel_dictation()` instantly — no waiting for the silence timer or a full
+  transcription of the whole clip. Falls back to the existing post-transcription
+  check if no local transcriber is loaded or no cancel keywords are configured.
+
+## [2.03.28] - 2026-06-10
+
+### Fixed
+- **Dropdowns no longer change on accidental scroll.** All `ComboBoxText`
+  widgets in the settings dialog now swallow scroll events so hovering over
+  a combo and scrolling doesn't silently change the selected value.
+
+## [2.03.27] - 2026-06-10
+
+### Added
+- **Overlay × cancel button.** A small × button appears in the top-right corner
+  of the on-screen waveform HUD while recording or streaming. Clicking it
+  cancels the current dictation. The rest of the overlay remains fully
+  click-through; only the button area receives pointer events.
+- **Cancel/Send keyboard shortcuts in Wakeword tab.** The "Cancel words" and
+  "Send words" rows in the Input → Wakeword section now include an inline
+  shortcut entry + "Set" button, so you can configure `key_cancel` /
+  `key_send` right next to the spoken-word equivalents without visiting the
+  keyboard-mode card.
+
+## [2.03.26] - 2026-06-10
+
+### Fixed
+- **Cancel key now works during wakeword-triggered recording.** Previously the
+  `ModifierScheme` state machine stayed in "idle" when the wakeword fired
+  (it bypasses the key-press path), so the cancel hotkey was silently ignored.
+  It now checks `daemon.is_recording` as a fallback so it fires regardless of
+  how recording started.
+
+### Added
+- **"✕ Cancel recording" in the tray menu.** Always visible; grayed out when
+  idle, enabled as soon as recording starts (wakeword or manual). The primary
+  escape hatch when the wakeword fires on audiobook / TV audio and spoken
+  cancel words can't be heard over the background audio.
+
+## [2.03.25] - 2026-06-10
+
+### Changed
+- **Smart Save — no restart popup anymore.** "Save" now diffs the changed
+  settings against what requires a daemon restart. If only safe settings
+  changed (language, sounds, LLM prompt, keywords, overlay, …) it shows
+  "✓ Settings applied" inline in the header bar for 4 s and closes the
+  dialog. If restart-required fields changed (STT engine, hotkeys,
+  microphone, wakeword server) it shows "⚠ Saved — restart needed for: …"
+  and highlights "Save & Restart" so you can act on it. No modal popups.
+
+## [2.03.24] - 2026-06-10
+
+### Fixed
+- **Input level meter works without visiting General first.** The level meter
+  was only started inside `_build_general()` and referenced `mic_level`
+  unconditionally. If Input was opened first the meter never started. Now
+  `_build_input()` also starts the meter when it isn't running yet, and both
+  level bars (`mic_level` in General and `ww_mic_level` in Input) are updated
+  defensively via `hasattr` so either tab can be visited in any order.
+
+## [2.03.23] - 2026-06-10
+
+### Fixed
+- **Wakeword results table actually resizable.** The controls pane is now
+  wrapped in a ScrolledWindow with `shrink=True`, so dragging the divider
+  upward collapses the controls and expands the table freely.
+
+## [2.03.22] - 2026-06-10
+
+### Changed
+- **Wakeword benchmark uses a split pane.** The TTS config / engine selector
+  controls sit in the top pane; the results table sits in the bottom pane.
+  Drag the divider to give the table as much vertical space as needed.
+
+## [2.03.21] - 2026-06-10
+
+### Added
+- **Wakeword results table: sortable columns.** Click any column header to sort
+  ascending/descending. Numeric columns (Detected, Total, Recall %, False fires,
+  Time) sort numerically.
+- **Wakeword results table: CSV export.** "Copy as CSV" copies the table to the
+  clipboard; "Save CSV…" opens a file chooser to write a `.csv` file.
+
+## [2.03.20] - 2026-06-10
+
+### Added
+- **Wakeword benchmark results table.** Results are now shown in a TreeView
+  with one row per engine per voice: Engine | Wakeword | Voice | Detected |
+  Total | Recall % | False fires | Time. Rows are colour-coded green/orange/red
+  by recall. An aggregate "ALL (N voices)" row is appended per engine.
+
+### Fixed
+- **Section header icons now vertically centred with the headline text.**
+  The `.bt-section` CSS class was inadvertently applied to the icon widget,
+  giving it a 14 px top margin and pushing it down. The image no longer
+  receives that class; a `set_pixel_size(14)` pin ensures consistent sizing.
+
+## [2.03.19] - 2026-06-10
+
+### Added
+- **Wakeword engine checkboxes in benchmark.** A row of checkboxes above the
+  "Run wakeword benchmark" button lets you pick which engines to include.
+  All are checked by default.
+- **Wakeword model selector in benchmark.** A "Wakeword" combo lets you
+  override which wakeword phrase (model) to test. Leave empty for the default
+  (each engine uses its own configured model). Pick a specific model (e.g.
+  `okay_computer`) to test that phrase on every selected engine.
+
+## [2.03.18] - 2026-06-10
+
+### Fixed
+- **TTS model dropdown no longer floods with voice names.** Servers like Kokoro
+  expose each voice as a `/models` entry. The ⟳ button now detects this case
+  and skips filling the model combo, prompting the user to type the model id
+  manually (e.g. `kokoro`). The status line shows "type model id manually" as
+  a hint.
+
+### Changed
+- **Wakeword benchmark runs across all engines and shows per-engine results.**
+  Previously a callback signature mismatch caused the benchmark to crash when
+  more than one engine was configured. Now progress shows `[1/3] engine name`,
+  and the results panel lists Recall / False fires / time per engine.
+
+## [2.03.17] - 2026-06-10
+
+### Added
+- **Wakeword model fetch feedback.** The ⟳ button now shows a status line while
+  connecting; after loading it reports how many models were found (with their
+  names) or "Unreachable" if the server is down.
+- **Wakeword Quickstart covers all four ports.** The Quickstart menu now lists
+  presets for ports 10400–10403, plus `hey_jarvis` and `alexa` variants.
+- **Wakeword info box.** An info banner explains how wyoming-openwakeword works,
+  where to put model files, and lists the common built-in models.
+
+## [2.03.16] - 2026-06-10
+
+### Added
+- **MP3/OGG/FLAC support for sound cues.** The sound file picker now accepts
+  WAV, MP3, OGG, FLAC, M4A, AAC, AIFF, and Opus. Playback uses `ffplay` or
+  `gst-play-1.0` as a universal fallback when the native `pw-play`/`paplay`
+  can't handle the format.
+- **Browse dialog with auto-preview.** The 📁 browse button opens a
+  `FileChooserDialog`; selecting a file auto-plays it so you can hear it before
+  confirming. The ▶ play button still works on the current selection.
+
+## [2.03.15] - 2026-06-10
+
+### Added
+- **Wakeword engine CRUD.** The wakeword server section now has the same full
+  management UI as STT engines: a named-preset selector combo, + Add, Quickstart
+  (with 4 common wyoming-openwakeword templates), ⟳ reload, and Delete. Existing
+  users are migrated: their `wakeword_uri` / `wakeword_model` become the first
+  preset automatically.
+
+## [2.03.14] - 2026-06-10
+
+### Fixed
+- **Engines tab.** Removed the "Internal engine — device & precision" section
+  header. The Device and Compute type fields already only appear when a local
+  engine type is selected; the separate header was redundant.
+
+## [2.03.13] - 2026-06-10
+
+### Changed
+- **Settings header bar.** Save and Save & Restart moved from the bottom button
+  bar into the title bar (GTK HeaderBar). The X button closes without saving.
+  Bottom button row removed.
+- **Section icon alignment.** Icons in section headers are now vertically
+  centred with the label text (`SMALL_TOOLBAR` size, `valign=CENTER`).
+
+## [2.03.12] - 2026-06-10
+
+### Added
+- **Icons in settings.** All tab labels (Presets, Engines, Input, General,
+  Benchmark, Log, Manual, About) and every section header inside each tab now
+  show a small GTK symbolic icon, making the layout easier to scan.
+
+### Fixed
+- **Resize grip position.** The grip indicator now appears correctly at the
+  bottom-right corner below the notebook, not misplaced in the tab bar.
+
+## [2.03.11] - 2026-06-09
+
+### Added
+- **Resize grip indicator.** A dotted SE-corner grip is drawn over the
+  bottom-right of the settings window so users discover it is resizable.
+
+## [2.03.10] - 2026-06-09
+
+### Fixed
+- **Server RAM probe.** Prometheus `/metrics` is almost always at the server
+  root (`http://host:port/metrics`), not under `/v1`. Now tries the root URL
+  first before falling back to the API base path.
+
+## [2.03.09] - 2026-06-09
+
+### Added
+- **Server RAM in benchmark.** For remote/Docker STT engines the benchmark now
+  probes the server's Prometheus `/metrics` endpoint for
+  `process_resident_memory_bytes` (standard Python/Go exporter) or
+  `container_memory_rss` (cAdvisor) and shows the server-side RSS in MB in the
+  RAM column. Falls back to `server` when the endpoint is not exposed.
+
+## [2.03.08] - 2026-06-09
+
+### Fixed
+- **Engines tab layout.** The "Internal engine — device & precision" section is
+  now hidden when a remote (Server) or streaming engine type is selected —
+  removing the confusing whitespace gap and irrelevant device controls for
+  non-local engines.
+
+## [2.03.01] - 2026-06-09
+
+### Added
+- **RAM usage column in benchmark.** The results table now shows a **RAM (MB)**
+  column — the increase in process RSS while the transcription ran. For local
+  models this captures the memory cost of loading the model on first use; for
+  remote engines it shows `—` (work happens server-side). Values are measured via
+  `/proc/self/status` (VmRSS), so they reflect actual resident memory, not
+  virtual address space.
+
+## [2.03.00] - 2026-06-09
+
+### Fixed
+- **"Not responding" / system instability on Save.** `_collect()` was calling
+  `socket.create_connection()` *synchronously* on the GTK main thread when
+  wakeword is enabled — freezing the UI for up to 1.5 s (longer if DNS is slow).
+  The check is now done on a daemon thread and the result is logged instead of
+  blocking the save path.
+- **GTK thread-safety crash in wakeword model load.** `_ww_load()` read
+  `self.ww_uri.get_text()` from inside a background thread — unsafe. The URI is
+  now captured on the main thread before the thread is spawned.
+- **HTTP 404 with WhisperX and other non-standard endpoints.** The remote
+  transcription call always appended `/audio/transcriptions` to the base URL, but
+  services like WhisperX use `/transcribe` as the full path. The URL path is now
+  inspected: if it is anything other than empty / `/v1` / `/v1.0`, the URL is
+  used as the complete endpoint with nothing appended — so
+  `http://host:8081/transcribe` works out of the box.
+- **Log levels.** `logbuffer` now stores `(timestamp, level, message)` tuples and
+  accepts a `level=` keyword (`DEBUG` / `INFO` / `WARNING` / `ERROR`). The Log
+  tab gains a **Level** dropdown (Verbose · Info · Warning · Error) that filters
+  the displayed entries live. Wakeword and socket errors are now tagged
+  `WARNING`; library records are forwarded at their native level.
+
+### Added
+- **Wakeword server preset dropdown** (Input → Hands-free wakeword). A
+  **Server preset** combo lists all configured wakeword server engines by name.
+  Picking one auto-fills the URI and model fields and re-probes reachability.
+  The selection is persisted as `wakeword_active` in config.
+
+## [2.02.03] - 2026-06-09
+
+### Added
+- Wakeword server preset dropdown in Input tab.
+
+## [2.02.02] - 2026-06-09
+
+### Fixed
+- License tab now renders with markdown styling.
+- Benchmark pane minimum height (320 px, `shrink=False`) prevents the engine
+  list or results table from collapsing to zero when the window is small.
+
+## [2.02.01] - 2026-06-09
+
+### Added
+- Last benchmark time and accuracy shown on the selected STT engine in the
+  Engines tab. Persisted to config so it survives restarts.
+
+## [2.02.00] - 2026-06-09
+
+### Added
+- **Language metadata in benchmark.** The engine checkbox list shows supported
+  language codes next to each engine (fetched async). Filter box searches by
+  language code. Results table has a **Lang** column. Data comes from the
+  `/v1/models` `language` field (faster-whisper-server) or NVIDIA NIM `/metadata`.
+
+## [1.9.5] - 2026-06-09
+
+### Added
+- **Emoji picker search.** A search field at the top of the emoji picker filters
+  all categories in real time using Unicode character names (e.g. "fire", "dog",
+  "heart"). Typing hides the category bar and shows matching results; clearing
+  restores the category view.
+
+### Fixed
+- **Manual tab now shows content.** `MANUAL.md` is copied next to the package
+  module so the Manual tab finds it in both venv and deb installs.
+- **Info banner no longer bright blue.** The `.bt-infobox` background now uses
+  a neutral 5 % tint of the foreground colour instead of the theme accent
+  colour, so text stays readable on any theme.
+
+## [1.9.4] - 2026-06-09
+
+### Changed
+- **Settings UI completely redesigned.** All six settings tabs (Presets, Engines,
+  Input, General, Input, General) now use a card-based layout following GTK3 best
+  practices: related fields are grouped inside visually distinct cards with bold
+  section titles. CSS is injected at start-up to give cards a consistent rounded
+  border (`boxed-list` + `bt-card`) and a styled info banner at the top of each
+  tab.
+- **Dialog is larger (740×700 px) and every tab scrolls.** The notebook pages
+  now wrap their content in a `Gtk.ScrolledWindow` so no fields are ever clipped,
+  even on small screens.
+- **Engines toolbar reorganised.** Creation actions (+ Add, + Stream, Quickstart)
+  are left-aligned; destructive/status actions (Delete, Test, ⟳) are
+  right-aligned via `pack_end`, making the bar scannable at a glance.
+- **Section titles replace plain separators.** The old `Gtk.Separator` +
+  unstyled `Gtk.Label` pattern is gone; every section now has a small, dimmed,
+  bold all-caps header rendered with markup.
+- **Cleaner section names.** "WW - Wakeword (Hands-free)" → "Hands-free
+  wakeword"; "Audio cues (manual dictation)" → "Audio cues (keyboard / hotkey
+  dictation)"; "Local engine … device & precision" → "Internal engine — device &
+  precision".
+
+## [1.9.3] - 2026-06-09
+
+### Added
+- **ⓘ info buttons on every settings field.** Each field in every tab now has a
+  small information icon that opens a plain-language help popover when clicked —
+  so non-technical users can understand what each setting does without hovering
+  or reading the manual.
+- **Manual tab in Settings.** A new "Manual" tab shows the full `MANUAL.md`
+  reference doc directly inside the Settings window.
+- **Quickstart templates for engines.** A "Quickstart ▾" button in the STT and
+  LLM engine toolbars opens a menu of common services (OpenAI, Groq, OpenRouter,
+  Ollama, LM Studio, vLLM, llama-swap, faster-whisper-server, NVIDIA Riva) and
+  pre-fills the form — one click to configure a provider.
+
+### Changed
+- **Engine type names are now human-readable.** STT types now read "Internal —
+  faster-whisper, runs inside the app", "Server — OpenAI-compatible API (LAN or
+  cloud)", and "Realtime — NVIDIA Riva / NIM streaming" instead of the raw
+  identifiers. LLM types read "LAN server — runs on your machine or local
+  network" and "Cloud service — OpenAI, Groq, OpenRouter, …".
+- **Device selector now shows "GPU (CUDA)" instead of "cuda"**, and compute
+  types have plain-language descriptions (e.g. "int8 — fast, less memory").
+
+## [1.9.2] - 2026-06-09
+
+### Added
+- **Emoji picker for preset icons.** The "Icon (emoji)" field in Settings →
+  Presets now has a 😀 button that opens a scrollable emoji grid (60 common
+  emojis across six categories). Click any emoji to insert it — or keep typing
+  directly into the field as before.
+
 ## [1.9.1] - 2026-06-08
 
 ### Changed
