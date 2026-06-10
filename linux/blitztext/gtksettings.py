@@ -2485,12 +2485,18 @@ notebook.bt-nb tab:checked label {
         results_box.pack_start(ww_sw, True, True, 0)
         results_box.pack_start(self.wwb_summary, False, False, 0)
 
+        # Wrap controls in a ScrolledWindow so the pane can shrink past its
+        # natural height when the user drags the divider upward.
+        ctrl_sw = Gtk.ScrolledWindow()
+        ctrl_sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        ctrl_sw.set_min_content_height(120)
+        ctrl_sw.add(ctrl)
+
         # ---- Paned: drag the divider to give more space to the table ----
         ww_paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
-        ww_paned.pack1(ctrl, resize=False, shrink=False)
+        ww_paned.pack1(ctrl_sw, resize=True, shrink=True)
         ww_paned.pack2(results_box, resize=True, shrink=False)
-        ww_paned.set_position(340)
-        ww_paned.set_size_request(-1, 260)
+        ww_paned.set_position(260)
         page.pack_start(ww_paned, True, True, 4)
 
     def _run_bench(self, _b) -> None:

@@ -9,6 +9,13 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.23] - 2026-06-10
+
+### Fixed
+- **Wakeword results table actually resizable.** The controls pane is now
+  wrapped in a ScrolledWindow with `shrink=True`, so dragging the divider
+  upward collapses the controls and expands the table freely.
+
 ## [2.03.22] - 2026-06-10
 
 ### Changed
