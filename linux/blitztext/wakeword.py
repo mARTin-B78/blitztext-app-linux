@@ -112,6 +112,8 @@ class WakewordListener:
                                 self._handle_detection()
                                 
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len > 10 * 1024 * 1024:
+                                raise ValueError(f"Payload length {payload_len} exceeds maximum allowed size")
                             if payload_len > 0:
                                 # Consume payload
                                 remaining = payload_len
@@ -258,6 +260,8 @@ class WakewordActionListener:
                                     self._stop_event.set()   # one-shot: stop after first fire
                                     cb()
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len > 10 * 1024 * 1024:
+                                raise ValueError(f"Payload length {payload_len} exceeds maximum allowed size")
                             if payload_len > 0:
                                 remaining = payload_len
                                 while remaining > 0:
