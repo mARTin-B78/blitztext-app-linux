@@ -265,11 +265,8 @@ cd blitztext-app-linux/linux
 
 ### Environment Variables
 
-The only environment variable needed is for rewrite workflows that use a cloud LLM:
-
-```bash
-export OPENAI_API_KEY=sk-...    # only if using OpenAI or a keyed endpoint
-```
+The only environment variable needed is for rewrite workflows that use a cloud LLM.
+Export the `OPENAI_API_KEY` variable with your key before running the app.
 
 The config file (`~/.config/blitztext/config.toml`) references environment variable *names*, never the keys themselves. Local STT and local LLM endpoints typically require no key.
 
@@ -311,9 +308,7 @@ That's it. The transcribed text appears where your cursor was.
 
 ### 4. Try a rewrite workflow
 
-```bash
-export OPENAI_API_KEY=sk-...   # or point at a local LLM in Settings
-```
+Make sure to export your `OPENAI_API_KEY` environment variable first, or point at a local LLM in Settings.
 
 1. Press `Ctrl+Super` → speak something rough like "hey john can you send me the report"
 2. Press `Ctrl` — the text appears as a plain transcript.

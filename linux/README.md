@@ -202,7 +202,7 @@ Three front-ends, same engine layer (STT engines + global hotkeys + xdotool typi
 
 ```bash
 # optional: only needed for the "rewrite" workflows
-export OPENAI_API_KEY=sk-...
+# Export your OPENAI_API_KEY environment variable here
 
 .venv/bin/python -m blitztext tray   # system-tray menu (macOS-menu-bar-like, default)
 .venv/bin/python -m blitztext gui    # control-panel window
