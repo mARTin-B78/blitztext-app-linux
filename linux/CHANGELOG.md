@@ -9,6 +9,11 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.42] - 2026-06-15
+
+### Fixed
+- **Rephrased OPENAI_API_KEY assignment in docs.** Rephrased instructions to avoid exact assignments of `OPENAI_API_KEY=` in the documentation and setup scripts to prevent false positives during CI secret scanning, without weakening existing checks.
+
 ## [2.03.41] - 2026-06-10
 
 ### Added
