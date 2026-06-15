@@ -25,7 +25,7 @@ ruff check blitztext tests              # quality gate
 - Check existing open PRs/branches first; never duplicate another agent's work.
 - Never touch `requirements.txt`, `pyrightconfig.json`, or CI configurations unless it is the explicit purpose of your task (e.g., Keeper/Polish).
 - Never commit secrets, real audio, transcripts, or private endpoint URLs. (The CI secret scan actively checks for these).
-- To prevent false positives in CI secret scanning, avoid using exact assignment strings like `OPENAI_API_KEY=` or `OPENAI_API_KEY =` in documentation or setup scripts. Rephrase instead.
+- To prevent false positives in CI secret scanning, avoid using exact assignment strings for the OpenAI API key in documentation or setup scripts. Rephrase instead.
 - Bump `linux/blitztext/__init__.py` and add a `CHANGELOG.md` entry for any user-visible change. SemVer: fix → patch, feature → minor.
 
 ## Journal

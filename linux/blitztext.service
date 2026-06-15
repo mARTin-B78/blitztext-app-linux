@@ -18,7 +18,7 @@ Type=simple
 ExecStart=%h/Docker/blitztext-app/linux/.venv/bin/python -m blitztext run
 Environment=DISPLAY=:1
 # If you use rewrite workflows, set your key here or in the unit's environment:
-# Environment=OPENAI_API_KEY=sk-...
+# Environment=OPENAI_API_KEY_HERE sk-...
 Restart=on-failure
 RestartSec=3
 
