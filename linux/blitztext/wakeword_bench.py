@@ -315,6 +315,8 @@ def _drain_detections(buf: bytes) -> tuple[bytes, int]:
     mistaken for the next header line.
     """
     found = 0
+    if b"\n" not in buf and len(buf) > 65536:
+        raise ValueError("Line length exceeded 64KB")
     while b"\n" in buf:
         line, rest = buf.split(b"\n", 1)
         if len(line) > 65536:
