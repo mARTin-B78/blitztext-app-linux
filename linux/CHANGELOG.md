@@ -9,6 +9,20 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.43] - 2026-06-16
+
+### Fixed
+- **Cancel/Send wakewords are now saved per profile.** They were stored
+  globally, so switching wakeword profiles (or saving) dropped the cancel and
+  send model selections. Each wakeword profile now keeps its own cancel/send
+  models; existing configs migrate their previous global values onto the active
+  profile.
+
+### Changed
+- **Renamed the Wakeword page labels to "Wakeword", "Cancel word" and "Send
+  word"** (instead of "Model name" / "Cancel model" / "Send model") — they're
+  technically models, but users think of them as spoken words.
+
 ## [2.03.42] - 2026-06-16
 
 ### Added

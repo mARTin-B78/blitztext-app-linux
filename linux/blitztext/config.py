@@ -39,6 +39,8 @@ class WakewordEngine:
     name: str = ""
     uri: str = "tcp://127.0.0.1:10400"
     model: str = "okay_computer"
+    cancel_model: str = ""   # wakeword model(s) that cancel an in-progress recording
+    send_model: str = ""     # wakeword model(s) that finish + send (Enter) a recording
 
 
 @dataclass
@@ -295,6 +297,8 @@ def load(path: Path = CONFIG_PATH) -> Config:
             name=e.get("name", ""),
             uri=e.get("uri", "tcp://127.0.0.1:10400"),
             model=e.get("model", "okay_computer"),
+            cancel_model=e.get("cancel_model", ""),
+            send_model=e.get("send_model", ""),
         )
         for e in data.get("wakeword_engine", [])
     ]
@@ -304,7 +308,18 @@ def load(path: Path = CONFIG_PATH) -> Config:
             name=cfg.wakeword_active or "Local wyoming-openwakeword",
             uri=cfg.wakeword_uri,
             model=cfg.wakeword_model,
+            cancel_model=cfg.wakeword_cancel_model,
+            send_model=cfg.wakeword_send_model,
         )]
+    # Migration: older configs stored cancel/send globally; seed them onto the
+    # active engine so per-profile values aren't blank on first load.
+    if cfg.wakeword_cancel_model or cfg.wakeword_send_model:
+        active = next((e for e in cfg.wakeword_engines if e.name == cfg.wakeword_active),
+                      cfg.wakeword_engines[0])
+        if not active.cancel_model:
+            active.cancel_model = cfg.wakeword_cancel_model
+        if not active.send_model:
+            active.send_model = cfg.wakeword_send_model
 
     # LLM engines (default: synthesized from the legacy [rewrite] block).
     cfg.llm_engines = [
@@ -407,7 +422,9 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "last": cfg.bench_last,
         },
         "wakeword_engine": [
-            {"name": e.name, "uri": e.uri, "model": e.model} for e in cfg.wakeword_engines
+            {"name": e.name, "uri": e.uri, "model": e.model,
+             "cancel_model": e.cancel_model, "send_model": e.send_model}
+            for e in cfg.wakeword_engines
         ],
         "stt": {"active": cfg.stt_active},
         "stt_engine": [

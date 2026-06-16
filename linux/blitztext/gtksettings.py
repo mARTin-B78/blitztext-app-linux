@@ -1987,9 +1987,9 @@ class SettingsDialog:
         self.ww_uri.connect("focus-out-event", self._on_ww_uri_leave)
         self.ww_model = _labeled(ww_cfg_card, "Wakeword", MultiPicker("Search models…"), width=LW,
                                  tooltip="Which wake model(s) to listen for (e.g. okay_computer, hey_jarvis). Pick several to accept multiple wakewords. Press ⟳ on the URI field to load models from the server.")
-        self.ww_cancel_model = _labeled(ww_cfg_card, "Cancel model", MultiPicker("none — use text keywords"), width=LW,
+        self.ww_cancel_model = _labeled(ww_cfg_card, "Cancel word", MultiPicker("none — use text keywords"), width=LW,
                                         tooltip="Optional: one or more wakeword models that immediately cancel the recording when heard (e.g. a ‘stop’ model). Faster than the Whisper-based text cancel.")
-        self.ww_send_model = _labeled(ww_cfg_card, "Send model", MultiPicker("none — use text keywords"), width=LW,
+        self.ww_send_model = _labeled(ww_cfg_card, "Send word", MultiPicker("none — use text keywords"), width=LW,
                                       tooltip="Optional: one or more wakeword models that finish recording and press Enter (e.g. a ‘send it’ model).")
         self.ww_combo.connect("changed", self._ww_changed)
 
@@ -2184,9 +2184,9 @@ class SettingsDialog:
         self.ww_uri.set_text(e.uri)
         _fill_combo(self.ww_model, [], e.model)
         if hasattr(self, "ww_cancel_model"):
-            _fill_combo(self.ww_cancel_model, [], self.cfg.wakeword_cancel_model)
+            _fill_combo(self.ww_cancel_model, [], e.cancel_model)
         if hasattr(self, "ww_send_model"):
-            _fill_combo(self.ww_send_model, [], self.cfg.wakeword_send_model)
+            _fill_combo(self.ww_send_model, [], e.send_model)
         self._probe_dot(self.ww_dot, e.uri, 10400)
         self._ww_fetch_models()
 
@@ -2200,6 +2200,10 @@ class SettingsDialog:
         e.name = new_name
         e.uri = self.ww_uri.get_text().strip()
         e.model = _combo_text(self.ww_model)
+        if hasattr(self, "ww_cancel_model"):
+            e.cancel_model = _combo_text(self.ww_cancel_model)
+        if hasattr(self, "ww_send_model"):
+            e.send_model = _combo_text(self.ww_send_model)
         if self.ww_combo.get_active_text() != new_name:
             self.ww_combo.remove(idx)
             self.ww_combo.insert_text(idx, new_name)
@@ -3260,6 +3264,8 @@ class SettingsDialog:
                 c.wakeword_active = e.name
                 c.wakeword_uri = e.uri
                 c.wakeword_model = e.model
+                c.wakeword_cancel_model = e.cancel_model
+                c.wakeword_send_model = e.send_model
             else:
                 c.wakeword_uri = self.ww_uri.get_text().strip()
                 c.wakeword_model = _combo_text(self.ww_model)
