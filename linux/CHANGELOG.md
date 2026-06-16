@@ -9,6 +9,11 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.42] - 2025-02-25
+
+### Security
+- Fixed a denial-of-service vulnerability in the wake-word client where untrusted Wyoming server payloads could cause unbounded memory allocations. Network parsing now strictly caps newline-framed strings to 64KB and binary payloads to 10MB.
+
 ## [2.03.41] - 2026-06-10
 
 ### Added

@@ -383,7 +383,7 @@ class Overlay:
         w = _WIDTH
         body_top = _TAIL_H if self._tail_up else 0
         body_h = self._height - _TAIL_H
-        body_bottom = body_top + body_h
+        body_top + body_h
 
         # Bubble + tail as one path, so the fill/stroke wrap the tail cleanly.
         self._bubble_path(cr, 0, body_top, w, body_h)

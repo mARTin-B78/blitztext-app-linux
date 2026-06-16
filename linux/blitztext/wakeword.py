@@ -97,7 +97,7 @@ class WakewordListener:
                         try:
                             # Read line
                             line = b""
-                            while not line.endswith(b"\n"):
+                            while not line.endswith(b"\n") and len(line) < 65536:
                                 byte = sock.recv(1)
                                 if not byte:
                                     break
@@ -112,6 +112,8 @@ class WakewordListener:
                                 self._handle_detection()
                                 
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len > 10 * 1024 * 1024:
+                                break
                             if payload_len > 0:
                                 # Consume payload
                                 remaining = payload_len
@@ -235,7 +237,7 @@ class WakewordActionListener:
                     while read_active and not self._stop_event.is_set():
                         try:
                             line = b""
-                            while not line.endswith(b"\n"):
+                            while not line.endswith(b"\n") and len(line) < 65536:
                                 byte = sock.recv(1)
                                 if not byte:
                                     return
@@ -258,6 +260,8 @@ class WakewordActionListener:
                                     self._stop_event.set()   # one-shot: stop after first fire
                                     cb()
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len > 10 * 1024 * 1024:
+                                break
                             if payload_len > 0:
                                 remaining = payload_len
                                 while remaining > 0:

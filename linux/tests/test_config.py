@@ -1,8 +1,6 @@
-import pytest
 import tempfile
-import os
 from pathlib import Path
-from blitztext.config import load, save, Config, Workflow, STTEngine, LLMEngine
+from blitztext.config import load, save, Config, Workflow, STTEngine
 
 def test_load_default_config():
     with tempfile.TemporaryDirectory() as tempdir:
@@ -17,7 +15,7 @@ def test_load_default_config():
         assert len(cfg.workflows) > 0
         assert cfg.workflows[0].name == "Transcribe"
         assert cfg.workflows[0].mode == "transcribe"
-        assert cfg.routing_enabled == True
+        assert cfg.routing_enabled
         assert cfg.stt_active == "Local faster-whisper"
 
 def test_save_and_load_config():
