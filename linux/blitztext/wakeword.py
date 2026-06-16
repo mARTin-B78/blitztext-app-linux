@@ -39,9 +39,9 @@ def set_muted(muted: bool) -> None:
 
 
 class WakewordListener:
-    def __init__(self, uri: str, model: str, mic: str, on_detect):
+    def __init__(self, uri: str, models: list[str], mic: str, on_detect):
         self.uri = uri
-        self.model = model
+        self.models = [m for m in models if m]
         self.mic = mic
         self.on_detect = on_detect
         
@@ -80,8 +80,8 @@ class WakewordListener:
             sock.connect((host, port))
             logbuffer.log(f"[wakeword] Connected to {self.uri}")
             
-            # Request detection for the specific model
-            detect_msg = {"type": "detect", "data": {"names": [self.model]}}
+            # Request detection for all configured models
+            detect_msg = {"type": "detect", "data": {"names": self.models}}
             sock.sendall((json.dumps(detect_msg) + "\n").encode("utf-8"))
 
             audio_start = {"type": "audio-start", "data": {"rate": 16000, "width": 2, "channels": 1}}
@@ -109,8 +109,9 @@ class WakewordListener:
                             msg = json.loads(line.decode("utf-8"))
                             
                             if msg.get("type") == "detection":
-                                self._handle_detection()
-                                
+                                name = msg.get("data", {}).get("name", "")
+                                self._handle_detection(name)
+
                             payload_len = msg.get("payload_length", 0)
                             if payload_len > 0:
                                 # Consume payload
@@ -155,7 +156,7 @@ class WakewordListener:
                     proc.kill()
                 reader_thread.join(timeout=1.0)
 
-    def _handle_detection(self):
+    def _handle_detection(self, name: str = ""):
         if time.time() < self._cooldown_until:
             return
 
@@ -163,7 +164,7 @@ class WakewordListener:
             logbuffer.log("[wakeword] Detected, but paused (resume via tray)")
             return
 
-        logbuffer.log(f"[wakeword] Detected '{self.model}'!")
+        logbuffer.log(f"[wakeword] Detected '{name or self.models}'!")
         self._cooldown_until = time.time() + 3.0  # 3s cooldown
         self.on_detect()
 

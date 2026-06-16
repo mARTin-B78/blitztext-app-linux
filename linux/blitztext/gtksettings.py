@@ -348,12 +348,13 @@ def _card_section(parent: Gtk.Box, title: str = "", margin_top: int = 16,
     return lb
 
 
-def _lb_add(lb: Gtk.ListBox, widget: Gtk.Widget) -> None:
+def _lb_add(lb: Gtk.ListBox, widget: Gtk.Widget) -> Gtk.ListBoxRow:
     """Add any widget as a non-interactive row inside a card ListBox."""
     row = Gtk.ListBoxRow()
     row.set_activatable(False); row.set_selectable(False)
     row.add(widget)
     lb.add(row)
+    return row
 
 
 def _entry(text="", placeholder="") -> Gtk.Entry:
@@ -466,15 +467,33 @@ class ModelPicker(Gtk.Box):
         self.pop.show_all(); self.search.set_text(""); self.search.grab_focus()
 
     def _activated(self, _lb, row) -> None:
-        self.entry.set_text(row.get_child().get_text())
+        self.entry.set_text(row.bt_value)
         self.pop.popdown()
 
     def set_models(self, models) -> None:
+        """Populate the dropdown.
+
+        Each entry in `models` is either a plain model-id string, or a dict
+        with 'name' (the id to store/select) and optional 'phrase' /
+        'languages' (shown alongside the id for readability — e.g. the
+        technical id 'okay_nabu' next to its spoken phrase 'Okay Nabu').
+        """
         for child in self.listbox.get_children():
             self.listbox.remove(child)
         for m in models:
+            if isinstance(m, dict):
+                name = m.get("name") or ""
+                phrase = m.get("phrase") or ""
+                langs = m.get("languages") or []
+                extra = " · ".join(p for p in (
+                    phrase if phrase.lower() != name.lower() else "",
+                    ", ".join(langs)) if p)
+                display = f"{name}  —  {extra}" if extra else name
+            else:
+                name, display = m, m
             row = Gtk.ListBoxRow()
-            lbl = Gtk.Label(label=m, xalign=0.0)
+            row.bt_value = name
+            lbl = Gtk.Label(label=display, xalign=0.0)
             lbl.set_margin_top(4); lbl.set_margin_bottom(4); lbl.set_margin_start(8); lbl.set_margin_end(8)
             row.add(lbl); self.listbox.add(row)
         self.listbox.show_all()
@@ -491,7 +510,7 @@ class MultiPicker(ModelPicker):
     for fields that hold several values (e.g. the benchmark's voices)."""
 
     def _activated(self, _lb, row) -> None:
-        val = row.get_child().get_text()
+        val = row.bt_value
         cur = [v.strip() for v in self.entry.get_text().split(",") if v.strip()]
         if val and val not in cur:
             cur.append(val)
@@ -1762,7 +1781,8 @@ class SettingsDialog:
         if tooltip_kw:
             kw_entry.set_tooltip_text(tooltip_kw)
         row1.pack_start(kw_entry, True, True, 0)
-        _lb_add(lb, row1)
+        kw_lb_row = _lb_add(lb, row1)
+        kw_lb_row.set_no_show_all(True)
 
         # Row 2 — shortcut (indented under the label to align with the entry above)
         row2 = Gtk.Box(spacing=8)
@@ -1787,7 +1807,7 @@ class SettingsDialog:
         row2.pack_start(set_btn, False, False, 0)
         _lb_add(lb, row2)
 
-        return kw_entry, key_entry
+        return kw_entry, key_entry, kw_lb_row
 
     def _key_field(self, page: Gtk.Box, label: str, value: str, placeholder: str = "", width: int = 150) -> Gtk.Entry:
         row = Gtk.Box(spacing=10); row.set_margin_top(3); row.set_margin_bottom(3)
@@ -1910,18 +1930,21 @@ class SettingsDialog:
 
         self.ww_silence = _labeled(ww_card, "Silence to stop (s)", _entry(str(self.cfg.wakeword_silence_seconds)), width=LW,
                                    tooltip="After the wakeword fires, stop recording this many seconds after you stop speaking. Default 2.0.")
-        self.cancel_keywords, self.ww_key_cancel = self._kw_shortcut_row(
+        self.cancel_keywords, self.ww_key_cancel, self._ww_cancel_kw_row = self._kw_shortcut_row(
             ww_card, "Cancel words", ", ".join(self.cfg.cancel_keywords),
             "abbrechen, cancel", self.cfg.key_cancel,
             tooltip_kw="Say one of these at the start or end of a clip to DISCARD it — nothing is typed. Empty = off.",
             tooltip_key="Keyboard shortcut that cancels dictation (works even during wakeword recording).",
             width=LW)
-        self.send_keywords, self.ww_key_send = self._kw_shortcut_row(
+        self.send_keywords, self.ww_key_send, self._ww_send_kw_row = self._kw_shortcut_row(
             ww_card, "Send words", ", ".join(self.cfg.send_keywords),
             "computer send, computer abschicken", self.cfg.key_send,
             tooltip_kw="Say one of these to type AND press Enter (spoken ‘submit’). Use a distinctive multi-word phrase. Empty = off.",
             tooltip_key="Keyboard shortcut that stops recording and pastes with Enter.",
             width=LW)
+        # Hidden until the wakeword server confirms it has usable models —
+        # text keywords are pointless if hands-free wakeword can't run at all.
+        self._ww_set_kw_rows_visible(False)
 
         # ── Engine selector bar ───────────────────────────────────────────────
         ww_bar = Gtk.Box(spacing=6); ww_bar.set_margin_top(6)
@@ -1962,12 +1985,12 @@ class SettingsDialog:
         self.ww_uri = _url_field_lb(ww_cfg_card, "Wakeword server", "tcp://127.0.0.1:10400",
                                     self._ww_reload, dot=self.ww_dot, width=LW)
         self.ww_uri.connect("focus-out-event", self._on_ww_uri_leave)
-        self.ww_model = _labeled(ww_cfg_card, "Model name", _model_combo("Search models…"), width=LW,
-                                 tooltip="Which wake model to listen for (e.g. okay_computer, hey_jarvis). Press ⟳ on the URI field to load models from the server.")
-        self.ww_cancel_model = _labeled(ww_cfg_card, "Cancel model", _model_combo("none — use text keywords"), width=LW,
-                                        tooltip="Optional: a wakeword model that immediately cancels the recording when heard (e.g. a ‘stop’ model). Faster than the Whisper-based text cancel.")
-        self.ww_send_model = _labeled(ww_cfg_card, "Send model", _model_combo("none — use text keywords"), width=LW,
-                                      tooltip="Optional: a wakeword model that finishes recording and presses Enter (e.g. a ‘send it’ model).")
+        self.ww_model = _labeled(ww_cfg_card, "Model name", MultiPicker("Search models…"), width=LW,
+                                 tooltip="Which wake model(s) to listen for (e.g. okay_computer, hey_jarvis). Pick several to accept multiple wakewords. Press ⟳ on the URI field to load models from the server.")
+        self.ww_cancel_model = _labeled(ww_cfg_card, "Cancel model", MultiPicker("none — use text keywords"), width=LW,
+                                        tooltip="Optional: one or more wakeword models that immediately cancel the recording when heard (e.g. a ‘stop’ model). Faster than the Whisper-based text cancel.")
+        self.ww_send_model = _labeled(ww_cfg_card, "Send model", MultiPicker("none — use text keywords"), width=LW,
+                                      tooltip="Optional: one or more wakeword models that finish recording and press Enter (e.g. a ‘send it’ model).")
         self.ww_combo.connect("changed", self._ww_changed)
 
         self._ww_load_idx(active_idx)
@@ -2232,6 +2255,26 @@ class SettingsDialog:
         self._probe_dot(self.ww_dot, self.ww_uri.get_text(), 10400)
         self._ww_fetch_models()
 
+    def _ww_set_kw_rows_visible(self, visible: bool) -> None:
+        """Show/hide the 'Cancel words' / 'Send words' text-keyword rows.
+
+        They only matter when hands-free wakeword can actually run, which
+        requires the server to have reported at least one usable model.
+        """
+        for attr in ("_ww_cancel_kw_row", "_ww_send_kw_row"):
+            row = getattr(self, attr, None)
+            if row is None:
+                continue
+            if visible:
+                # The row's no_show_all blocks show_all() from ever reaching
+                # its never-shown content, so show the content explicitly.
+                content = row.get_child()
+                if content is not None:
+                    content.show_all()
+                row.show()
+            else:
+                row.hide()
+
     def _ww_fetch_models(self) -> None:
         """Background fetch of model list from wyoming server."""
         uri = self.ww_uri.get_text().strip()  # capture on GTK thread
@@ -2257,32 +2300,44 @@ class SettingsDialog:
                         if not chunk: break
                         payload += chunk
                     data = json.loads(payload.decode("utf-8"))
-                    models = [m.get("name") for w in data.get("wake", [])
-                              for m in w.get("models", []) if m.get("name")]
-                    def apply(models=models):
+                    # Flatten every model from every wake engine the server
+                    # reports (a server can run several wake engines — e.g.
+                    # microWakeWord and openWakeWord side by side — and each
+                    # one lists its own set of wakewords under it).
+                    models_detail = [
+                        {"name": m.get("name"), "phrase": m.get("phrase"),
+                         "languages": m.get("languages")}
+                        for w in data.get("wake", [])
+                        for m in w.get("models", []) if m.get("name")
+                    ]
+                    models = [m["name"] for m in models_detail]
+                    def apply(models=models, models_detail=models_detail):
                         if models:
                             cur = _combo_text(self.ww_model)
-                            _fill_combo(self.ww_model, models, cur or models[0])
+                            _fill_combo(self.ww_model, models_detail, cur or models[0])
                             # Also populate cancel/send model pickers with the same list.
                             # Preserve whatever the user already typed; empty stays empty.
                             if hasattr(self, "ww_cancel_model"):
                                 cur_c = _combo_text(self.ww_cancel_model)
-                                _fill_combo(self.ww_cancel_model, models, cur_c)
+                                _fill_combo(self.ww_cancel_model, models_detail, cur_c)
                             if hasattr(self, "ww_send_model"):
                                 cur_s = _combo_text(self.ww_send_model)
-                                _fill_combo(self.ww_send_model, models, cur_s)
+                                _fill_combo(self.ww_send_model, models_detail, cur_s)
                             if hasattr(self, "ww_status"):
                                 self.ww_status.set_markup(
                                     f'<span foreground="#4a8" size="small">'
                                     f'{len(models)} model{"s" if len(models) != 1 else ""} loaded: '
                                     f'{", ".join(models)}</span>')
+                            self._ww_set_kw_rows_visible(True)
                         else:
                             if hasattr(self, "ww_status"):
                                 self.ww_status.set_markup(
                                     '<span foreground="#888" size="small">Connected — no models found</span>')
+                            self._ww_set_kw_rows_visible(False)
                     GLib.idle_add(apply)
             except Exception as exc:
                 def show_err(exc=exc):
+                    self._ww_set_kw_rows_visible(False)
                     if hasattr(self, "ww_status"):
                         self.ww_status.set_markup(
                             f'<span foreground="#c44" size="small">Unreachable: {exc}</span>')
@@ -2303,7 +2358,7 @@ class SettingsDialog:
             
             listener = WakewordListener(
                 uri=self.ww_uri.get_text().strip(),
-                model=_combo_text(self.ww_model),
+                models=[m.strip() for m in _combo_text(self.ww_model).split(",") if m.strip()],
                 mic=self._selected_mic_name(),
                 on_detect=on_detect
             )

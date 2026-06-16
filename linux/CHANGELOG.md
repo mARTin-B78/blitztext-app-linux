@@ -9,6 +9,23 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.42] - 2026-06-16
+
+### Added
+- **Multi-select wakeword/cancel/send models.** The "Model name", "Cancel
+  model" and "Send model" pickers on the Wakeword page now accept several
+  models at once (e.g. listen for `computer, komputer, hey_jarvis` as
+  wakewords, or treat any of `abbruch, komputer_stop, cancel` as a cancel
+  trigger), instead of being limited to one model each.
+- **Model picker shows the spoken phrase and languages**, not just the
+  technical model id (e.g. `okay_nabu — Okay Nabu · en`), making it easier to
+  tell similarly-named models apart.
+
+### Changed
+- **"Cancel words" / "Send words" are now hidden until the wakeword server
+  reports at least one usable model** — they're meaningless if hands-free
+  wakeword can't run at all.
+
 ## [2.03.41] - 2026-06-10
 
 ### Added

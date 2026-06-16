@@ -186,7 +186,7 @@ class Daemon:
                     "resume via the tray 'Pause wakeword' toggle.")
             self._wakeword_listener = WakewordListener(
                 uri=self.cfg.wakeword_uri,
-                model=self.cfg.wakeword_model,
+                models=[m.strip() for m in self.cfg.wakeword_model.split(",") if m.strip()],
                 mic=self.cfg.mic,
                 on_detect=self._on_wakeword,
             )
@@ -324,12 +324,15 @@ class Daemon:
                 self.cfg.wakeword_cancel_model or self.cfg.wakeword_send_model):
             from .wakeword import WakewordActionListener
             cbs: dict = {}
-            if self.cfg.wakeword_cancel_model:
-                cbs[self.cfg.wakeword_cancel_model] = lambda: GLib.idle_add(
-                    self.cancel_dictation)
-            if self.cfg.wakeword_send_model:
-                cbs[self.cfg.wakeword_send_model] = lambda: GLib.idle_add(
-                    lambda: self.finish_dictation(send_enter=True))
+            for m in self.cfg.wakeword_cancel_model.split(","):
+                m = m.strip()
+                if m:
+                    cbs[m] = lambda: GLib.idle_add(self.cancel_dictation)
+            for m in self.cfg.wakeword_send_model.split(","):
+                m = m.strip()
+                if m:
+                    cbs[m] = lambda: GLib.idle_add(
+                        lambda: self.finish_dictation(send_enter=True))
             self._action_listener = WakewordActionListener(
                 uri=self.cfg.wakeword_uri, model_callbacks=cbs, mic=self.cfg.mic)
             self._action_listener.start()
