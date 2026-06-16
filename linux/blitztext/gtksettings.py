@@ -1985,7 +1985,7 @@ class SettingsDialog:
         self.ww_uri = _url_field_lb(ww_cfg_card, "Wakeword server", "tcp://127.0.0.1:10400",
                                     self._ww_reload, dot=self.ww_dot, width=LW)
         self.ww_uri.connect("focus-out-event", self._on_ww_uri_leave)
-        self.ww_model = _labeled(ww_cfg_card, "Model name", MultiPicker("Search models…"), width=LW,
+        self.ww_model = _labeled(ww_cfg_card, "Wakeword", MultiPicker("Search models…"), width=LW,
                                  tooltip="Which wake model(s) to listen for (e.g. okay_computer, hey_jarvis). Pick several to accept multiple wakewords. Press ⟳ on the URI field to load models from the server.")
         self.ww_cancel_model = _labeled(ww_cfg_card, "Cancel model", MultiPicker("none — use text keywords"), width=LW,
                                         tooltip="Optional: one or more wakeword models that immediately cancel the recording when heard (e.g. a ‘stop’ model). Faster than the Whisper-based text cancel.")
