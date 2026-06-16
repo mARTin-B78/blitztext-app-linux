@@ -9,6 +9,17 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.44] - 2026-06-17
+
+### Changed
+- **Reorganized the Wakeword page.** Each profile's *Wakeword*, *Cancel word*
+  and *Send word* model rows now have their own **Test** button (replacing the
+  single global "Test wakeword" button), and the spoken *Cancel words* /
+  *Send words* keyword fields sit directly beside the models they relate to,
+  inside the profile card. The duplicate Cancel/Send keyboard-shortcut rows were
+  removed from the Wakeword page — those shortcuts are configured on the
+  Keyboard page (they always shared the same `key_cancel` / `key_send` keys).
+
 ## [2.03.43] - 2026-06-16
 
 ### Fixed

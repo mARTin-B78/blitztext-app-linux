@@ -1760,19 +1760,21 @@ class SettingsDialog:
         return False
 
     # -- key binding ("Set" button captures the next keypress) ---
-    def _kw_shortcut_row(self, lb, label: str, kw_value: str, kw_placeholder: str,
-                         key_value: str, *, tooltip_kw: str = "", tooltip_key: str = "",
-                         width: int = 150):
-        """Two rows: keywords on top, shortcut underneath."""
-        # Row 1 — keywords
-        row1 = Gtk.Box(spacing=8)
-        row1.set_margin_top(6); row1.set_margin_bottom(2)
-        row1.set_margin_start(12); row1.set_margin_end(8)
+    def _kw_text_row(self, lb, label: str, kw_value: str, kw_placeholder: str,
+                     *, tooltip_kw: str = "", width: int = 150):
+        """A single spoken-keyword text row (no keyboard shortcut).
+
+        Returns ``(entry, lb_row)``; the row carries ``no_show_all`` so the
+        caller can reveal it only once the server reports usable models.
+        """
+        row = Gtk.Box(spacing=8)
+        row.set_margin_top(6); row.set_margin_bottom(6)
+        row.set_margin_start(12); row.set_margin_end(8)
         lbl = Gtk.Label(label=label, xalign=0.0)
         lbl.set_size_request(width, -1)
         if tooltip_kw:
             lbl.set_tooltip_text(tooltip_kw)
-        row1.pack_start(lbl, False, False, 0)
+        row.pack_start(lbl, False, False, 0)
         kw_entry = Gtk.Entry()
         kw_entry.set_text(kw_value)
         kw_entry.set_placeholder_text(kw_placeholder)
@@ -1780,34 +1782,44 @@ class SettingsDialog:
         kw_entry.set_width_chars(1)
         if tooltip_kw:
             kw_entry.set_tooltip_text(tooltip_kw)
-        row1.pack_start(kw_entry, True, True, 0)
-        kw_lb_row = _lb_add(lb, row1)
+        row.pack_start(kw_entry, True, True, 0)
+        if tooltip_kw:
+            row.pack_start(_info_btn(tooltip_kw), False, False, 0)
+        kw_lb_row = _lb_add(lb, row)
         kw_lb_row.set_no_show_all(True)
+        return kw_entry, kw_lb_row
 
-        # Row 2 — shortcut (indented under the label to align with the entry above)
-        row2 = Gtk.Box(spacing=8)
-        row2.set_margin_top(2); row2.set_margin_bottom(6)
-        row2.set_margin_start(12); row2.set_margin_end(8)
-        indent = Gtk.Box(); indent.set_size_request(width, -1)
-        row2.pack_start(indent, False, False, 0)
-        key_lbl = Gtk.Label(label="Shortcut", xalign=0.0)
-        key_lbl.get_style_context().add_class("dim-label")
-        if tooltip_key:
-            key_lbl.set_tooltip_text(tooltip_key)
-        row2.pack_start(key_lbl, False, False, 0)
-        key_entry = Gtk.Entry()
-        key_entry.set_text(key_value)
-        key_entry.set_placeholder_text("<esc>")
-        key_entry.set_size_request(150, -1)
-        if tooltip_key:
-            key_entry.set_tooltip_text(tooltip_key)
-        row2.pack_start(key_entry, False, False, 0)
-        set_btn = Gtk.Button(label="Set")
-        set_btn.connect("clicked", lambda _b, e=key_entry: self._bind_key(e))
-        row2.pack_start(set_btn, False, False, 0)
-        _lb_add(lb, row2)
+    def _model_test_row(self, lb, label: str, placeholder: str, *,
+                        tooltip: str = "", width: int = 150):
+        """A labeled MultiPicker row with a trailing per-row 'Test' button.
 
-        return kw_entry, key_entry, kw_lb_row
+        The Test button listens ~10s and reports whether the model(s) in this
+        row fire. Returns ``(picker, test_btn)``.
+        """
+        picker = MultiPicker(placeholder)
+        row = Gtk.Box(spacing=8)
+        row.set_margin_top(6); row.set_margin_bottom(6)
+        row.set_margin_start(12); row.set_margin_end(8)
+        lbl = Gtk.Label(label=label, xalign=0.0)
+        lbl.set_size_request(width, -1)
+        if tooltip:
+            lbl.set_tooltip_text(tooltip)
+            picker.set_tooltip_text(tooltip)
+        row.pack_start(lbl, False, False, 0)
+        row.pack_start(picker, True, True, 0)
+        status = Gtk.Label(label="", xalign=0.0)
+        status.set_max_width_chars(10)
+        status.set_ellipsize(Pango.EllipsizeMode.END)
+        test_btn = Gtk.Button(label="Test")
+        test_btn.set_tooltip_text("Listen ~10s and check this wake model fires")
+        test_btn.connect("clicked",
+                         lambda _b, p=picker, s=status, b=test_btn: self._ww_test_picker(p, s, b))
+        row.pack_start(test_btn, False, False, 0)
+        row.pack_start(status, False, False, 0)
+        if tooltip:
+            row.pack_start(_info_btn(tooltip), False, False, 0)
+        _lb_add(lb, row)
+        return picker, test_btn
 
     def _key_field(self, page: Gtk.Box, label: str, value: str, placeholder: str = "", width: int = 150) -> Gtk.Entry:
         row = Gtk.Box(spacing=10); row.set_margin_top(3); row.set_margin_bottom(3)
@@ -1920,31 +1932,10 @@ class SettingsDialog:
         _labeled(ww_card, "Input level", self.ww_mic_level, width=LW,
                  tooltip="Live microphone level — the bar should move when you speak.")
 
-        self.ww_test_btn = Gtk.Button(label="Test wakeword"); self.ww_test_btn.set_halign(Gtk.Align.START)
-        self.ww_test_btn.connect("clicked", self._ww_test)
-        self.ww_test_lbl = Gtk.Label(label=""); self.ww_test_lbl.set_xalign(0.0)
-        test_box = Gtk.Box(spacing=10)
-        test_box.pack_start(self.ww_test_btn, False, False, 0)
-        test_box.pack_start(self.ww_test_lbl, False, False, 0)
-        _labeled(ww_card, "", test_box, width=LW)
-
         self.ww_silence = _labeled(ww_card, "Silence to stop (s)", _entry(str(self.cfg.wakeword_silence_seconds)), width=LW,
                                    tooltip="After the wakeword fires, stop recording this many seconds after you stop speaking. Default 2.0.")
-        self.cancel_keywords, self.ww_key_cancel, self._ww_cancel_kw_row = self._kw_shortcut_row(
-            ww_card, "Cancel words", ", ".join(self.cfg.cancel_keywords),
-            "abbrechen, cancel", self.cfg.key_cancel,
-            tooltip_kw="Say one of these at the start or end of a clip to DISCARD it — nothing is typed. Empty = off.",
-            tooltip_key="Keyboard shortcut that cancels dictation (works even during wakeword recording).",
-            width=LW)
-        self.send_keywords, self.ww_key_send, self._ww_send_kw_row = self._kw_shortcut_row(
-            ww_card, "Send words", ", ".join(self.cfg.send_keywords),
-            "computer send, computer abschicken", self.cfg.key_send,
-            tooltip_kw="Say one of these to type AND press Enter (spoken ‘submit’). Use a distinctive multi-word phrase. Empty = off.",
-            tooltip_key="Keyboard shortcut that stops recording and pastes with Enter.",
-            width=LW)
-        # Hidden until the wakeword server confirms it has usable models —
-        # text keywords are pointless if hands-free wakeword can't run at all.
-        self._ww_set_kw_rows_visible(False)
+        # The Cancel/Send keyboard shortcuts live on the Keyboard page; the
+        # spoken cancel/send words now sit with their per-profile models below.
 
         # ── Engine selector bar ───────────────────────────────────────────────
         ww_bar = Gtk.Box(spacing=6); ww_bar.set_margin_top(6)
@@ -1985,12 +1976,24 @@ class SettingsDialog:
         self.ww_uri = _url_field_lb(ww_cfg_card, "Wakeword server", "tcp://127.0.0.1:10400",
                                     self._ww_reload, dot=self.ww_dot, width=LW)
         self.ww_uri.connect("focus-out-event", self._on_ww_uri_leave)
-        self.ww_model = _labeled(ww_cfg_card, "Wakeword", MultiPicker("Search models…"), width=LW,
-                                 tooltip="Which wake model(s) to listen for (e.g. okay_computer, hey_jarvis). Pick several to accept multiple wakewords. Press ⟳ on the URI field to load models from the server.")
-        self.ww_cancel_model = _labeled(ww_cfg_card, "Cancel word", MultiPicker("none — use text keywords"), width=LW,
-                                        tooltip="Optional: one or more wakeword models that immediately cancel the recording when heard (e.g. a ‘stop’ model). Faster than the Whisper-based text cancel.")
-        self.ww_send_model = _labeled(ww_cfg_card, "Send word", MultiPicker("none — use text keywords"), width=LW,
-                                      tooltip="Optional: one or more wakeword models that finish recording and press Enter (e.g. a ‘send it’ model).")
+        self.ww_model, _ = self._model_test_row(
+            ww_cfg_card, "Wakeword", "Search models…", width=LW,
+            tooltip="Which wake model(s) to listen for (e.g. okay_computer, hey_jarvis). Pick several to accept multiple wakewords. Press ⟳ on the URI field to load models from the server.")
+        self.ww_cancel_model, _ = self._model_test_row(
+            ww_cfg_card, "Cancel word", "none — use text keywords", width=LW,
+            tooltip="Optional: one or more wakeword models that immediately cancel the recording when heard (e.g. a ‘stop’ model). Faster than the Whisper-based text cancel.")
+        self.cancel_keywords, self._ww_cancel_kw_row = self._kw_text_row(
+            ww_cfg_card, "Cancel words", ", ".join(self.cfg.cancel_keywords), "abbrechen, cancel", width=LW,
+            tooltip_kw="Say one of these at the start or end of a clip to DISCARD it — nothing is typed. Empty = off.")
+        self.ww_send_model, _ = self._model_test_row(
+            ww_cfg_card, "Send word", "none — use text keywords", width=LW,
+            tooltip="Optional: one or more wakeword models that finish recording and press Enter (e.g. a ‘send it’ model).")
+        self.send_keywords, self._ww_send_kw_row = self._kw_text_row(
+            ww_cfg_card, "Send words", ", ".join(self.cfg.send_keywords), "computer send, computer abschicken", width=LW,
+            tooltip_kw="Say one of these to type AND press Enter (spoken ‘submit’). Use a distinctive multi-word phrase. Empty = off.")
+        # Text keywords are pointless if hands-free wakeword can't run at all —
+        # hide them until the server confirms it has usable models.
+        self._ww_set_kw_rows_visible(False)
         self.ww_combo.connect("changed", self._ww_changed)
 
         self._ww_load_idx(active_idx)
@@ -2348,10 +2351,15 @@ class SettingsDialog:
                 GLib.idle_add(show_err)
         threading.Thread(target=work, daemon=True).start()
 
-    def _ww_test(self, _b) -> None:
-        self.ww_test_btn.set_sensitive(False)
-        self.ww_test_lbl.set_text("Listening for 10s...")
-        
+    def _ww_test_picker(self, picker, status_lbl, btn) -> None:
+        """Listen ~10s for the model(s) in one picker row and report the result."""
+        models = [m.strip() for m in _combo_text(picker).split(",") if m.strip()]
+        if not models:
+            status_lbl.set_markup("<span foreground='red'>no model</span>")
+            return
+        btn.set_sensitive(False)
+        status_lbl.set_markup("<span foreground='#888'>Listening…</span>")
+
         def work():
             from .wakeword import WakewordListener
             import time
@@ -2359,29 +2367,29 @@ class SettingsDialog:
             def on_detect():
                 nonlocal detected
                 detected = True
-            
+
             listener = WakewordListener(
                 uri=self.ww_uri.get_text().strip(),
-                models=[m.strip() for m in _combo_text(self.ww_model).split(",") if m.strip()],
+                models=models,
                 mic=self._selected_mic_name(),
-                on_detect=on_detect
+                on_detect=on_detect,
             )
             listener.start()
-            
+
             start_t = time.time()
             while time.time() - start_t < 10 and not detected:
                 time.sleep(0.1)
-                
+
             listener.stop()
-            
+
             def finish():
-                self.ww_test_btn.set_sensitive(True)
+                btn.set_sensitive(True)
                 if detected:
-                    self.ww_test_lbl.set_markup("<span foreground='green'><b>Detected!</b></span>")
+                    status_lbl.set_markup("<span foreground='green'><b>Detected!</b></span>")
                 else:
-                    self.ww_test_lbl.set_markup("<span foreground='red'>Timed out.</span>")
+                    status_lbl.set_markup("<span foreground='red'>Timed out.</span>")
             GLib.idle_add(finish)
-            
+
         threading.Thread(target=work, daemon=True).start()
 
     # ===== Benchmark ========================================================
@@ -3276,10 +3284,7 @@ class SettingsDialog:
             c.wakeword_send_model = _combo_text(self.ww_send_model) if hasattr(self, "ww_send_model") else ""
             c.cancel_keywords = [k.strip() for k in self.cancel_keywords.get_text().split(",") if k.strip()]
             c.send_keywords = [k.strip() for k in self.send_keywords.get_text().split(",") if k.strip()]
-            if hasattr(self, "ww_key_cancel"):
-                c.key_cancel = self.ww_key_cancel.get_text().strip() or c.key_cancel
-            if hasattr(self, "ww_key_send"):
-                c.key_send = self.ww_key_send.get_text().strip() or c.key_send
+            # Cancel/Send keyboard shortcuts are owned by the Keyboard page now.
             c.tts_url = self.wwb_url.get_text().strip().rstrip("/")
             c.tts_api_key_env = self.wwb_key.get_text().strip()
             c.tts_model = self.wwb_model.get_text().strip()
