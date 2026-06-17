@@ -1983,13 +1983,13 @@ class SettingsDialog:
             ww_cfg_card, "Cancel word", "none — use text keywords", width=LW,
             tooltip="Optional: one or more wakeword models that immediately cancel the recording when heard (e.g. a ‘stop’ model). Faster than the Whisper-based text cancel.")
         self.cancel_keywords, self._ww_cancel_kw_row = self._kw_text_row(
-            ww_cfg_card, "Cancel words", ", ".join(self.cfg.cancel_keywords), "abbrechen, cancel", width=LW,
+            ww_cfg_card, "Custom cancel words", ", ".join(self.cfg.cancel_keywords), "abbrechen, cancel", width=LW,
             tooltip_kw="Say one of these at the start or end of a clip to DISCARD it — nothing is typed. Empty = off.")
         self.ww_send_model, _ = self._model_test_row(
             ww_cfg_card, "Send word", "none — use text keywords", width=LW,
             tooltip="Optional: one or more wakeword models that finish recording and press Enter (e.g. a ‘send it’ model).")
         self.send_keywords, self._ww_send_kw_row = self._kw_text_row(
-            ww_cfg_card, "Send words", ", ".join(self.cfg.send_keywords), "computer send, computer abschicken", width=LW,
+            ww_cfg_card, "Custom send words", ", ".join(self.cfg.send_keywords), "computer send, computer abschicken", width=LW,
             tooltip_kw="Say one of these to type AND press Enter (spoken ‘submit’). Use a distinctive multi-word phrase. Empty = off.")
         # Text keywords are pointless if hands-free wakeword can't run at all —
         # hide them until the server confirms it has usable models.

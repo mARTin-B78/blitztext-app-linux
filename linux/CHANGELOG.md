@@ -9,6 +9,14 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.45] - 2026-06-17
+
+### Changed
+- **Renamed the spoken-keyword fields to "Custom cancel words" / "Custom send
+  words"** to make clear they are the Whisper-transcript fallback (matched in
+  what you said), distinct from the server-side *Cancel word* / *Send word*
+  wakeword models above them.
+
 ## [2.03.44] - 2026-06-17
 
 ### Changed
