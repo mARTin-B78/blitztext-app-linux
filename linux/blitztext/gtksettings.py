@@ -1954,6 +1954,11 @@ class SettingsDialog:
         qs = Gtk.Button(label="Quickstart ▾")
         qs.set_tooltip_text("Fill the form from a common wakeword server template")
         qs.connect("clicked", self._show_ww_templates); ww_bar.pack_start(qs, False, False, 0)
+        dl = Gtk.Button(label="Download…")
+        dl.set_tooltip_text("Download community openWakeWord models into your "
+                            "openWakeWord server's model folder")
+        dl.connect("clicked", self._show_ww_downloader)
+        ww_bar.pack_start(dl, False, False, 0)
         for label, cb, tip in (
             ("Delete", self._ww_delete, "Remove this wakeword engine preset"),
             ("⟳",      lambda _b: self._ww_reload(), "Re-check connection and reload models from the server"),
@@ -2254,6 +2259,279 @@ class SettingsDialog:
         self.ww_uri.set_text(uri)
         _fill_combo(self.ww_model, [model], model)
         self._probe_dot(self.ww_dot, uri, 10400)
+
+    # ── Community wakeword downloader ─────────────────────────────────────────
+    def _show_ww_downloader(self, _b=None) -> None:
+        """Dialog to fetch community openWakeWord models into the server's dir."""
+        from . import wwdownload as WD
+
+        dlg = Gtk.Dialog(title="Download wakeword models",
+                         transient_for=self.dlg, modal=True)
+        dlg.set_default_size(560, 520)
+        box = dlg.get_content_area()
+        box.set_spacing(8)
+        box.set_border_width(12)
+
+        intro = Gtk.Label(xalign=0.0)
+        intro.set_line_wrap(True)
+        intro.set_markup(
+            "Community models from "
+            "<a href='https://github.com/fwartner/home-assistant-wakewords-collection'>"
+            "fwartner/home-assistant-wakewords-collection</a> "
+            "(an <b>openWakeWord</b> collection). They install into the model "
+            "folder of the openWakeWord server this engine points at.")
+        box.pack_start(intro, False, False, 0)
+
+        # Resolve the target folder from the *currently selected engine's* server
+        # so the download lands where that engine actually reads models from.
+        det = WD.autodetect_for_uri(self.ww_uri.get_text())
+        det_dir = det["model_dir"]
+        det_containers = det["containers"]
+
+        # Warning banner when the selected engine is NOT openWakeWord — the
+        # collection's models won't load on a microWakeWord server.
+        warn_lbl = Gtk.Label(xalign=0.0)
+        warn_lbl.set_line_wrap(True)
+        if not det["compatible"]:
+            fw = det["framework"] or "this"
+            warn_lbl.set_markup(
+                f"<span foreground='#b35900'>⚠ The selected engine is a "
+                f"<b>{GLib.markup_escape_text(fw)}</b> server — these openWakeWord "
+                f"models won't load there. They'll be saved to your openWakeWord "
+                f"folder below; switch the active engine to an openWakeWord server "
+                f"to use them.</span>")
+            box.pack_start(warn_lbl, False, False, 0)
+
+        # Target model directory (auto-detected, editable, saved to config).
+        dir_row = Gtk.Box(spacing=6)
+        dir_row.pack_start(Gtk.Label(label="Model folder:", xalign=0.0), False, False, 0)
+        dir_entry = Gtk.Entry()
+        dir_entry.set_hexpand(True)
+        dir_entry.set_text(det_dir or "")
+        dir_row.pack_start(dir_entry, True, True, 0)
+        browse = Gtk.Button(label="Browse…")
+        dir_row.pack_start(browse, False, False, 0)
+        box.pack_start(dir_row, False, False, 0)
+
+        def _browse(_b):
+            fc = Gtk.FileChooserDialog(
+                title="Select openWakeWord model folder", transient_for=dlg,
+                action=Gtk.FileChooserAction.SELECT_FOLDER)
+            fc.add_buttons("Cancel", Gtk.ResponseType.CANCEL,
+                           "Select", Gtk.ResponseType.OK)
+            if dir_entry.get_text():
+                fc.set_current_folder(dir_entry.get_text())
+            if fc.run() == Gtk.ResponseType.OK:
+                dir_entry.set_text(fc.get_filename())
+            fc.destroy()
+        browse.connect("clicked", _browse)
+
+        # Language + search filter.
+        filt_row = Gtk.Box(spacing=6)
+        filt_row.pack_start(Gtk.Label(label="Language:", xalign=0.0), False, False, 0)
+        lang_combo = _block_scroll(Gtk.ComboBoxText())
+        filt_row.pack_start(lang_combo, False, False, 0)
+        search = Gtk.SearchEntry()
+        search.set_placeholder_text("Filter models…")
+        search.set_hexpand(True)
+        filt_row.pack_start(search, True, True, 0)
+        box.pack_start(filt_row, False, False, 0)
+
+        # Model list.
+        store = Gtk.ListStore(str, str)  # display, name
+        view = Gtk.TreeView(model=Gtk.TreeModelFilter(child_model=store))
+        view.set_headers_visible(False)
+        col = Gtk.TreeViewColumn("", Gtk.CellRendererText(), text=0)
+        view.append_column(col)
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+        scroll.add(view)
+        box.pack_start(scroll, True, True, 0)
+
+        tmodel = view.get_model()
+        filter_text = {"q": ""}
+        tmodel.set_visible_func(
+            lambda m, it, _d: filter_text["q"] in (m[it][1] or "").lower())
+        search.connect("search-changed",
+                       lambda e: (filter_text.__setitem__("q", e.get_text().lower()),
+                                  tmodel.refilter()))
+
+        status = Gtk.Label(xalign=0.0)
+        status.set_line_wrap(True)
+        status.get_style_context().add_class("dim-label")
+        box.pack_start(status, False, False, 0)
+
+        opts = Gtk.Box(spacing=6)
+        both_chk = Gtk.CheckButton(label="Also download .onnx copy")
+        both_chk.set_active(True)
+        both_chk.set_tooltip_text("Keep both formats so the model works whether "
+                                  "the server uses the tflite or onnx framework")
+        opts.pack_start(both_chk, False, False, 0)
+        box.pack_start(opts, False, False, 0)
+
+        readme_btn = dlg.add_button("View README", 1)
+        dl_btn = dlg.add_button("Download", Gtk.ResponseType.APPLY)
+        dlg.add_button("Close", Gtk.ResponseType.CLOSE)
+        dl_btn.set_sensitive(False)
+        readme_btn.set_sensitive(False)
+
+        state = {"lang": "en", "models": {}, "sel": None}
+
+        def _selected_name():
+            sel = view.get_selection().get_selected()
+            m, it = sel
+            return m[it][1] if it else None
+
+        def _load_models(lang):
+            status.set_text(f"Loading {lang} models…")
+            store.clear()
+            dl_btn.set_sensitive(False)
+            readme_btn.set_sensitive(False)
+
+            def work():
+                try:
+                    names = WD.list_models(lang)
+                    err = None
+                except Exception as e:
+                    names, err = [], str(e)
+
+                def apply():
+                    if err:
+                        status.set_markup(f"<span foreground='#cc0000'>{GLib.markup_escape_text(err)}</span>")
+                        return
+                    for n in names:
+                        store.append([WD.phrase_from_name(n), n])
+                    status.set_text(f"{len(names)} models — select one.")
+                    return False
+                GLib.idle_add(apply)
+            threading.Thread(target=work, daemon=True).start()
+
+        def _on_lang(c):
+            lang = c.get_active_text()
+            if lang:
+                state["lang"] = lang
+                _load_models(lang)
+
+        def _on_sel(_sel):
+            name = _selected_name()
+            on = name is not None
+            dl_btn.set_sensitive(on)
+            readme_btn.set_sensitive(on)
+            state["sel"] = name
+
+        view.get_selection().connect("changed", _on_sel)
+
+        # Populate languages in a thread (network).
+        def _load_langs():
+            try:
+                langs = WD.list_languages()
+            except Exception:
+                langs = WD.KNOWN_LANGUAGES
+
+            def apply():
+                for lg in langs:
+                    lang_combo.append_text(lg)
+                idx = langs.index("en") if "en" in langs else 0
+                lang_combo.set_active(idx)  # triggers _on_lang
+                return False
+            GLib.idle_add(apply)
+        lang_combo.connect("changed", _on_lang)
+        threading.Thread(target=_load_langs, daemon=True).start()
+
+        def _do_download(name):
+            model_dir = dir_entry.get_text().strip()
+            if not model_dir or not Path(model_dir).is_dir():
+                status.set_markup("<span foreground='#cc0000'>Set a valid model "
+                                  "folder first.</span>")
+                return
+            status.set_text(f"Downloading {name}…")
+            dl_btn.set_sensitive(False)
+            all_fmt = both_chk.get_active()
+            lang = state["lang"]
+
+            def work():
+                try:
+                    variants = WD.list_variants(lang, name)
+                    if not WD.has_tflite(variants) and variants:
+                        warn = (" (only .onnx available — needs the server's "
+                                "onnx framework)")
+                    else:
+                        warn = ""
+                    res = WD.install(lang, name, model_dir,
+                                     variants=variants, all_formats=all_fmt)
+                    err = None
+                except Exception as e:
+                    res, warn, err = None, "", str(e)
+
+                def apply():
+                    dl_btn.set_sensitive(True)
+                    if err:
+                        status.set_markup(
+                            f"<span foreground='#cc0000'>{GLib.markup_escape_text(err)}</span>")
+                        return False
+                    files = ", ".join(res["files"])
+                    status.set_markup(
+                        f"<span foreground='#1a7f37'>Installed "
+                        f"<b>{GLib.markup_escape_text(res['model_id'])}</b></span> "
+                        f"({GLib.markup_escape_text(files)}){GLib.markup_escape_text(warn)}.")
+                    self.cfg.wakeword_model_dir = model_dir
+                    if det_containers:
+                        self.cfg.wakeword_model_container = ",".join(det_containers)
+                    self._ww_offer_restart(det_containers, dlg)
+                    return False
+                GLib.idle_add(apply)
+            threading.Thread(target=work, daemon=True).start()
+
+        def _on_response(_d, resp):
+            if resp == 1:  # README
+                name = _selected_name()
+                if name:
+                    Gtk.show_uri_on_window(
+                        dlg, WD.readme_url(state["lang"], name),
+                        Gdk.CURRENT_TIME)
+                return
+            if resp == Gtk.ResponseType.APPLY:
+                name = _selected_name()
+                if name:
+                    _do_download(name)
+                return
+            dlg.destroy()
+
+        dlg.connect("response", _on_response)
+        dlg.show_all()
+
+    def _ww_offer_restart(self, containers: list[str], parent) -> None:
+        """After install, offer to restart the openWakeWord container(s)."""
+        from . import wwdownload as WD
+        if not containers:
+            if hasattr(self, "ww_status"):
+                self.ww_status.set_text("Restart your openWakeWord server, then ⟳")
+            return
+        names = ", ".join(containers)
+        q = Gtk.MessageDialog(
+            transient_for=parent, modal=True,
+            message_type=Gtk.MessageType.QUESTION,
+            buttons=Gtk.ButtonsType.YES_NO,
+            text="Restart wakeword server now?")
+        q.format_secondary_text(
+            f"openWakeWord loads models at startup. Restart {names} so the new "
+            "model becomes available? Active detections pause briefly.")
+        if q.run() == Gtk.ResponseType.YES:
+            q.destroy()
+
+            def work():
+                ok, msg = WD.restart_containers(containers)
+
+                def apply():
+                    if hasattr(self, "ww_status"):
+                        self.ww_status.set_text(
+                            "Restarted — press ⟳" if ok else f"Restart failed: {msg}")
+                    return False
+                GLib.idle_add(apply)
+            threading.Thread(target=work, daemon=True).start()
+        else:
+            q.destroy()
 
     def _ww_reload(self) -> None:
         """Probe the dot and fetch models from the server (⟳ button)."""

@@ -9,6 +9,21 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.46] - 2026-06-17
+
+### Added
+- **Community wakeword downloader** (Wakeword page → *Download…*). Browse the
+  [fwartner/home-assistant-wakewords-collection](https://github.com/fwartner/home-assistant-wakewords-collection)
+  by language (en/dk/fi/ru/zh), filter by name, view a model's README, and
+  install it straight into your **openWakeWord** server's `--custom-model-dir`.
+  The target folder and containers are auto-detected from the running
+  `wyoming-openwakeword` container(s) and remembered in the config
+  (`wakeword.model_dir` / `model_container`); both the `.tflite` and `.onnx`
+  forms are fetched so the model works under either inference framework. After a
+  download Blitztext offers to restart the openWakeWord container(s) so the new
+  model is picked up. Note: this collection is openWakeWord-only — its models do
+  **not** load on a microWakeWord server.
+
 ## [2.03.45] - 2026-06-17
 
 ### Changed

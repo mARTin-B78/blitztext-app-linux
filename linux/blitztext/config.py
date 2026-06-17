@@ -114,6 +114,11 @@ class Config:
     wakeword_silence_seconds: float = 2.0  # auto-stop after this much trailing silence
     wakeword_cancel_model: str = ""  # wakeword model that cancels an in-progress recording
     wakeword_send_model: str = ""    # wakeword model that finishes + sends (Enter) a recording
+    # Where the microWakeWord server loads custom models from (host path to its
+    # --custom-model-dir), and the Docker container to restart so it reloads.
+    # Used by the wakeword-model downloader; auto-detected from Docker on first use.
+    wakeword_model_dir: str = ""
+    wakeword_model_container: str = ""
     setup_complete: bool = False     # True once the first-run wizard has been completed
     # Text-to-speech for the wakeword benchmark — its own OpenAI-compatible
     # endpoint (Kokoro, XTTS, OpenAI, …): base URL incl. /v1, an optional bearer
@@ -247,6 +252,8 @@ def load(path: Path = CONFIG_PATH) -> Config:
         wakeword_silence_seconds=float(ww.get("silence_seconds", 2.0)),
         wakeword_cancel_model=ww.get("cancel_model", ""),
         wakeword_send_model=ww.get("send_model", ""),
+        wakeword_model_dir=ww.get("model_dir", ""),
+        wakeword_model_container=ww.get("model_container", ""),
         tts_url=tts.get("url", "").rstrip("/"),
         tts_api_key_env=tts.get("api_key_env", ""),
         tts_model=tts.get("model", ""),
@@ -408,6 +415,8 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "silence_seconds": cfg.wakeword_silence_seconds,
             "cancel_model": cfg.wakeword_cancel_model,
             "send_model": cfg.wakeword_send_model,
+            "model_dir": cfg.wakeword_model_dir,
+            "model_container": cfg.wakeword_model_container,
         },
         "tts": {
             "url": cfg.tts_url,
