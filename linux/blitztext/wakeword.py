@@ -102,8 +102,10 @@ class WakewordListener:
                                 if not byte:
                                     break
                                 line += byte
+                                if len(line) > 65536:
+                                    break
                             
-                            if not line:
+                            if not line or len(line) > 65536:
                                 break
 
                             msg = json.loads(line.decode("utf-8"))
@@ -113,6 +115,8 @@ class WakewordListener:
                                 self._handle_detection(name)
 
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len < 0 or payload_len > 1048576:
+                                break
                             if payload_len > 0:
                                 # Consume payload
                                 remaining = payload_len
@@ -241,6 +245,8 @@ class WakewordActionListener:
                                 if not byte:
                                     return
                                 line += byte
+                                if len(line) > 65536:
+                                    return
                             if not line:
                                 return
                             msg = json.loads(line.decode("utf-8"))
@@ -259,6 +265,8 @@ class WakewordActionListener:
                                     self._stop_event.set()   # one-shot: stop after first fire
                                     cb()
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len < 0 or payload_len > 1048576:
+                                return
                             if payload_len > 0:
                                 remaining = payload_len
                                 while remaining > 0:
