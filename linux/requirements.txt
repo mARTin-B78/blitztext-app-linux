@@ -1,4 +1,4 @@
-faster-whisper>=1.0
+faster-whisper>=1.2.1
 pynput>=1.7
 tomli-w>=1.0
 sounddevice>=0.4
