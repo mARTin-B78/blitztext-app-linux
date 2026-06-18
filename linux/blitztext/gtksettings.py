@@ -2564,7 +2564,8 @@ class SettingsDialog:
         """Background fetch of model list from wyoming server."""
         uri = self.ww_uri.get_text().strip()  # capture on GTK thread
         def work():
-            import socket, json
+            import socket
+            import json
             from urllib.parse import urlparse
             parsed = urlparse(uri)
             host = parsed.hostname or "127.0.0.1"
@@ -3339,7 +3340,8 @@ class SettingsDialog:
                         "Recall %", "False fires", "Time (s)"]
 
     def _wwbench_csv_text(self) -> str:
-        import csv, io
+        import csv
+        import io
         out = io.StringIO()
         w = csv.writer(out)
         w.writerow(self._WWB_CSV_HEADERS)
@@ -3645,7 +3647,6 @@ class SettingsDialog:
         if resp in (RESP_SAVE, RESP_SAVE_RESTART):
             self._force_build_tabs()
         if resp == RESP_SAVE:
-            import copy
             snap_before = self._cfg_snapshot(self.cfg)
             if self._collect():
                 save(self.cfg)

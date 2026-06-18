@@ -1,0 +1,3 @@
+## 2024-05-20 — Bounding payload lengths in Wyoming server STT connections
+**Learning:** Wyoming audio event framing in `wakeword.py` (and `wakeword_bench.py`) reads arbitrary payloads based on an untrusted server-supplied `payload_length` parsed via JSON. If `payload_length` is extremely large, not an int, or negative, `sock.recv()` attempts to read unbounded amounts of data or breaks, potentially allowing a malicious server to cause memory exhaustion (DoS).
+**Action:** Implemented a bounds check on `payload_length` limits parsing in `wakeword.py` and `wakeword_bench.py` to only positive ints under a sane maximum (10 MB). Added targeted pytest coverage.
