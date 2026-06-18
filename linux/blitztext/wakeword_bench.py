@@ -315,13 +315,19 @@ def _drain_detections(buf: bytes) -> tuple[bytes, int]:
     mistaken for the next header line.
     """
     found = 0
+    if b"\n" not in buf and len(buf) > 65536:
+        raise ValueError("Line length exceeded 64KB")
     while b"\n" in buf:
         line, rest = buf.split(b"\n", 1)
+        if len(line) > 65536:
+            raise ValueError("Line length exceeded 64KB")
         try:
             msg = json.loads(line.decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             return rest, found
         plen = msg.get("payload_length", 0) or 0
+        if plen > 10 * 1024 * 1024:
+            raise ValueError(f"Payload length {plen} exceeded 10MB")
         if len(rest) < plen:
             return buf, found  # payload not fully arrived yet; wait for more
         rest = rest[plen:]
