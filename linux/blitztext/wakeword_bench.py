@@ -322,6 +322,9 @@ def _drain_detections(buf: bytes) -> tuple[bytes, int]:
         except (ValueError, UnicodeDecodeError):
             return rest, found
         plen = msg.get("payload_length", 0) or 0
+        if not (0 <= plen <= 10 * 1024 * 1024):
+            # Abort this buffer completely if framing is corrupt or size is unreasonable
+            return b"", found
         if len(rest) < plen:
             return buf, found  # payload not fully arrived yet; wait for more
         rest = rest[plen:]
