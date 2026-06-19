@@ -638,10 +638,16 @@ class Daemon:
             self._emit("busy", label, "Transcribing…")
             self._dnotify(f"⌛ {label}", "Transcribing…")
             hotwords = ", ".join(self.cfg.all_keywords) if workflow.mode == "route" else ""
+            # In 'transcribe' mode the output must be a verbatim 1:1 of whatever
+            # was spoken, in the spoken language — so ignore the configured
+            # language hint (which would force e.g. English speech to be decoded
+            # as German) and let the engine auto-detect. Other modes keep the
+            # hint for accuracy.
+            language = "" if workflow.mode == "transcribe" else self.cfg.language
             text = stt.transcribe(
                 self.cfg.active_stt,
                 audio_path,
-                language=self.cfg.language,
+                language=language,
                 hotwords=hotwords,
                 local_transcriber=self.transcriber,
                 timeout=self.cfg.timeout,

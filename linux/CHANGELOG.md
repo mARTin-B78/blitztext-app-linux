@@ -9,6 +9,17 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.47] - 2026-06-19
+
+### Fixed
+- **"Transcribe" mode now produces a verbatim 1:1 of whatever was spoken,
+  regardless of language.** It previously forced the configured *Language hint*
+  (e.g. `de`) onto the speech-to-text engine, so speaking English came out as
+  garbled German (`"The quick brown fox…"` → `"Der quick-brown Fox…"`).
+  Transcribe mode now ignores the hint and lets the engine auto-detect the
+  spoken language; other modes (rewrite/route/stream) keep the hint for
+  accuracy.
+
 ## [2.03.46] - 2026-06-17
 
 ### Added
