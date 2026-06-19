@@ -56,6 +56,8 @@ _FILLERS = {
 # config / Settings to match what your endpoint actually serves.
 DEFAULT_VOICES = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
 
+MAX_PAYLOAD_BYTES = 10 * 1024 * 1024  # 10 MB limit for incoming binary payloads
+
 _TARGET_RATE = 16000          # wyoming-openwakeword expects 16 kHz mono s16le
 _CHUNK_BYTES = 3200           # 100 ms per audio-chunk, matching the live listener
 
@@ -322,6 +324,8 @@ def _drain_detections(buf: bytes) -> tuple[bytes, int]:
         except (ValueError, UnicodeDecodeError):
             return rest, found
         plen = msg.get("payload_length", 0) or 0
+        if plen > MAX_PAYLOAD_BYTES:
+            raise ValueError(f"Payload length {plen} exceeds maximum allowed size")
         if len(rest) < plen:
             return buf, found  # payload not fully arrived yet; wait for more
         rest = rest[plen:]
