@@ -9,6 +9,19 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.48] - 2026-06-20
+
+### Fixed
+- **A configured wakeword cancel/send model now also works as a spoken
+  keyword.** The real-time wakeword cancel/send models can miss (custom
+  microWakeWord models are unreliable), and previously the post-transcription
+  fallback only checked the text keyword lists — so saying e.g. "Abbruch" would
+  be transcribed verbatim instead of discarding the clip. The active wakeword
+  cancel/send model name (underscores → spaces, e.g. `hey_jarvis` → "hey
+  jarvis") is now folded into the cancel/send keyword matching automatically, so
+  the spoken word reliably discards/sends even when the model didn't fire. New
+  `Config.effective_cancel_keywords` / `effective_send_keywords`.
+
 ## [2.03.47] - 2026-06-19
 
 ### Fixed

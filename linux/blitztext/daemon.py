@@ -666,7 +666,7 @@ class Daemon:
             # Spoken abort: a configured cancel word heard at an edge discards the
             # whole clip — nothing is routed, rewritten, or typed. This is the
             # rescue for an accidentally triggered (e.g. wakeword) dictation.
-            cancel_kw = is_cancel(text, self.cfg.cancel_keywords, threshold=self.cfg.routing_threshold)
+            cancel_kw = is_cancel(text, self.cfg.effective_cancel_keywords, threshold=self.cfg.routing_threshold)
             if cancel_kw:
                 log(f"✗ Discarded by voice keyword “{cancel_kw}”.")
                 if self.text_cb:
@@ -678,7 +678,7 @@ class Daemon:
             # Spoken send: a configured word at an edge ("computer send") is
             # stripped, and the rest is delivered AND submitted with Enter — the
             # spoken equivalent of stop+paste+Enter. Mainly for hands-free use.
-            send_kw, text = match_send(text, self.cfg.send_keywords, threshold=self.cfg.routing_threshold)
+            send_kw, text = match_send(text, self.cfg.effective_send_keywords, threshold=self.cfg.routing_threshold)
             if send_kw:
                 send_enter = True
                 log(f"⏎ Send keyword “{send_kw}” — delivering and pressing Enter.")

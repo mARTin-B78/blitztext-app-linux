@@ -181,6 +181,41 @@ class Config:
                 out.append(w.name)  # names are implicit triggers — bias STT for them too
         return out
 
+    @staticmethod
+    def _model_words(models: str) -> list[str]:
+        """Spoken forms of comma-separated wakeword model ids ('hey_jarvis' →
+        'hey jarvis')."""
+        out = []
+        for m in models.split(","):
+            m = m.strip().replace("_", " ").strip()
+            if m:
+                out.append(m)
+        return out
+
+    @property
+    def effective_cancel_keywords(self) -> list[str]:
+        """Text cancel keywords plus the configured wakeword cancel model name.
+
+        The real-time wakeword cancel model can miss (custom micro models are
+        unreliable); folding its name in as a spoken keyword gives a dependable
+        post-transcription fallback, so saying e.g. 'abbruch' still discards the
+        clip even when the model didn't fire."""
+        out = list(self.cancel_keywords)
+        for w in self._model_words(self.wakeword_cancel_model):
+            if w not in out:
+                out.append(w)
+        return out
+
+    @property
+    def effective_send_keywords(self) -> list[str]:
+        """Text send keywords plus the configured wakeword send model name
+        (see effective_cancel_keywords)."""
+        out = list(self.send_keywords)
+        for w in self._model_words(self.wakeword_send_model):
+            if w not in out:
+                out.append(w)
+        return out
+
     @property
     def api_key(self) -> str | None:
         return os.environ.get(self.api_key_env) or None
