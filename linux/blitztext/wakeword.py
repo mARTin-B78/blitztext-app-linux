@@ -107,10 +107,24 @@ class WakewordListener:
                                 break
 
                             msg = json.loads(line.decode("utf-8"))
-                            
-                            if msg.get("type") == "detection":
-                                name = msg.get("data", {}).get("name", "")
-                                self._handle_detection(name)
+
+                            # Wyoming sends the event's `data` as a separate
+                            # `data_length` block after the header line (not
+                            # inline) — newer servers like wyoming-microwakeword
+                            # always do. Read it so the wake-word name is
+                            # available and the stream stays in sync.
+                            data_len = msg.get("data_length", 0)
+                            if data_len > 0:
+                                data_bytes = b""
+                                while len(data_bytes) < data_len:
+                                    r = sock.recv(min(data_len - len(data_bytes), 4096))
+                                    if not r:
+                                        break
+                                    data_bytes += r
+                                try:
+                                    msg["data"] = json.loads(data_bytes.decode("utf-8"))
+                                except Exception:
+                                    pass
 
                             payload_len = msg.get("payload_length", 0)
                             if payload_len > 0:
@@ -121,6 +135,10 @@ class WakewordListener:
                                     if not received:
                                         break
                                     remaining -= len(received)
+
+                            if msg.get("type") == "detection":
+                                name = msg.get("data", {}).get("name", "")
+                                self._handle_detection(name)
                         except socket.timeout:
                             pass
                 except Exception:
@@ -244,20 +262,23 @@ class WakewordActionListener:
                             if not line:
                                 return
                             msg = json.loads(line.decode("utf-8"))
-                            if msg.get("type") == "detection":
-                                name = msg.get("data", {}).get("name", "")
-                                cb = self.model_callbacks.get(name)
-                                if cb is None:
-                                    # Try partial match — some servers omit the lang suffix
-                                    for k, v in self.model_callbacks.items():
-                                        if name.startswith(k) or k.startswith(name):
-                                            cb = v
-                                            break
-                                if cb:
-                                    logbuffer.log(
-                                        f"[wakeword-action] '{name}' detected — firing action")
-                                    self._stop_event.set()   # one-shot: stop after first fire
-                                    cb()
+
+                            # Read the separate `data` block (see WakewordListener)
+                            # — without it the detection name is blank, so the
+                            # wrong action (or none) fires.
+                            data_len = msg.get("data_length", 0)
+                            if data_len > 0:
+                                data_bytes = b""
+                                while len(data_bytes) < data_len:
+                                    r = sock.recv(min(data_len - len(data_bytes), 4096))
+                                    if not r:
+                                        break
+                                    data_bytes += r
+                                try:
+                                    msg["data"] = json.loads(data_bytes.decode("utf-8"))
+                                except Exception:
+                                    pass
+
                             payload_len = msg.get("payload_length", 0)
                             if payload_len > 0:
                                 remaining = payload_len
@@ -266,6 +287,24 @@ class WakewordActionListener:
                                     if not chunk:
                                         break
                                     remaining -= len(chunk)
+
+                            if msg.get("type") == "detection":
+                                name = msg.get("data", {}).get("name", "")
+                                if not name:
+                                    continue  # ignore nameless detections
+                                cb = self.model_callbacks.get(name)
+                                if cb is None:
+                                    # Partial match — some servers add/omit a lang
+                                    # suffix. Guard against empty name matching all.
+                                    for k, v in self.model_callbacks.items():
+                                        if k and (name.startswith(k) or k.startswith(name)):
+                                            cb = v
+                                            break
+                                if cb:
+                                    logbuffer.log(
+                                        f"[wakeword-action] '{name}' detected — firing action")
+                                    self._stop_event.set()   # one-shot: stop after first fire
+                                    cb()
                         except socket.timeout:
                             pass
                 except Exception:

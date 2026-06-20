@@ -9,6 +9,19 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.49] - 2026-06-20
+
+### Fixed
+- **Wakeword detection name is now read correctly.** Wyoming sends an event's
+  `data` (which holds the detected wake-word `name`) as a separate
+  `data_length` block after the header line, not inline — newer servers like
+  wyoming-microwakeword always do. The listener only looked for an inline
+  `data`, so the name came through empty: the cancel/send action listener then
+  fired the wrong action (or fired on a nameless detection), couldn't tell
+  `abbruch` from `senden`, and the unread bytes desynced the stream (making
+  micro feel flakier than openWakeWord). Both read loops now consume the
+  `data_length` block, and nameless detections are ignored.
+
 ## [2.03.48] - 2026-06-20
 
 ### Fixed
