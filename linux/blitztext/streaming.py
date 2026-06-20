@@ -198,9 +198,20 @@ class RivaRealtimeStreamer:
         updated["input_audio_params"]["num_channels"] = 1
         updated.setdefault("recognition_config", {})
         updated["recognition_config"]["max_alternatives"] = 1
-        if self.language:
+        # Language: an explicit hint wins. Otherwise, if the server's session
+        # default is a comma-list of codes (multi-language models report e.g.
+        # "bn-IN,en-US,hi-IN,ta-IN,indic"), Riva's streaming backend rejects the
+        # whole list and needs exactly one code — collapse it to a single code
+        # (prefer en-US) so streaming works out of the box.
+        lang = self.language
+        if not lang:
+            existing = (updated.get("input_audio_transcription") or {}).get("language", "")
+            if "," in existing:
+                codes = [c.strip() for c in existing.split(",") if c.strip()]
+                lang = "en-US" if "en-US" in codes else (codes[0] if codes else "")
+        if lang:
             updated.setdefault("input_audio_transcription", {})
-            updated["input_audio_transcription"]["language"] = self.language
+            updated["input_audio_transcription"]["language"] = lang
         if self.engine.model:
             updated.setdefault("input_audio_transcription", {})
             updated["input_audio_transcription"]["model"] = self.engine.model

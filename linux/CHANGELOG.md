@@ -9,7 +9,18 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
-## [2.03.49] - 2026-06-20
+## [2.03.50] - 2026-06-21
+
+### Fixed
+- **Realtime streaming now works with multi-language Riva models.** Such models
+  report their session-default language as a comma-list (e.g.
+  `bn-IN,en-US,hi-IN,ta-IN,indic`), which the Riva streaming backend rejects —
+  it needs exactly one code — so the WebSocket session was accepted then
+  immediately closed with `INVALID_ARGUMENT`. When no explicit language hint is
+  set, the streamer now collapses a comma-list default to a single code
+  (preferring `en-US`). Verified end-to-end against an NVIDIA parakeet RNNT NIM.
+
+
 
 ### Fixed
 - **Wakeword detection name is now read correctly.** Wyoming sends an event's
