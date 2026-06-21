@@ -9,6 +9,18 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.52] - 2026-06-21
+
+### Added
+- **Per-preset STT engine.** Each preset can now pick its own speech-to-text
+  engine (new "STT engine" dropdown in the preset's Behaviour card; `(active
+  engine)` = follow the Engines tab, like the existing per-preset LLM engine).
+  This lets a `stream`-mode preset use a realtime engine while `transcribe`/
+  `rewrite` presets (and the wakeword/route flow) use a batch engine — they
+  previously had to share one global engine, so selecting a streaming engine
+  broke all batch dictation with "Streaming STT engines are live-only". New
+  `Config.stt_engine_for(workflow)`; persisted as `workflow.stt_engine`.
+
 ## [2.03.51] - 2026-06-21
 
 ### Fixed

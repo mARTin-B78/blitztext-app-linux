@@ -1025,6 +1025,15 @@ class SettingsDialog:
         beh_card = _card_section(page, "Behaviour", icon="system-run-symbolic")
         self.wf_mode = _labeled(beh_card, "Mode", _combo(["transcribe", "rewrite", "stream"]),
                                 tooltip="’transcribe’ types your words as-is. ‘rewrite’ sends them to the language model first. ‘stream’ shows live text from a realtime engine.")
+        # STT engine dropdown — "(active engine)" + one entry per configured STT
+        # engine. Lets a 'stream' preset use a realtime engine while batch
+        # presets use a batch engine (a streaming engine can't do batch).
+        stt_names = [e.name for e in self.cfg.stt_engines]
+        self.wf_stt_engine = _labeled(
+            beh_card, "STT engine",
+            _combo(["(active engine)"] + stt_names),
+            tooltip="Which speech-to-text engine this preset uses. ‘(active engine)’ follows the Engines tab. Use a realtime engine for ‘stream’ mode and a batch engine for ‘transcribe’/‘rewrite’.",
+        )
         # Engine dropdown — "(active engine)" + one entry per configured LLM engine.
         llm_names = [e.name for e in self.cfg.llm_engines]
         self.wf_llm_engine = _labeled(
@@ -1060,6 +1069,10 @@ class SettingsDialog:
         engine = getattr(wf, "llm_engine", "") or ""
         idx_e = (llm_names.index(engine) + 1) if engine in llm_names else 0
         self.wf_llm_engine.set_active(idx_e)
+        stt_names = [e.name for e in self.cfg.stt_engines]
+        stt_eng = getattr(wf, "stt_engine", "") or ""
+        idx_s = (stt_names.index(stt_eng) + 1) if stt_eng in stt_names else 0
+        self.wf_stt_engine.set_active(idx_s)
         self.wf_temp.set_text("" if wf.temperature is None else str(wf.temperature))
         self.wf_prompt.get_buffer().set_text(wf.prompt)
         self._wf_idx = idx
@@ -1077,6 +1090,8 @@ class SettingsDialog:
         wf.mode = self.wf_mode.get_active_text() or "transcribe"
         engine_text = self.wf_llm_engine.get_active_text() or ""
         wf.llm_engine = "" if engine_text == "(active engine)" else engine_text
+        stt_text = self.wf_stt_engine.get_active_text() or ""
+        wf.stt_engine = "" if stt_text == "(active engine)" else stt_text
         t = self.wf_temp.get_text().strip()
         wf.temperature = float(t) if _isfloat(t) else None
         b = self.wf_prompt.get_buffer()

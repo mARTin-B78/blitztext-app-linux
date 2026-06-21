@@ -442,7 +442,7 @@ class Daemon:
             self._target_window = active_window_id()
             self._active_workflow = wf
             if wf.mode == "stream":
-                engine = self.cfg.active_stt
+                engine = self.cfg.stt_engine_for(wf)
                 if not engine.is_streaming:
                     self._active_workflow = None
                     self._emit("error", wf.name, "Active STT engine is not realtime streaming")
@@ -645,7 +645,7 @@ class Daemon:
             # hint for accuracy.
             language = "" if workflow.mode == "transcribe" else self.cfg.language
             text = stt.transcribe(
-                self.cfg.active_stt,
+                self.cfg.stt_engine_for(workflow),
                 audio_path,
                 language=language,
                 hotwords=hotwords,

@@ -28,6 +28,10 @@ class Workflow:
     # Which LLM engine to use for this preset's rewrite step.
     # "" (empty) = use whichever engine is currently active in the Engines tab.
     llm_engine: str = ""
+    # Which STT engine to use for this preset. "" (empty) = the active STT
+    # engine. Lets a stream-mode preset use a realtime engine while batch presets
+    # use a batch engine (a streaming engine can't do batch transcription).
+    stt_engine: str = ""
     # Cosmetic, used by the GUI.
     description: str = ""
     icon: str = "⚡"
@@ -145,6 +149,14 @@ class Config:
         if e:
             return e
         return self.stt_engines[0] if self.stt_engines else STTEngine("Local", "local", model=self.model)
+
+    def stt_engine_for(self, workflow: "Workflow | None") -> STTEngine:
+        """The STT engine a preset should use: its own override, else active."""
+        if workflow and workflow.stt_engine:
+            e = next((x for x in self.stt_engines if x.name == workflow.stt_engine), None)
+            if e:
+                return e
+        return self.active_stt
 
     @property
     def active_llm(self) -> LLMEngine:
@@ -310,6 +322,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
                 model=entry.get("model"),
                 temperature=entry.get("temperature"),
                 llm_engine=entry.get("llm_engine", ""),
+                stt_engine=entry.get("stt_engine", ""),
                 description=entry.get("description", ""),
                 icon=entry.get("icon", "⚡"),
             )
@@ -499,6 +512,8 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             entry["temperature"] = wf.temperature
         if wf.llm_engine:
             entry["llm_engine"] = wf.llm_engine
+        if wf.stt_engine:
+            entry["stt_engine"] = wf.stt_engine
         if wf.description:
             entry["description"] = wf.description
         if wf.icon and wf.icon != "⚡":
