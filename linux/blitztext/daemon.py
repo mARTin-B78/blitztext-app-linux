@@ -863,7 +863,15 @@ class Daemon:
                 cancel=self.cfg.key_cancel,
                 push_to_talk=self.cfg.push_to_talk,
             )
-            return self._scheme.start_listener()
+            scheme_listener = self._scheme.start_listener()
+            # Per-preset hotkeys also work in 'modifiers' mode: the modifier keys
+            # drive start/stop, while a preset's optional hotkey jumps straight to
+            # that preset. The scheme only arms stop/send while recording, so it
+            # ignores these chords when idle — no conflict. Without this, preset
+            # hotkeys (incl. the bundled defaults) were silently ignored here.
+            if self._build_mapping():
+                self.start_hotkeys()
+            return scheme_listener
         return self.start_hotkeys()
 
     def stop_input(self) -> None:

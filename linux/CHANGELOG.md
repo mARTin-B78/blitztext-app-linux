@@ -9,7 +9,19 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
-## [2.03.50] - 2026-06-21
+## [2.03.51] - 2026-06-21
+
+### Fixed
+- **Per-preset hotkeys now work in "modifiers" input mode.** In that mode the
+  daemon only registered the start/stop/cancel modifier keys and never
+  registered the presets' optional hotkeys — so every preset shortcut (incl. the
+  bundled `<ctrl>+<alt>+e` etc.) was silently ignored. The preset-hotkey
+  listener now runs alongside the modifier scheme (which only arms stop/send
+  while recording, so there's no conflict when idle). Tip: avoid a bare-modifier
+  prefix already used by the scheme (e.g. prefer `<ctrl>+<alt>+s` over `<alt>+s`,
+  since `<alt>` is the stop+Enter key).
+
+
 
 ### Fixed
 - **Realtime streaming now works with multi-language Riva models.** Such models
