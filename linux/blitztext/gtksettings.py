@@ -2011,6 +2011,12 @@ class SettingsDialog:
         self.send_keywords, self._ww_send_kw_row = self._kw_text_row(
             ww_cfg_card, "Custom send words", ", ".join(self.cfg.send_keywords), "computer send, computer abschicken", width=LW,
             tooltip_kw="Say one of these to type AND press Enter (spoken ‘submit’). Use a distinctive multi-word phrase. Empty = off.")
+        self.ww_stop_model, _ = self._model_test_row(
+            ww_cfg_card, "Stop word", "none — use text keywords", width=LW,
+            tooltip="Optional: one or more wakeword models that finish recording and paste WITHOUT pressing Enter (stop + paste).")
+        self.stop_keywords, self._ww_stop_kw_row = self._kw_text_row(
+            ww_cfg_card, "Custom stop words", ", ".join(self.cfg.stop_keywords), "computer stopp, stopp", width=LW,
+            tooltip_kw="Say one of these to type WITHOUT pressing Enter (spoken ‘stop + paste’). Empty = off.")
         # Text keywords are pointless if hands-free wakeword can't run at all —
         # hide them until the server confirms it has usable models.
         self._ww_set_kw_rows_visible(False)
@@ -2210,6 +2216,8 @@ class SettingsDialog:
             _fill_combo(self.ww_cancel_model, [], e.cancel_model)
         if hasattr(self, "ww_send_model"):
             _fill_combo(self.ww_send_model, [], e.send_model)
+        if hasattr(self, "ww_stop_model"):
+            _fill_combo(self.ww_stop_model, [], e.stop_model)
         self._probe_dot(self.ww_dot, e.uri, 10400)
         self._ww_fetch_models()
 
@@ -2227,6 +2235,8 @@ class SettingsDialog:
             e.cancel_model = _combo_text(self.ww_cancel_model)
         if hasattr(self, "ww_send_model"):
             e.send_model = _combo_text(self.ww_send_model)
+        if hasattr(self, "ww_stop_model"):
+            e.stop_model = _combo_text(self.ww_stop_model)
         if self.ww_combo.get_active_text() != new_name:
             self.ww_combo.remove(idx)
             self.ww_combo.insert_text(idx, new_name)
@@ -2561,7 +2571,7 @@ class SettingsDialog:
         They only matter when hands-free wakeword can actually run, which
         requires the server to have reported at least one usable model.
         """
-        for attr in ("_ww_cancel_kw_row", "_ww_send_kw_row"):
+        for attr in ("_ww_cancel_kw_row", "_ww_send_kw_row", "_ww_stop_kw_row"):
             row = getattr(self, attr, None)
             if row is None:
                 continue
@@ -2623,6 +2633,9 @@ class SettingsDialog:
                             if hasattr(self, "ww_send_model"):
                                 cur_s = _combo_text(self.ww_send_model)
                                 _fill_combo(self.ww_send_model, models_detail, cur_s)
+                            if hasattr(self, "ww_stop_model"):
+                                cur_st = _combo_text(self.ww_stop_model)
+                                _fill_combo(self.ww_stop_model, models_detail, cur_st)
                             if hasattr(self, "ww_status"):
                                 self.ww_status.set_markup(
                                     f'<span foreground="#4a8" size="small">'
@@ -3567,6 +3580,7 @@ class SettingsDialog:
                 c.wakeword_model = e.model
                 c.wakeword_cancel_model = e.cancel_model
                 c.wakeword_send_model = e.send_model
+                c.wakeword_stop_model = e.stop_model
             else:
                 c.wakeword_uri = self.ww_uri.get_text().strip()
                 c.wakeword_model = _combo_text(self.ww_model)
@@ -3575,8 +3589,10 @@ class SettingsDialog:
             c.wakeword_silence_seconds = float(self.ww_silence.get_text())
             c.wakeword_cancel_model = _combo_text(self.ww_cancel_model) if hasattr(self, "ww_cancel_model") else ""
             c.wakeword_send_model = _combo_text(self.ww_send_model) if hasattr(self, "ww_send_model") else ""
+            c.wakeword_stop_model = _combo_text(self.ww_stop_model) if hasattr(self, "ww_stop_model") else ""
             c.cancel_keywords = [k.strip() for k in self.cancel_keywords.get_text().split(",") if k.strip()]
             c.send_keywords = [k.strip() for k in self.send_keywords.get_text().split(",") if k.strip()]
+            c.stop_keywords = [k.strip() for k in self.stop_keywords.get_text().split(",") if k.strip()]
             # Cancel/Send keyboard shortcuts are owned by the Keyboard page now.
             c.tts_url = self.wwb_url.get_text().strip().rstrip("/")
             c.tts_api_key_env = self.wwb_key.get_text().strip()

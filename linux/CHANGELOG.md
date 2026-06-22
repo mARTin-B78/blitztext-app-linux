@@ -9,6 +9,18 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.53] - 2026-06-22
+
+### Added
+- **Spoken "stop" word — paste without Enter.** Alongside the send word (stop +
+  paste + Enter), you can now configure a stop word that finishes the recording
+  and pastes the text **without** pressing Enter (stop + paste). Per-wakeword-
+  profile **"Stop word"** model picker and **"Custom stop words"** text field on
+  the Wakeword page, mirroring the send word. New `wakeword_stop_model` /
+  `stop_keywords` config (per-profile `stop_model`), `Config.effective_stop_
+  keywords`, and the action listener fires `finish_dictation(send_enter=False)`
+  on a stop-model detection; the spoken word is stripped from the transcript.
+
 ## [2.03.52] - 2026-06-21
 
 ### Added

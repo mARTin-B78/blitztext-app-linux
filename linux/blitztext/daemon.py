@@ -321,7 +321,8 @@ class Daemon:
         # dedicated wakeword ("stop", "send it") fires instantly — no Whisper pass.
         self._action_listener = None
         if self.cfg.wakeword_enabled and (
-                self.cfg.wakeword_cancel_model or self.cfg.wakeword_send_model):
+                self.cfg.wakeword_cancel_model or self.cfg.wakeword_send_model
+                or self.cfg.wakeword_stop_model):
             from .wakeword import WakewordActionListener
             cbs: dict = {}
             for m in self.cfg.wakeword_cancel_model.split(","):
@@ -333,6 +334,11 @@ class Daemon:
                 if m:
                     cbs[m] = lambda: GLib.idle_add(
                         lambda: self.finish_dictation(send_enter=True))
+            for m in self.cfg.wakeword_stop_model.split(","):
+                m = m.strip()
+                if m:
+                    cbs[m] = lambda: GLib.idle_add(
+                        lambda: self.finish_dictation(send_enter=False))
             self._action_listener = WakewordActionListener(
                 uri=self.cfg.wakeword_uri, model_callbacks=cbs, mic=self.cfg.mic)
             self._action_listener.start()
@@ -682,6 +688,14 @@ class Daemon:
             if send_kw:
                 send_enter = True
                 log(f"⏎ Send keyword “{send_kw}” — delivering and pressing Enter.")
+
+            # Spoken stop: like send but delivered *without* Enter — the word is
+            # stripped and the rest is pasted as-is (stop+paste). Only checked
+            # when no send word matched (send wins if both somehow appear).
+            if not send_kw:
+                stop_kw, text = match_send(text, self.cfg.effective_stop_keywords, threshold=self.cfg.routing_threshold)
+                if stop_kw:
+                    log(f"⏹ Stop keyword “{stop_kw}” — delivering without Enter.")
 
             # Voice routing: pick the preset from a spoken keyword, strip it.
             if workflow.mode == "route":

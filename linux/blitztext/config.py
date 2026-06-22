@@ -45,6 +45,7 @@ class WakewordEngine:
     model: str = "okay_computer"
     cancel_model: str = ""   # wakeword model(s) that cancel an in-progress recording
     send_model: str = ""     # wakeword model(s) that finish + send (Enter) a recording
+    stop_model: str = ""     # wakeword model(s) that finish + paste (no Enter) a recording
 
 
 @dataclass
@@ -102,6 +103,9 @@ class Config:
     # Enter, prefer a distinctive multi-word phrase (e.g. "computer send") so a
     # sentence that merely ends in "send" doesn't submit by accident.
     send_keywords: list[str] = field(default_factory=list)
+    # Spoken stop: like send, but the rest is delivered *without* Enter — the
+    # spoken equivalent of "stop + paste". Empty = disabled.
+    stop_keywords: list[str] = field(default_factory=list)
     # speech-to-text engines (presets)
     stt_engines: list[STTEngine] = field(default_factory=list)
     stt_active: str = ""
@@ -118,6 +122,7 @@ class Config:
     wakeword_silence_seconds: float = 2.0  # auto-stop after this much trailing silence
     wakeword_cancel_model: str = ""  # wakeword model that cancels an in-progress recording
     wakeword_send_model: str = ""    # wakeword model that finishes + sends (Enter) a recording
+    wakeword_stop_model: str = ""    # wakeword model that finishes + pastes (no Enter)
     # Where the microWakeWord server loads custom models from (host path to its
     # --custom-model-dir), and the Docker container to restart so it reloads.
     # Used by the wakeword-model downloader; auto-detected from Docker on first use.
@@ -229,6 +234,16 @@ class Config:
         return out
 
     @property
+    def effective_stop_keywords(self) -> list[str]:
+        """Text stop keywords plus the configured wakeword stop model name
+        (see effective_cancel_keywords)."""
+        out = list(self.stop_keywords)
+        for w in self._model_words(self.wakeword_stop_model):
+            if w not in out:
+                out.append(w)
+        return out
+
+    @property
     def api_key(self) -> str | None:
         return os.environ.get(self.api_key_env) or None
 
@@ -277,6 +292,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
         routing_threshold=float(rt.get("threshold", 0.82)),
         cancel_keywords=list(rt.get("cancel_keywords", ["abbrechen", "cancel"])),
         send_keywords=list(rt.get("send_keywords", [])),
+        stop_keywords=list(rt.get("stop_keywords", [])),
         input_mode=inp.get("mode", "modifiers"),
         push_to_talk=bool(inp.get("push_to_talk", False)),
         key_start=inp.get("start", "<ctrl>+<cmd>"),
@@ -299,6 +315,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
         wakeword_silence_seconds=float(ww.get("silence_seconds", 2.0)),
         wakeword_cancel_model=ww.get("cancel_model", ""),
         wakeword_send_model=ww.get("send_model", ""),
+        wakeword_stop_model=ww.get("stop_model", ""),
         wakeword_model_dir=ww.get("model_dir", ""),
         wakeword_model_container=ww.get("model_container", ""),
         tts_url=tts.get("url", "").rstrip("/"),
@@ -354,6 +371,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
             model=e.get("model", "okay_computer"),
             cancel_model=e.get("cancel_model", ""),
             send_model=e.get("send_model", ""),
+            stop_model=e.get("stop_model", ""),
         )
         for e in data.get("wakeword_engine", [])
     ]
@@ -365,16 +383,19 @@ def load(path: Path = CONFIG_PATH) -> Config:
             model=cfg.wakeword_model,
             cancel_model=cfg.wakeword_cancel_model,
             send_model=cfg.wakeword_send_model,
+            stop_model=cfg.wakeword_stop_model,
         )]
     # Migration: older configs stored cancel/send globally; seed them onto the
     # active engine so per-profile values aren't blank on first load.
-    if cfg.wakeword_cancel_model or cfg.wakeword_send_model:
+    if cfg.wakeword_cancel_model or cfg.wakeword_send_model or cfg.wakeword_stop_model:
         active = next((e for e in cfg.wakeword_engines if e.name == cfg.wakeword_active),
                       cfg.wakeword_engines[0])
         if not active.cancel_model:
             active.cancel_model = cfg.wakeword_cancel_model
         if not active.send_model:
             active.send_model = cfg.wakeword_send_model
+        if not active.stop_model:
+            active.stop_model = cfg.wakeword_stop_model
 
     # LLM engines (default: synthesized from the legacy [rewrite] block).
     cfg.llm_engines = [
@@ -441,6 +462,7 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "threshold": cfg.routing_threshold,
             "cancel_keywords": cfg.cancel_keywords,
             "send_keywords": cfg.send_keywords,
+            "stop_keywords": cfg.stop_keywords,
         },
         "quality": {
             "min_speech_seconds": cfg.min_speech_seconds,
@@ -463,6 +485,7 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "silence_seconds": cfg.wakeword_silence_seconds,
             "cancel_model": cfg.wakeword_cancel_model,
             "send_model": cfg.wakeword_send_model,
+            "stop_model": cfg.wakeword_stop_model,
             "model_dir": cfg.wakeword_model_dir,
             "model_container": cfg.wakeword_model_container,
         },
@@ -480,7 +503,8 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
         },
         "wakeword_engine": [
             {"name": e.name, "uri": e.uri, "model": e.model,
-             "cancel_model": e.cancel_model, "send_model": e.send_model}
+             "cancel_model": e.cancel_model, "send_model": e.send_model,
+             "stop_model": e.stop_model}
             for e in cfg.wakeword_engines
         ],
         "stt": {"active": cfg.stt_active},
