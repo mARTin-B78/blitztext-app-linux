@@ -1,0 +1,3 @@
+## 2024-05-14 — Enforce payload/header size bounds in Wyoming protocol
+**Learning:** Wyoming network payload deserializers (`wakeword.py` and `wakeword_bench.py`) process incoming JSON stream data based on headers. They previously relied on the remote endpoint sending correct sizes and line delimiters, leaving them vulnerable to unbounded memory consumption DoS if the endpoint sends malformed data (like missing newlines or fake huge payload lengths).
+**Action:** Implemented strict bounds checking in byte read loops across both clients: headers cap out at 64KB per line, and both `data_length` and `payload_length` drop connections if they claim sizes exceeding 1MB.
