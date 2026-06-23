@@ -268,7 +268,7 @@ cd blitztext-app-linux/linux
 The only environment variable needed is for rewrite workflows that use a cloud LLM:
 
 ```bash
-export MY_LLM_API_KEY=sk-...    # only if using OpenAI or a keyed endpoint
+export MY_LLM_API_KEY="<your_api_key_here>"    # only if using OpenAI or a keyed endpoint
 ```
 
 The config file (`~/.config/blitztext/config.toml`) references environment variable *names*, never the keys themselves. Local STT and local LLM endpoints typically require no key.
@@ -312,7 +312,7 @@ That's it. The transcribed text appears where your cursor was.
 ### 4. Try a rewrite workflow
 
 ```bash
-export MY_LLM_API_KEY=sk-...   # or point at a local LLM in Settings
+export MY_LLM_API_KEY="<your_api_key_here>"   # or point at a local LLM in Settings
 ```
 
 1. Press `Ctrl+Super` → speak something rough like "hey john can you send me the report"
