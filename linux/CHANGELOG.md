@@ -9,6 +9,19 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.54] - 2026-06-23
+
+### Changed
+- **Real-time cancel/send/stop detection shares the recorder's mic capture
+  instead of opening its own.** During a wakeword recording the action listener
+  used to spawn a *second* `pw-record` on the same device, competing with the
+  recorder/VAD meter (up to 4 concurrent captures) — which made spoken
+  `abbruch`/`senden`/`stopp` detection miss and fall back to the slow
+  silence-then-transcribe path. The action listener now runs in `external_audio`
+  mode: the daemon fans the single shared 16 kHz capture out to both the cancel
+  watcher and the action listener (`WakewordActionListener.feed`), so there's no
+  device contention and the action words fire in real time more reliably.
+
 ## [2.03.53] - 2026-06-22
 
 ### Added

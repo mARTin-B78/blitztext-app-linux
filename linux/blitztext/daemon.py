@@ -339,13 +339,16 @@ class Daemon:
                 if m:
                     cbs[m] = lambda: GLib.idle_add(
                         lambda: self.finish_dictation(send_enter=False))
+            # external_audio: reuse the recorder's capture (fed below via
+            # on_chunk) instead of opening a second pw-record that competes for
+            # the mic — that contention made real-time detection flaky.
             self._action_listener = WakewordActionListener(
-                uri=self.cfg.wakeword_uri, model_callbacks=cbs, mic=self.cfg.mic)
+                uri=self.cfg.wakeword_uri, model_callbacks=cbs, mic=self.cfg.mic,
+                external_audio=True)
             self._action_listener.start()
 
         # Whisper-based cancel watcher: fallback when no cancel wakeword model is
         # set, or as belt-and-suspenders for the spoken cancel keyword list.
-        on_chunk = None
         use_whisper_watcher = (self.cfg.cancel_keywords
                                and getattr(self, "transcriber", None) is not None
                                and not self.cfg.wakeword_cancel_model)
@@ -357,9 +360,18 @@ class Daemon:
                 self.cfg.routing_threshold,
                 on_cancel=lambda: GLib.idle_add(self.cancel_dictation),
             )
-            on_chunk = self._cancel_watcher.feed
         else:
             self._cancel_watcher = None
+
+        # Fan the single shared capture out to every consumer that needs raw PCM:
+        # the cancel watcher and the action listener (which no longer opens its
+        # own mic). One pw-record feeds them all.
+        _sinks = []
+        if self._cancel_watcher is not None:
+            _sinks.append(self._cancel_watcher.feed)
+        if self._action_listener is not None:
+            _sinks.append(self._action_listener.feed)
+        on_chunk = (lambda c: [s(c) for s in _sinks]) if _sinks else None
 
         self._vad_meter = audio.LevelMeter(self.cfg.mic, on_level=on_level,
                                            recorder=self.recorder_name, on_chunk=on_chunk)

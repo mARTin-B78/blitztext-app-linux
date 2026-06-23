@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import socket
 import subprocess
 import threading
@@ -200,12 +201,24 @@ class WakewordActionListener:
     because the listener is torn down immediately after the first action fires.
     """
 
-    def __init__(self, uri: str, model_callbacks: dict, mic: str):
+    def __init__(self, uri: str, model_callbacks: dict, mic: str,
+                 external_audio: bool = False):
         self.uri = uri
         self.model_callbacks = dict(model_callbacks)   # {name: callable}
         self.mic = mic
+        # When ``external_audio`` is set the listener does NOT open its own mic;
+        # the daemon feeds it the same PCM the recorder already captured (via
+        # ``feed``). Avoids a second/competing ``pw-record`` on the same device,
+        # which made real-time cancel/send/stop detection flaky during recording.
+        self.external_audio = external_audio
+        self._audio_q: "queue.Queue[bytes | None]" = queue.Queue()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+
+    def feed(self, chunk: bytes) -> None:
+        """Supply a chunk of 16 kHz s16le mono PCM (external-audio mode)."""
+        if self.external_audio and not self._stop_event.is_set():
+            self._audio_q.put(chunk)
 
     def start(self) -> None:
         if not self.model_callbacks:
@@ -217,6 +230,7 @@ class WakewordActionListener:
 
     def stop(self) -> None:
         self._stop_event.set()
+        self._audio_q.put(None)   # unblock the fed-audio loop immediately
         if self._thread:
             self._thread.join(timeout=2.0)
             self._thread = None
@@ -313,6 +327,30 @@ class WakewordActionListener:
             reader = threading.Thread(target=read_loop, daemon=True)
             reader.start()
 
+            def send_chunk(chunk: bytes) -> None:
+                header = {"type": "audio-chunk",
+                          "data": {"rate": 16000, "width": 2, "channels": 1},
+                          "payload_length": len(chunk)}
+                sock.sendall((json.dumps(header) + "\n").encode("utf-8"))
+                sock.sendall(chunk)
+
+            if self.external_audio:
+                # Audio is fed in via feed() from the shared recorder capture —
+                # no own pw-record, so no contention on the mic device.
+                try:
+                    while not self._stop_event.is_set():
+                        try:
+                            chunk = self._audio_q.get(timeout=0.2)
+                        except queue.Empty:
+                            continue
+                        if chunk is None:
+                            break
+                        send_chunk(chunk)
+                finally:
+                    read_active = False
+                    reader.join(timeout=1.0)
+                return
+
             cmd = ["pw-record", "--rate=16000", "--channels=1", "--format=s16", "-"]
             if self.mic:
                 cmd.extend(["--target", self.mic])
@@ -323,11 +361,7 @@ class WakewordActionListener:
                     chunk = proc.stdout.read(3200)
                     if not chunk:
                         break
-                    header = {"type": "audio-chunk",
-                              "data": {"rate": 16000, "width": 2, "channels": 1},
-                              "payload_length": len(chunk)}
-                    sock.sendall((json.dumps(header) + "\n").encode("utf-8"))
-                    sock.sendall(chunk)
+                    send_chunk(chunk)
             finally:
                 read_active = False
                 proc.terminate()
