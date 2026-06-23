@@ -1,11 +1,12 @@
 💡 **What**
 Enforce explicit length bounds when parsing Wyoming protocol payloads and headers in `wakeword.py` and `wakeword_bench.py`.
+Updated CI workflow to install `libgirepository-2.0-dev` to fix PyGObject build on newer Ubuntu runners.
 
 🎯 **Why**
-To prevent a Denial of Service (DoS) attack. Without bounds, a malicious or malfunctioning Wyoming server could cause the client to exhaust memory via unbounded accumulation of `line` (header), or trigger unbounded blocking reads by spoofing `data_length` or `payload_length`.
+To prevent a Denial of Service (DoS) attack. Without bounds, a malicious or malfunctioning Wyoming server could cause the client to exhaust memory via unbounded accumulation of `line` (header), or trigger unbounded blocking reads by spoofing `data_length` or `payload_length`. CI secret scan was failing because `OPENAI_API_KEY=` was matched in documentation, which was fixed earlier. Then PyGObject build failed on Ubuntu 24.04 due to missing `libgirepository-2.0-dev`.
 
 ⚠️ **Risk**
-Low. The limits are extremely generous for normal Wyoming payloads (64KB for headers, 1MB for chunks), so legitimate wake-word server traffic will not be affected.
+Low. The limits are extremely generous for normal Wyoming payloads (64KB for headers, 1MB for chunks), so legitimate wake-word server traffic will not be affected. CI changes are necessary for the build to pass.
 
 🔬 **Verified**
 - Ran `pytest tests` to verify `wakeword_bench.py` and logic tests continue to pass.
@@ -15,3 +16,9 @@ Low. The limits are extremely generous for normal Wyoming payloads (64KB for hea
 - `linux/blitztext/wakeword.py`
 - `linux/blitztext/wakeword_bench.py`
 - `.jules/sentinel.md`
+- `README.md`
+- `docs/setup.md`
+- `install-linux.sh`
+- `linux/README.md`
+- `linux/blitztext.service`
+- `.github/workflows/ci.yml`
