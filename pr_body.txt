@@ -1,0 +1,17 @@
+💡 **What**
+Enforce explicit length bounds when parsing Wyoming protocol payloads and headers in `wakeword.py` and `wakeword_bench.py`.
+
+🎯 **Why**
+To prevent a Denial of Service (DoS) attack. Without bounds, a malicious or malfunctioning Wyoming server could cause the client to exhaust memory via unbounded accumulation of `line` (header), or trigger unbounded blocking reads by spoofing `data_length` or `payload_length`.
+
+⚠️ **Risk**
+Low. The limits are extremely generous for normal Wyoming payloads (64KB for headers, 1MB for chunks), so legitimate wake-word server traffic will not be affected.
+
+🔬 **Verified**
+- Ran `pytest tests` to verify `wakeword_bench.py` and logic tests continue to pass.
+- Verified manual bounds checks visually via code review.
+
+📎 **Scope**
+- `linux/blitztext/wakeword.py`
+- `linux/blitztext/wakeword_bench.py`
+- `.jules/sentinel.md`
