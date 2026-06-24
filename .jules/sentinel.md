@@ -1,0 +1,1 @@
+## 2024-05-18 — [Wyoming Protocol Unbounded Reads] \n **Learning:** Unbounded reads from the wyoming protocol on both socket headers and payloads can lead to OOM and DOS attacks. \n **Action:** Added bounds to `data_length`, `payload_length` and header size across `wakeword.py` and `wakeword_bench.py`.
