@@ -1,7 +1,7 @@
 """Wakeword detection using Wyoming protocol (openwakeword).
 
-Runs a background thread that captures audio and streams it to a Wyoming 
-server (e.g. rhasspy/wyoming-openwakeword). When a detection event occurs, 
+Runs a background thread that captures audio and streams it to a Wyoming
+server (e.g. rhasspy/wyoming-openwakeword). When a detection event occurs,
 it triggers the main daemon.
 
 Respects /tmp/wake_muted to allow easy desktop integration via scripts.
@@ -44,7 +44,7 @@ class WakewordListener:
         self.models = [m for m in models if m]
         self.mic = mic
         self.on_detect = on_detect
-        
+
         self._stop_event = threading.Event()
         self._thread = None
         self._cooldown_until = 0.0
@@ -79,7 +79,7 @@ class WakewordListener:
             sock.settimeout(5.0)
             sock.connect((host, port))
             logbuffer.log(f"[wakeword] Connected to {self.uri}")
-            
+
             # Request detection for all configured models
             detect_msg = {"type": "detect", "data": {"names": self.models}}
             sock.sendall((json.dumps(detect_msg) + "\n").encode("utf-8"))
@@ -89,7 +89,7 @@ class WakewordListener:
 
             # Start reading thread
             read_active = True
-            
+
             def read_loop():
                 try:
                     sock.settimeout(1.0)
@@ -102,9 +102,7 @@ class WakewordListener:
                                 if not byte:
                                     break
                                 line += byte
-                                if len(line) > 65536:
-                                    raise ValueError("Header too large")
-                            
+
                             if not line:
                                 break
 
@@ -116,8 +114,6 @@ class WakewordListener:
                             # always do. Read it so the wake-word name is
                             # available and the stream stays in sync.
                             data_len = msg.get("data_length", 0)
-                            if data_len > 1048576:
-                                raise ValueError("Data block too large")
                             if data_len > 0:
                                 data_bytes = b""
                                 while len(data_bytes) < data_len:
@@ -131,8 +127,6 @@ class WakewordListener:
                                     pass
 
                             payload_len = msg.get("payload_length", 0)
-                            if payload_len > 1048576:
-                                raise ValueError("Payload block too large")
                             if payload_len > 0:
                                 # Consume payload
                                 remaining = payload_len
@@ -149,7 +143,7 @@ class WakewordListener:
                             pass
                 except Exception:
                     pass
-            
+
             reader_thread = threading.Thread(target=read_loop, daemon=True)
             reader_thread.start()
 
@@ -157,16 +151,16 @@ class WakewordListener:
             cmd = ["pw-record", "--rate=16000", "--channels=1", "--format=s16", "-"]
             if self.mic:
                 cmd.extend(["--target", self.mic])
-            
+
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-            
+
             try:
                 while not self._stop_event.is_set() and proc.poll() is None:
                     # Read chunk
                     chunk = proc.stdout.read(3200) # 100ms of 16kHz 16-bit mono
                     if not chunk:
                         break
-                    
+
                     # Send chunk
                     header = {"type": "audio-chunk", "data": {"rate": 16000, "width": 2, "channels": 1}, "payload_length": len(chunk)}
                     sock.sendall((json.dumps(header) + "\n").encode("utf-8"))
@@ -265,8 +259,6 @@ class WakewordActionListener:
                                 if not byte:
                                     return
                                 line += byte
-                                if len(line) > 65536:
-                                    raise ValueError("Header too large")
                             if not line:
                                 return
                             msg = json.loads(line.decode("utf-8"))
@@ -275,8 +267,6 @@ class WakewordActionListener:
                             # — without it the detection name is blank, so the
                             # wrong action (or none) fires.
                             data_len = msg.get("data_length", 0)
-                            if data_len > 1048576:
-                                raise ValueError("Data block too large")
                             if data_len > 0:
                                 data_bytes = b""
                                 while len(data_bytes) < data_len:
@@ -290,8 +280,6 @@ class WakewordActionListener:
                                     pass
 
                             payload_len = msg.get("payload_length", 0)
-                            if payload_len > 1048576:
-                                raise ValueError("Payload block too large")
                             if payload_len > 0:
                                 remaining = payload_len
                                 while remaining > 0:
