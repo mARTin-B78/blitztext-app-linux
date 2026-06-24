@@ -1,3 +1,4 @@
+import pytest
 from dataclasses import dataclass
 from blitztext.routing import route, normalize, _strip_span
 

@@ -1,5 +1,0 @@
-💡 What  — Creates the `AGENTS.md` file at the repository root to centralize shared rules, environment setup, and PR formatting for the roster of 11 Jules agents. Includes enhanced setup steps (installing additional build dependencies like `pkg-config`, `libgirepository-2.0-dev` and `numpy`) to ensure CI gates run correctly on fresh environments.
-🎯 Why   — To establish clear, enforceable guidelines for the automated agents that patrol the repository, enforcing scope discipline, and ensuring all agents start from a consistent, working environment.
-⚠️ Risk  — Low. This is purely a documentation/guideline addition for the automated workflow and does not modify the application code itself.
-🔬 Verified — Locally verified that `AGENTS.md` parses correctly and the included CI commands (`py_compile`, `pytest`, `ruff`) run successfully using the exact environment setup described.
-📎 Scope — `AGENTS.md` (new file). No other code files touched.
