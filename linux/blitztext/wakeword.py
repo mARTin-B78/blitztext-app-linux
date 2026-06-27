@@ -102,8 +102,10 @@ class WakewordListener:
                                 if not byte:
                                     break
                                 line += byte
+                                if len(line) > 65536:
+                                    break
                             
-                            if not line:
+                            if not line or not line.endswith(b"\n"):
                                 break
 
                             msg = json.loads(line.decode("utf-8"))
@@ -114,6 +116,8 @@ class WakewordListener:
                             # always do. Read it so the wake-word name is
                             # available and the stream stays in sync.
                             data_len = msg.get("data_length", 0)
+                            if data_len > 1048576:
+                                break
                             if data_len > 0:
                                 data_bytes = b""
                                 while len(data_bytes) < data_len:
@@ -127,6 +131,8 @@ class WakewordListener:
                                     pass
 
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len > 1048576:
+                                break
                             if payload_len > 0:
                                 # Consume payload
                                 remaining = payload_len
@@ -259,7 +265,9 @@ class WakewordActionListener:
                                 if not byte:
                                     return
                                 line += byte
-                            if not line:
+                                if len(line) > 65536:
+                                    return
+                            if not line or not line.endswith(b"\n"):
                                 return
                             msg = json.loads(line.decode("utf-8"))
 
@@ -267,6 +275,8 @@ class WakewordActionListener:
                             # — without it the detection name is blank, so the
                             # wrong action (or none) fires.
                             data_len = msg.get("data_length", 0)
+                            if data_len > 1048576:
+                                return
                             if data_len > 0:
                                 data_bytes = b""
                                 while len(data_bytes) < data_len:
@@ -280,6 +290,8 @@ class WakewordActionListener:
                                     pass
 
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len > 1048576:
+                                return
                             if payload_len > 0:
                                 remaining = payload_len
                                 while remaining > 0:
