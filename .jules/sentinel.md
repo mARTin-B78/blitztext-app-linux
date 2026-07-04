@@ -1,0 +1,3 @@
+## 2024-05-24 — Enforce bounds on Wyoming protocol parsers
+**Learning:** The Wyoming protocol implementation in `wakeword.py` and `wakeword_bench.py` parses untrusted network inputs from remote servers. While typical usage sends small JSON headers and ~3.2KB chunks, missing bounds allowed a malicious server (or connection error) to cause an unbounded `while` loop (memory exhaustion) or DoS on the local STT listener.
+**Action:** Bounded `line` reads to 64KB, and `data_length` / `payload_length` blocks to 1MB across all `read_loop` threads and benchmarking parsers. Added defensive chunk verification to `buf` lengths to catch delimiter missing conditions.
