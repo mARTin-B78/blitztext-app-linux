@@ -1,5 +1,0 @@
-💡 What: Added size bounds for JSON headers and binary payloads.
-🎯 Why: Prevents DoS via unbounded memory allocation on deliberately un-delimited streams or streams supplying malicious length parameters.
-⚠️ Risk: Low; limits are set safely above expected Wyoming protocol message sizes.
-🔬 Verified: via pytest and ruff.
-📎 Scope: blitztext/wakeword.py, blitztext/wakeword_bench.py
