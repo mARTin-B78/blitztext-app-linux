@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [2.03.60] - 2026-07-07
+## [2.03.61] - 2026-07-07
 
 ### Added
 - **TTS Engine Extra Payload:** Added a new configuration field ("Extra Payload") in the TTS settings UI to allow custom JSON injection (e.g. `{"app": "Blitztext"}`) for Voice Creator proxy language routing.

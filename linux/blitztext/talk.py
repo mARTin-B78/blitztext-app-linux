@@ -59,18 +59,14 @@ def get_selected_text():
     # 3. Wait for physical keys to be released
     time.sleep(0.4)
     
-    # 4. Simulate Ctrl+C via pynput for maximum reliability
-    from pynput.keyboard import Controller, Key
-    kb = Controller()
-    
-    # Force release common modifiers that might block ctrl+c (like Shift)
-    for key in [Key.shift, Key.shift_l, Key.shift_r, Key.alt, Key.alt_l, Key.alt_r, Key.cmd, Key.cmd_l, Key.cmd_r, Key.ctrl, Key.ctrl_l, Key.ctrl_r]:
-        kb.release(key)
-        
-    time.sleep(0.05)
-    with kb.pressed(Key.ctrl):
-        kb.press('c')
-        kb.release('c')
+    # 4. Simulate Ctrl+C via xdotool/wtype (pynput crashes with BadRRModeError on some X11 configs)
+    if shutil.which("xdotool"):
+        subprocess.run(['xdotool', 'keyup', 'Control_L', 'Control_R', 'Alt_L', 'Alt_R', 'Shift_L', 'Shift_R', 'Super_L', 'Super_R'], stderr=subprocess.DEVNULL)
+        subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+c'], stderr=subprocess.DEVNULL)
+    elif shutil.which("wtype"):
+        subprocess.run(['wtype', '-M', 'ctrl', 'c', '-m', 'ctrl'], stderr=subprocess.DEVNULL)
+    elif shutil.which("ydotool"):
+        subprocess.run(['ydotool', 'key', 'ctrl+c'], stderr=subprocess.DEVNULL)
         
     # 5. Wait for clipboard to populate (poll every 0.05s up to 1 second)
     text = ""
