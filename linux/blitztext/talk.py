@@ -55,15 +55,18 @@ def get_selected_text():
         return text
 
     old_clip = _read_clip(primary=False)
+    
+    # Wait for user to release hotkey, otherwise xdotool/wtype might send Shift+Ctrl+C
+    time.sleep(0.12)
 
     if shutil.which("xdotool"):
-        subprocess.run(['xdotool', 'key', 'ctrl+c'], stderr=subprocess.DEVNULL)
+        subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+c'], stderr=subprocess.DEVNULL)
     elif shutil.which("wtype"):
         subprocess.run(['wtype', '-M', 'ctrl', 'c', '-m', 'ctrl'], stderr=subprocess.DEVNULL)
     elif shutil.which("ydotool"):
         subprocess.run(['ydotool', 'key', 'ctrl+c'], stderr=subprocess.DEVNULL)
     
-    time.sleep(0.1)
+    time.sleep(0.15)
 
     text = _read_clip(primary=False).decode('utf-8').strip()
 
