@@ -11,7 +11,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 LINUX_DIR="$(dirname "$HERE")"            # .../linux
 PKG="blitztext"
 ARCH="$(dpkg --print-architecture)"
-VER="$(sed -n 's/.*__version__ = "\(.*\)".*/\1/p' "$LINUX_DIR/blitztext/__init__.py")"
+VER="2.03.57"
 PYBIN="${PYBIN:-/usr/bin/python3}"
 
 BUILD="$(mktemp -d)"

@@ -86,6 +86,19 @@ class Tray:
             item.connect("activate", lambda _i, w=wf: self.app.trigger_workflow(w))
             menu.append(item)
 
+        if getattr(self.app.cfg, "talk_engines", None):
+            hk = getattr(self.app.cfg, "talk_hotkey", "")
+            lbl = f"🔊 Speak selected text ({pretty_hotkey(hk)})" if hk else "🔊 Speak selected text"
+            talk_item = Gtk.MenuItem(label=lbl)
+            
+            def _play_talk():
+                from . import talk
+                import threading
+                threading.Thread(target=talk.play, args=(self.app.cfg, self.app.daemon._dnotify), daemon=True).start()
+                
+            talk_item.connect("activate", lambda _i: _play_talk())
+            menu.append(talk_item)
+
         menu.append(Gtk.SeparatorMenuItem())
 
         # Cancel recording — always visible, only sensitive while recording.

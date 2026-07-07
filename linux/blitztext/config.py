@@ -38,6 +38,14 @@ class Workflow:
 
 
 @dataclass
+class TTSEngine:
+    name: str
+    url: str = "http://localhost:8023/v1"
+    model: str = "tts-1"
+    api_key_env: str = ""
+    extra_payload: str = '{"app": "Blitztext"}'
+
+@dataclass
 class WakewordEngine:
     """A wyoming-openwakeword endpoint to compare in the wakeword benchmark."""
     name: str = ""
@@ -147,6 +155,20 @@ class Config:
     bench_last: dict = field(default_factory=dict)  # {engine_name: {seconds, accuracy, ok}}
     # workflows
     workflows: list[Workflow] = field(default_factory=list)
+    # blitztalk
+    talk_engines: list[TTSEngine] = field(default_factory=list)
+    talk_active: str = ""
+    talk_voice: str = "DE_M_Privat_mARTin"
+    talk_hotkey: str = "<ctrl>+<alt>+t"
+
+    @property
+    def active_talk(self) -> TTSEngine:
+        e = next((x for x in self.talk_engines if x.name == self.talk_active), None)
+        if e:
+            return e
+        if self.talk_engines:
+            return self.talk_engines[0]
+        return TTSEngine("Default", "http://localhost:8023/v1", "tts-1")
 
     @property
     def active_stt(self) -> STTEngine:
@@ -326,6 +348,8 @@ def load(path: Path = CONFIG_PATH) -> Config:
         bench_ref=data.get("benchmark", {}).get("ref", ""),
         bench_expand_models=bool(data.get("benchmark", {}).get("expand_models", False)),
         bench_last=dict(data.get("benchmark", {}).get("last", {})),
+        talk_voice=data.get("talk", {}).get("voice", "DE_M_Privat_mARTin"),
+        talk_hotkey=data.get("talk", {}).get("hotkey", "<ctrl>+<alt>+t"),
     )
 
     for entry in data.get("workflow", []):
@@ -410,6 +434,18 @@ def load(path: Path = CONFIG_PATH) -> Config:
         for e in data.get("llm_engine", [])
     ] or [LLMEngine("Default", cfg.base_url, cfg.rewrite_model, cfg.api_key_env, cfg.temperature)]
     cfg.llm_active = data.get("llm", {}).get("active", cfg.llm_engines[0].name)
+
+    cfg.talk_engines = [
+        TTSEngine(
+            name=e["name"],
+            url=e.get("url", "http://localhost:8023/v1").rstrip("/"),
+            model=e.get("model", "tts-1"),
+            api_key_env=e.get("api_key_env", ""),
+            extra_payload=e.get("extra_payload", '{"app": "Blitztext"}'),
+        )
+        for e in data.get("talk_engine", [])
+    ] or [TTSEngine("Local TTS", "http://localhost:8023/v1", "tts-1")]
+    cfg.talk_active = data.get("talk", {}).get("active", cfg.talk_engines[0].name)
 
     return cfg
 
@@ -521,6 +557,15 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             {"name": e.name, "type": e.type, "url": e.url, "model": e.model,
              "api_key_env": e.api_key_env, "temperature": e.temperature}
             for e in cfg.llm_engines
+        ],
+        "talk": {
+            "active": cfg.talk_active,
+            "voice": cfg.talk_voice,
+            "hotkey": cfg.talk_hotkey,
+        },
+        "talk_engine": [
+            {"name": e.name, "url": e.url, "model": e.model, "api_key_env": e.api_key_env, "extra_payload": e.extra_payload}
+            for e in cfg.talk_engines
         ],
         "workflow": [],
     }
