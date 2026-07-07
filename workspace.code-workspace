@@ -2,6 +2,9 @@
 	"folders": [
 		{
 			"path": "."
+		},
+		{
+			"path": "../../../Docker/tts-dgx-spark-faster-qwen3-tts"
 		}
 	]
 }

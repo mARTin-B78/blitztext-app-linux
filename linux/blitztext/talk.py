@@ -50,26 +50,42 @@ def _write_clip(data):
             pass
 
 def get_selected_text():
-    text = _read_clip(primary=True).decode('utf-8').strip()
-    if text:
-        return text
-
+    # 1. Save old clipboard
     old_clip = _read_clip(primary=False)
     
-    # Wait for user to release hotkey, otherwise xdotool/wtype might send Shift+Ctrl+C
-    time.sleep(0.12)
+    # 2. Clear clipboard to detect when ctrl+c succeeds
+    _write_clip(b"")
 
-    if shutil.which("xdotool"):
-        subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+c'], stderr=subprocess.DEVNULL)
-    elif shutil.which("wtype"):
-        subprocess.run(['wtype', '-M', 'ctrl', 'c', '-m', 'ctrl'], stderr=subprocess.DEVNULL)
-    elif shutil.which("ydotool"):
-        subprocess.run(['ydotool', 'key', 'ctrl+c'], stderr=subprocess.DEVNULL)
+    # 3. Wait for physical keys to be released
+    time.sleep(0.4)
     
-    time.sleep(0.15)
+    # 4. Simulate Ctrl+C via pynput for maximum reliability
+    from pynput.keyboard import Controller, Key
+    kb = Controller()
+    
+    # Force release common modifiers that might block ctrl+c (like Shift)
+    for key in [Key.shift, Key.shift_l, Key.shift_r, Key.alt, Key.alt_l, Key.alt_r, Key.cmd, Key.cmd_l, Key.cmd_r, Key.ctrl, Key.ctrl_l, Key.ctrl_r]:
+        kb.release(key)
+        
+    time.sleep(0.05)
+    with kb.pressed(Key.ctrl):
+        kb.press('c')
+        kb.release('c')
+        
+    # 5. Wait for clipboard to populate (poll every 0.05s up to 1 second)
+    text = ""
+    for _ in range(20):
+        time.sleep(0.05)
+        clip_data = _read_clip(primary=False)
+        if clip_data:
+            text = clip_data.decode('utf-8', errors='ignore').strip()
+            break
 
-    text = _read_clip(primary=False).decode('utf-8').strip()
+    # 6. Fallback to primary selection if ctrl+c failed (e.g. terminals where ctrl+c is interrupt)
+    if not text:
+        text = _read_clip(primary=True).decode('utf-8', errors='ignore').strip()
 
+    # 7. Restore old clipboard
     if old_clip:
         _write_clip(old_clip)
         

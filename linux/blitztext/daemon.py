@@ -10,6 +10,7 @@ from __future__ import annotations
 import signal
 import sys
 import threading
+import typing
 import traceback
 from typing import Callable
 
@@ -82,6 +83,8 @@ class _CancelWatcher:
     def feed(self, chunk: bytes) -> None:
         if not self._active:
             return
+        ready = False
+        snapshot = b""
         with self._lock:
             if not self._active:
                 return
@@ -172,6 +175,12 @@ class Daemon:
         self.recorder_name = detect_recorder(cfg.recorder)
         self.transcriber: Transcriber | None = None
         self._wakeword_listener = None
+        self._cancel_watcher: typing.Any | None = None
+        self._vad_meter: typing.Any | None = None
+        self._action_listener: typing.Any | None = None
+        self._scheme: typing.Any | None = None
+        self._vad_started_at = 0.0
+        self._vad_last_speech = 0.0
         # When a session is started hands-free by the wakeword, its desktop
         # notifications are suppressed (kept quiet in the background).
         self._session_silent = False
@@ -286,7 +295,7 @@ class Daemon:
         self._vad_stop()
         import time
         from . import audio
-        from gi.repository import GLib
+        from gi.repository import GLib  # type: ignore
         
         self._vad_started_at = time.time()
         self._vad_last_speech = time.time()
@@ -393,13 +402,13 @@ class Daemon:
 
     def _vad_stop(self) -> None:
         if getattr(self, '_vad_meter', None) is not None:
-            self._vad_meter.stop()
+            self._vad_meter.stop()  # type: ignore
             self._vad_meter = None
         if getattr(self, "_cancel_watcher", None) is not None:
-            self._cancel_watcher.stop()
+            self._cancel_watcher.stop()  # type: ignore
             self._cancel_watcher = None
         if getattr(self, "_action_listener", None) is not None:
-            self._action_listener.stop()
+            self._action_listener.stop()  # type: ignore
             self._action_listener = None
 
     def _ov_meter_start(self) -> None:
@@ -416,7 +425,7 @@ class Daemon:
 
     def _ov_meter_stop(self) -> None:
         if getattr(self, "_ov_meter", None) is not None:
-            self._ov_meter.stop()
+            self._ov_meter.stop()  # type: ignore
             self._ov_meter = None
 
     def _play_sound(self, sound_name: str) -> None:
@@ -511,9 +520,10 @@ class Daemon:
                 self._stream_segment_text = ""
             else:
                 streamer = None
-                if self._recording is None:
+                rec = getattr(self, "_recording", None)
+                if rec is None:
                     return
-                rec, wf, win = self._recording, self._active_workflow, self._target_window
+                wf, win = self._active_workflow, self._target_window
                 self._recording = None
                 self._active_workflow = None
                 self._busy = True
@@ -527,7 +537,7 @@ class Daemon:
             self._emit("idle", None, "Ready")
             return
 
-        audio_path = rec.stop()
+        audio_path = rec.stop()  # type: ignore
         self._play_cue("after")
         threading.Thread(
             target=self._process, args=(audio_path, wf, win, send_enter), daemon=True
@@ -567,7 +577,7 @@ class Daemon:
             self._emit("idle", None, "Cancelled")
             self._play_sound("device-removed")
             return
-        rec.discard()
+        rec.discard()  # type: ignore
         self._emit("idle", None, "Cancelled")
         self._notify("Cancelled", "Recording discarded.", "low")
         self._play_sound("device-removed")
@@ -765,7 +775,7 @@ class Daemon:
                         return True
 
                     try:
-                        from gi.repository import GLib as _GLib
+                        from gi.repository import GLib  # type: ignore as _GLib
                         # idle_add ensures timeout_add runs on the GTK main thread —
                         # calling timeout_add from a background thread is not safe.
                         _GLib.idle_add(lambda: _GLib.timeout_add(400, _pulse_thinking) and False)
@@ -866,11 +876,19 @@ class Daemon:
                 mapping[wf.hotkey] = (lambda wf=wf: self.toggle(wf))
         if self.cfg.routing_enabled and self.cfg.routing_hotkey:
             mapping[self.cfg.routing_hotkey] = (lambda: self.toggle(self._route_workflow))
+            
+        if getattr(self.cfg, "talk_hotkey", ""):
+            import threading
+            from . import talk
+            def run_talk():
+                threading.Thread(target=talk.play, args=(self.cfg, self._dnotify), daemon=True).start()
+            mapping[self.cfg.talk_hotkey] = run_talk
+            
         return mapping
 
     def start_hotkeys(self):
         """Register global hotkeys non-blocking; returns the pynput listener."""
-        from pynput import keyboard
+        from pynput import keyboard  # type: ignore
 
         self._listener = keyboard.GlobalHotKeys(self._build_mapping())
         self._listener.start()
