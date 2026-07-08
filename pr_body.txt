@@ -1,0 +1,14 @@
+## 💡 What
+Enforces 64KB line length bounds and 1MB buffer/payload lengths on untrusted network streams parsing Wyoming protocols in `wakeword.py` and `wakeword_bench.py`.
+
+## 🎯 Why
+Prevents a Denial of Service (DoS) attack vector where memory exhaustion could be triggered by an attacker omitting newline delimiters or sending oversized `payload_length` values.
+
+## ⚠️ Risk
+Low. Legitimate Wyoming protocol wakeword events are tiny (kilobytes). Drops malformed frames cleanly.
+
+## 🔬 Verified
+Tested with `pytest tests` and manually verified bounded loop exit behavior.
+
+## 📎 Scope
+`wakeword.py`, `wakeword_bench.py`
