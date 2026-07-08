@@ -1,0 +1,3 @@
+## 2024-07-05 — Wyoming protocol DoS mitigations
+**Learning:** Parsing untrusted network streams requires bounds on lengths. `wakeword.py` read Wyoming protocol streams by searching for `\n` without any buffer limit and consumed data based on an untrusted `payload_length` value. This is vulnerable to an unbounded memory allocation DoS if a server is deliberately malformed or sends massive lengths.
+**Action:** Implemented a 64KB max bound on JSON headers while searching for `\n`, and enforced a hard 1MB ceiling on `data_length` and `payload_length` inside the `read_loop` in both `WakewordListener` and `WakewordActionListener`. Also added a 1MB buffer accumulation bound inside `_bench_engine` in `wakeword_bench.py`.
