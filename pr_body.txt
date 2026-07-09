@@ -1,0 +1,5 @@
+💡 What  — Creates the directory structure, prompts, journals, and shared rules (`AGENTS.md`) for 11 targeted Jules agents.
+🎯 Why   — To establish an automated, continuous patrol of the codebase, distributing concerns (security, correctness, stability, licensing, docs, etc.) across specialized agents as requested.
+⚠️ Risk  — Zero functional risk to the app. Only markdown documentation files were created/modified. The `AGENTS.md` adds standard apt packages (`pkg-config`, `build-essential`, etc.) to the CI block.
+🔬 Verified — Ran `python -m py_compile blitztext/*.py`, `PYTHONPATH=. pytest tests`, and `ruff check blitztext tests` inside `linux/` (all passed).
+📎 Scope — Added `AGENTS.md`, 11 files in `agents/`, and 11 files in `.jules/`. Unrelated code untouched.
