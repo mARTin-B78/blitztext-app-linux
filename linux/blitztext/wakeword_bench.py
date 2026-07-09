@@ -297,6 +297,8 @@ def count_detections(uri: str, model: str, pcm: bytes, *, settle: float = 1.5,
             if not data:
                 break
             buf += data
+            if len(buf) > 1048576:
+                break
             buf, n = _drain_detections(buf)
             detections += n
     return detections
