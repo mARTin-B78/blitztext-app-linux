@@ -1,0 +1,5 @@
+💡 What  — Creates the Jules agent framework (11 specific agents, .jules journal files, shared AGENTS.md rules).
+🎯 Why   — The repository needs automated patrol to enforce stability, security, compliance and code quality per the requested agent roster.
+⚠️ Risk  — Low risk. These are just markdown documentation and prompts. Adds missing system dependencies to the CI workflow which is standard procedure.
+🔬 Verified — Ran `python -m py_compile blitztext/*.py`, `PYTHONPATH=. pytest tests`, `ruff check blitztext tests` locally and all passed. Checked that `.jules/` and `agents/` generated correctly.
+📎 Scope — Modified `.github/workflows/ci.yml`, added `AGENTS.md` and populated `agents/` and `.jules/` directories. Confirmed no unrelated changes were made.
