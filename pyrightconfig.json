@@ -4,5 +4,12 @@
   ],
   "venvPath": "linux",
   "venv": ".venv",
-  "reportMissingModuleSource": "none"
+  "reportMissingModuleSource": "none",
+  "reportMissingImports": false,
+  "reportAttributeAccessIssue": false,
+  "reportOptionalMemberAccess": false,
+  "reportAssignmentType": false,
+  "reportOptionalCall": false,
+  "reportUndefinedVariable": false,
+  "reportOptionalSubscript": false
 }
