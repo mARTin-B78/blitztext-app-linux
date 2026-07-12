@@ -1,0 +1,1 @@
+# Scribe Agent Journal
