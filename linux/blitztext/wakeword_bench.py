@@ -314,6 +314,9 @@ def _drain_detections(buf: bytes) -> tuple[bytes, int]:
     Consumes each message's binary payload too, so payload bytes are never
     mistaken for the next header line.
     """
+    if len(buf) > 1048576 + 65536:
+        raise ValueError("Buffer exceeded bounds")
+
     found = 0
     while b"\n" in buf:
         line, rest = buf.split(b"\n", 1)
