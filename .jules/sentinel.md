@@ -1,0 +1,3 @@
+## 2024-07-16 — Untrusted parsing in Wyoming protocol streams
+**Learning:** Network streams processing Wyoming wake-word protocols must explicitly bound their reads independently of protocol delimiters. Without bounds checking, reading until `\n` or consuming `payload_length` arbitrary bytes exposes the client to DoS via out-of-memory errors from malformed or intentionally giant payloads.
+**Action:** Enforced strict bounds checks in `wakeword.py` (maximum 64KB for header and `data_length` blocks, 1MB for binary payloads) and `wakeword_bench.py` (maximum 1MB cumulative buffer and payload lengths). Used early returns to safely exit dead threads instead of breaking inner loops which would incorrectly proceed to parse incomplete data.
