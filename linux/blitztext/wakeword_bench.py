@@ -314,6 +314,8 @@ def _drain_detections(buf: bytes) -> tuple[bytes, int]:
     Consumes each message's binary payload too, so payload bytes are never
     mistaken for the next header line.
     """
+    if len(buf) > 1048576:
+        raise ValueError("Buffer too large")
     found = 0
     while b"\n" in buf:
         line, rest = buf.split(b"\n", 1)
@@ -322,6 +324,8 @@ def _drain_detections(buf: bytes) -> tuple[bytes, int]:
         except (ValueError, UnicodeDecodeError):
             return rest, found
         plen = msg.get("payload_length", 0) or 0
+        if plen > 1048576:
+            raise ValueError("Payload too large")
         if len(rest) < plen:
             return buf, found  # payload not fully arrived yet; wait for more
         rest = rest[plen:]
