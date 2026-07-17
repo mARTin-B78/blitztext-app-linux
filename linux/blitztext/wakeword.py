@@ -101,11 +101,13 @@ class WakewordListener:
                             while not line.endswith(b"\n"):
                                 byte = sock.recv(1)
                                 if not byte:
-                                    break
+                                    raise ConnectionError("EOF while reading header")
                                 line += byte
+                                if len(line) > 65536:
+                                    raise ConnectionError("Header too long")
                             
                             if not line:
-                                break
+                                raise ConnectionError("EOF while reading header")
 
                             msg = json.loads(line.decode("utf-8"))
 
@@ -115,12 +117,14 @@ class WakewordListener:
                             # always do. Read it so the wake-word name is
                             # available and the stream stays in sync.
                             data_len = msg.get("data_length", 0)
+                            if data_len > 1048576:
+                                raise ConnectionError("Data too long")
                             if data_len > 0:
                                 data_bytes = b""
                                 while len(data_bytes) < data_len:
                                     r = sock.recv(min(data_len - len(data_bytes), 4096))
                                     if not r:
-                                        break
+                                        raise ConnectionError("EOF while reading data")
                                     data_bytes += r
                                 try:
                                     msg["data"] = json.loads(data_bytes.decode("utf-8"))
@@ -128,13 +132,15 @@ class WakewordListener:
                                     pass
 
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len > 1048576:
+                                raise ConnectionError("Payload too long")
                             if payload_len > 0:
                                 # Consume payload
                                 remaining = payload_len
                                 while remaining > 0:
                                     received = sock.recv(min(remaining, 4096))
                                     if not received:
-                                        break
+                                        raise ConnectionError("EOF while reading payload")
                                     remaining -= len(received)
 
                             if msg.get("type") == "detection":
@@ -271,22 +277,26 @@ class WakewordActionListener:
                             while not line.endswith(b"\n"):
                                 byte = sock.recv(1)
                                 if not byte:
-                                    return
+                                    raise ConnectionError("EOF while reading header")
                                 line += byte
+                                if len(line) > 65536:
+                                    raise ConnectionError("Header too long")
                             if not line:
-                                return
+                                raise ConnectionError("EOF while reading header")
                             msg = json.loads(line.decode("utf-8"))
 
                             # Read the separate `data` block (see WakewordListener)
                             # — without it the detection name is blank, so the
                             # wrong action (or none) fires.
                             data_len = msg.get("data_length", 0)
+                            if data_len > 1048576:
+                                raise ConnectionError("Data too long")
                             if data_len > 0:
                                 data_bytes = b""
                                 while len(data_bytes) < data_len:
                                     r = sock.recv(min(data_len - len(data_bytes), 4096))
                                     if not r:
-                                        break
+                                        raise ConnectionError("EOF while reading data")
                                     data_bytes += r
                                 try:
                                     msg["data"] = json.loads(data_bytes.decode("utf-8"))
@@ -294,12 +304,14 @@ class WakewordActionListener:
                                     pass
 
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len > 1048576:
+                                raise ConnectionError("Payload too long")
                             if payload_len > 0:
                                 remaining = payload_len
                                 while remaining > 0:
                                     chunk = sock.recv(min(remaining, 4096))
                                     if not chunk:
-                                        break
+                                        raise ConnectionError("EOF while reading payload")
                                     remaining -= len(chunk)
 
                             if msg.get("type") == "detection":
