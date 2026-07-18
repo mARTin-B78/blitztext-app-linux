@@ -1,0 +1,3 @@
+## 2023-10-27 — [Command Injection in TTS Playback Fixed]
+**Learning:** The `play` function in `linux/blitztext/talk.py` constructed a pipeline using string formatting that was vulnerable to shell injection due to the use of `subprocess.Popen(cmd, shell=True)`. Even with partial quoting (`shlex.quote`), such structures are flagged by security scanners (e.g. bandit, ruff S602) and pose significant risks.
+**Action:** Replaced the `shell=True` pipeline with secure chained `subprocess.Popen` calls, passing arguments as discrete lists and piping standard output to standard input manually, closing the parent file descriptor appropriately.
