@@ -6,6 +6,7 @@ CPU-only, so device="auto" attempts CUDA and falls back to CPU automatically.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 
