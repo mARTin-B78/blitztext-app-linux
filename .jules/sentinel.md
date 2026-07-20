@@ -1,0 +1,3 @@
+## 2024-05-18 — Untrusted Network Payload Parsing
+**Learning:** The local Wyoming wake-word server implementation did not bound socket reads when parsing newline-framed JSON headers and binary payloads. If a malicious or buggy server sent endless data without a newline, or declared an enormous payload length, `json.loads` / buffer aggregation would cause unbound memory allocation (DoS).
+**Action:** Added explicit size bounds constraints in `wakeword.py` (64KB header, 1MB payload) and `wakeword_bench.py` (2MB total buffer, 1MB payload) that immediately abort processing or raise exceptions to gracefully handle malformed streams.

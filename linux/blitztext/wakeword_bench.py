@@ -296,6 +296,8 @@ def count_detections(uri: str, model: str, pcm: bytes, *, settle: float = 1.5,
                 break  # server quiet for `settle`s → done
             if not data:
                 break
+            if len(buf) + len(data) > 2097152:
+                raise ValueError("Buffer exceeds 2MB limit")
             buf += data
             buf, n = _drain_detections(buf)
             detections += n
@@ -317,17 +319,23 @@ def _drain_detections(buf: bytes) -> tuple[bytes, int]:
     found = 0
     while b"\n" in buf:
         line, rest = buf.split(b"\n", 1)
+        if len(line) > 65536:
+            raise ValueError("Header line exceeds 64KB limit")
         try:
             msg = json.loads(line.decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             return rest, found
         plen = msg.get("payload_length", 0) or 0
+        if plen > 1024 * 1024:
+            raise ValueError("Payload length exceeds 1MB limit")
         if len(rest) < plen:
             return buf, found  # payload not fully arrived yet; wait for more
         rest = rest[plen:]
         if msg.get("type") == "detection":
             found += 1
         buf = rest
+    if len(buf) > 65536:
+        raise ValueError("Header line exceeds 64KB limit")
     return buf, found
 
 
