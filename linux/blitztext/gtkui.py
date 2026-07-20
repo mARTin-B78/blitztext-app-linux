@@ -9,6 +9,7 @@ hacks). Status updates from worker threads are marshalled with GLib.idle_add.
 from __future__ import annotations
 
 import os
+import sys
 import threading
 from pathlib import Path
 

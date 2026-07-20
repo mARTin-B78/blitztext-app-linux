@@ -1,3 +1,4 @@
+import pytest
 from blitztext.quality import too_quiet, is_hallucination, clean
 
 def test_too_quiet():
