@@ -101,13 +101,13 @@ class WakewordListener:
                             while not line.endswith(b"\n"):
                                 byte = sock.recv(1)
                                 if not byte:
-                                    raise ConnectionError("Connection closed")
+                                    return
                                 line += byte
                                 if len(line) > 65536:
                                     raise ValueError("Header exceeds 64KB")
                             
                             if not line:
-                                raise ConnectionError("Connection closed")
+                                return
 
                             msg = json.loads(line.decode("utf-8"))
 
@@ -277,12 +277,12 @@ class WakewordActionListener:
                             while not line.endswith(b"\n"):
                                 byte = sock.recv(1)
                                 if not byte:
-                                    raise ConnectionError("Connection closed")
+                                    return
                                 line += byte
                                 if len(line) > 65536:
                                     raise ValueError("Header exceeds 64KB")
                             if not line:
-                                raise ConnectionError("Connection closed")
+                                return
                             msg = json.loads(line.decode("utf-8"))
 
                             # Read the separate `data` block (see WakewordListener)
