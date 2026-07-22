@@ -775,7 +775,6 @@ class Daemon:
                         return True
 
                     try:
-                        from gi.repository import GLib  # type: ignore as _GLib
                         # idle_add ensures timeout_add runs on the GTK main thread —
                         # calling timeout_add from a background thread is not safe.
                         _GLib.idle_add(lambda: _GLib.timeout_add(400, _pulse_thinking) and False)
