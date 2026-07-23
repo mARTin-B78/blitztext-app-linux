@@ -328,6 +328,10 @@ def _drain_detections(buf: bytes) -> tuple[bytes, int]:
         if msg.get("type") == "detection":
             found += 1
         buf = rest
+
+    if len(buf) > 65536:
+        raise ValueError("Header too large or missing delimiter")
+
     return buf, found
 
 
