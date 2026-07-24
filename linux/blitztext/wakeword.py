@@ -99,13 +99,15 @@ class WakewordListener:
                             # Read line
                             line = b""
                             while not line.endswith(b"\n"):
+                                if len(line) > 65536:
+                                    raise ValueError("Header line too long")
                                 byte = sock.recv(1)
                                 if not byte:
-                                    break
+                                    return
                                 line += byte
                             
                             if not line:
-                                break
+                                return
 
                             msg = json.loads(line.decode("utf-8"))
 
@@ -115,12 +117,14 @@ class WakewordListener:
                             # always do. Read it so the wake-word name is
                             # available and the stream stays in sync.
                             data_len = msg.get("data_length", 0)
+                            if data_len > 1048576:
+                                raise ValueError("Data payload too large")
                             if data_len > 0:
                                 data_bytes = b""
                                 while len(data_bytes) < data_len:
                                     r = sock.recv(min(data_len - len(data_bytes), 4096))
                                     if not r:
-                                        break
+                                        return
                                     data_bytes += r
                                 try:
                                     msg["data"] = json.loads(data_bytes.decode("utf-8"))
@@ -269,6 +273,8 @@ class WakewordActionListener:
                         try:
                             line = b""
                             while not line.endswith(b"\n"):
+                                if len(line) > 65536:
+                                    raise ValueError("Header line too long")
                                 byte = sock.recv(1)
                                 if not byte:
                                     return
@@ -281,12 +287,14 @@ class WakewordActionListener:
                             # — without it the detection name is blank, so the
                             # wrong action (or none) fires.
                             data_len = msg.get("data_length", 0)
+                            if data_len > 1048576:
+                                raise ValueError("Data payload too large")
                             if data_len > 0:
                                 data_bytes = b""
                                 while len(data_bytes) < data_len:
                                     r = sock.recv(min(data_len - len(data_bytes), 4096))
                                     if not r:
-                                        break
+                                        return
                                     data_bytes += r
                                 try:
                                     msg["data"] = json.loads(data_bytes.decode("utf-8"))
