@@ -1,5 +1,4 @@
 import json
-import shlex
 import subprocess
 import time
 
@@ -136,8 +135,10 @@ def play(cfg, _notify_func):
     
     try:
         p1 = subprocess.Popen(curl_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        p2 = subprocess.Popen(ffplay_cmd, stdin=p1.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if p1.stdout:
-            p1.stdout.close()
+        try:
+            _ = subprocess.Popen(ffplay_cmd, stdin=p1.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        finally:
+            if p1.stdout:
+                p1.stdout.close()
     except Exception as e:
         _notify_func("Blitztalk Error", f"Error playing audio: {e}", "critical")
