@@ -314,14 +314,20 @@ def _drain_detections(buf: bytes) -> tuple[bytes, int]:
     Consumes each message's binary payload too, so payload bytes are never
     mistaken for the next header line.
     """
+    if len(buf) > 1048576 + 65536:
+        raise ConnectionError("Buffer length exceeded limit")
     found = 0
     while b"\n" in buf:
         line, rest = buf.split(b"\n", 1)
+        if len(line) > 65536:
+            raise ConnectionError("Header length exceeded 64KB limit")
         try:
             msg = json.loads(line.decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             return rest, found
         plen = msg.get("payload_length", 0) or 0
+        if plen > 1048576:
+            raise ConnectionError("Payload length exceeded 1MB limit")
         if len(rest) < plen:
             return buf, found  # payload not fully arrived yet; wait for more
         rest = rest[plen:]
