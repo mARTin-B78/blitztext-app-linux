@@ -1,0 +1,1 @@
+# 🗣️ Linguist Journal
