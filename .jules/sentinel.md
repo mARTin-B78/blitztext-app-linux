@@ -1,0 +1,3 @@
+## 2025-02-17 — Fix unbounded memory allocation DoS in wakeword stream parsing
+**Learning:** When enforcing size limits on socket stream payloads (e.g., `payload_length` or `data_length`) in a framing protocol like Wyoming, using soft truncation (e.g., `min(requested_length, MAX_LIMIT)`) leaves unread residual bytes in the socket buffer. This desynchronizes the stream and corrupts subsequent frames.
+**Action:** Implemented a hard failure (using `return` or `break` to abort the connection) whenever `data_length` or `payload_length` exceeds 1MB, or when header lines exceed 64KB, in `wakeword.py` and `wakeword_bench.py`.
