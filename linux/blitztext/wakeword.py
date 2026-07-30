@@ -103,8 +103,10 @@ class WakewordListener:
                                 if not byte:
                                     break
                                 line += byte
+                                if len(line) > 65536:
+                                    break
                             
-                            if not line:
+                            if not line or len(line) > 65536:
                                 break
 
                             msg = json.loads(line.decode("utf-8"))
@@ -115,6 +117,8 @@ class WakewordListener:
                             # always do. Read it so the wake-word name is
                             # available and the stream stays in sync.
                             data_len = msg.get("data_length", 0)
+                            if data_len > 1048576:
+                                break
                             if data_len > 0:
                                 data_bytes = b""
                                 while len(data_bytes) < data_len:
@@ -122,12 +126,16 @@ class WakewordListener:
                                     if not r:
                                         break
                                     data_bytes += r
+                                if len(data_bytes) < data_len:
+                                    break
                                 try:
                                     msg["data"] = json.loads(data_bytes.decode("utf-8"))
                                 except Exception:
                                     pass
 
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len > 1048576:
+                                break
                             if payload_len > 0:
                                 # Consume payload
                                 remaining = payload_len
@@ -136,6 +144,8 @@ class WakewordListener:
                                     if not received:
                                         break
                                     remaining -= len(received)
+                                if remaining > 0:
+                                    break
 
                             if msg.get("type") == "detection":
                                 name = msg.get("data", {}).get("name", "")
@@ -273,7 +283,9 @@ class WakewordActionListener:
                                 if not byte:
                                     return
                                 line += byte
-                            if not line:
+                                if len(line) > 65536:
+                                    return
+                            if not line or len(line) > 65536:
                                 return
                             msg = json.loads(line.decode("utf-8"))
 
@@ -281,6 +293,8 @@ class WakewordActionListener:
                             # — without it the detection name is blank, so the
                             # wrong action (or none) fires.
                             data_len = msg.get("data_length", 0)
+                            if data_len > 1048576:
+                                return
                             if data_len > 0:
                                 data_bytes = b""
                                 while len(data_bytes) < data_len:
@@ -288,12 +302,16 @@ class WakewordActionListener:
                                     if not r:
                                         break
                                     data_bytes += r
+                                if len(data_bytes) < data_len:
+                                    return
                                 try:
                                     msg["data"] = json.loads(data_bytes.decode("utf-8"))
                                 except Exception:
                                     pass
 
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len > 1048576:
+                                return
                             if payload_len > 0:
                                 remaining = payload_len
                                 while remaining > 0:
@@ -301,6 +319,8 @@ class WakewordActionListener:
                                     if not chunk:
                                         break
                                     remaining -= len(chunk)
+                                if remaining > 0:
+                                    return
 
                             if msg.get("type") == "detection":
                                 name = msg.get("data", {}).get("name", "")
