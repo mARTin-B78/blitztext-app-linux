@@ -297,6 +297,8 @@ def count_detections(uri: str, model: str, pcm: bytes, *, settle: float = 1.5,
             if not data:
                 break
             buf += data
+            if len(buf) > 1048576 + 65536:
+                raise ValueError("Buffer exceeded length limits")
             buf, n = _drain_detections(buf)
             detections += n
     return detections
@@ -317,6 +319,8 @@ def _drain_detections(buf: bytes) -> tuple[bytes, int]:
     found = 0
     while b"\n" in buf:
         line, rest = buf.split(b"\n", 1)
+        if len(line) > 65536:
+            raise ValueError("Header length exceeded")
         try:
             msg = json.loads(line.decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
