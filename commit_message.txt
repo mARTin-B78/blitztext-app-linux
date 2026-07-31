@@ -1,0 +1,23 @@
+🛡️ Sentinel: Fix untrusted network streams parsing lengths
+
+💡 What:
+In `wakeword.py` and `wakeword_bench.py`, enforce strict limits on socket buffer reads:
+- Added maximum header length bounds (64KB).
+- Added binary payload and arbitrary JSON data bounds (1MB).
+In `talk.py`, converted `subprocess.Popen(..., shell=True)` into two piped sub-processes with `shell=False`.
+
+🎯 Why:
+To prevent Denial of Service attacks caused by unbounded socket buffer reads from untrusted local/network wake-word servers (if manipulated), and to prevent command injection vectors in `talk.py` via maliciously formatted TTS payloads.
+
+⚠️ Risk:
+Low. Prevents application crashes from malformed Wyoming protocol messages or injection vulnerabilities. The hard-coded byte limits are far beyond what valid messages should reach.
+
+🔬 Verified:
+- Hand-tested regex substitutions to verify correct logic applications.
+- Run `pytest` to make sure existing tests pass cleanly.
+- Run `ruff check --select S` to clear the `talk.py` issues.
+
+📎 Scope:
+- `linux/blitztext/wakeword.py`
+- `linux/blitztext/wakeword_bench.py`
+- `linux/blitztext/talk.py`
