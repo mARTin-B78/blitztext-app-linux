@@ -1,0 +1,3 @@
+## 2025-02-14 — Enforce payload size limits to prevent DoS via unbounded reads
+**Learning:** The Wyoming protocol implementation in `wakeword.py` and `wakeword_bench.py` lacked bounds on JSON header lengths and binary payload lengths, which could lead to Denial of Service (DoS) via unbounded reads if an attacker sent a large payload or deliberately omitted newlines.
+**Action:** Enforced a maximum bound of 64KB for JSON headers and 1MB for data/payload blocks in `WakewordListener`, `WakewordActionListener`, and `_drain_detections`. When limits are exceeded, a `ValueError` is cleanly raised to prevent memory exhaustion.
