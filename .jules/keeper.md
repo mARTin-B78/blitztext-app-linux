@@ -1,0 +1,3 @@
+# Keeper Journal
+
+This file contains learnings and context for the Keeper agent.
