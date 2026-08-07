@@ -1,0 +1,3 @@
+## 2025-02-12 — Command Injection in talk.py via shell=True
+**Learning:** `subprocess.Popen` with `shell=True` can be vulnerable to command injection when variables (like a URL) are unsafely interpolated into the string command. Using list-based arguments with `shell=False` is safer. When piping, use stdout=subprocess.PIPE on the first command, pass it as stdin to the second command, and close the first process's stdout in the parent process to allow SIGPIPE.
+**Action:** Replaced `shell=True` curl to ffplay pipeline in `blitztext/talk.py` with secure chained `subprocess.Popen` calls using `shell=False`.
