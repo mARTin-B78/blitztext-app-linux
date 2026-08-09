@@ -2760,8 +2760,6 @@ class SettingsDialog:
                         line += chunk
                     info = json.loads(line.decode("utf-8"))
                     payload_len = info.get("data_length", info.get("payload_length", 0))
-                    if payload_len > 65536:
-                        raise ValueError("Payload too large")
                     payload = b""
                     while len(payload) < payload_len:
                         chunk = s.recv(payload_len - len(payload))
