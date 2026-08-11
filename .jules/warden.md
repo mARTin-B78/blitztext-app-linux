@@ -1,0 +1,6 @@
+# Journal for Warden
+
+Append critical codebase learnings using the format:
+## YYYY-MM-DD — [Title]
+**Learning:** ...
+**Action:** ...
