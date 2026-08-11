@@ -317,17 +317,23 @@ def _drain_detections(buf: bytes) -> tuple[bytes, int]:
     found = 0
     while b"\n" in buf:
         line, rest = buf.split(b"\n", 1)
+        if len(line) > 65536:
+            raise ValueError("Header line exceeds 64KB")
         try:
             msg = json.loads(line.decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             return rest, found
         plen = msg.get("payload_length", 0) or 0
+        if plen > 65536:
+            raise ValueError("Payload length exceeds 64KB")
         if len(rest) < plen:
             return buf, found  # payload not fully arrived yet; wait for more
         rest = rest[plen:]
         if msg.get("type") == "detection":
             found += 1
         buf = rest
+    if len(buf) > 65536:
+        raise ValueError("Buffer exceeds 64KB without newline")
     return buf, found
 
 
