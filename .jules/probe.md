@@ -1,0 +1,6 @@
+# Journal for Probe
+
+Append critical codebase learnings using the format:
+## YYYY-MM-DD — [Title]
+**Learning:** ...
+**Action:** ...

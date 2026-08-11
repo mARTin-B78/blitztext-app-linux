@@ -1,0 +1,6 @@
+# Journal for Bolt
+
+Append critical codebase learnings using the format:
+## YYYY-MM-DD — [Title]
+**Learning:** ...
+**Action:** ...
