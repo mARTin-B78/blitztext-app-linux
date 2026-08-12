@@ -120,7 +120,8 @@ def wakeword_phrase(model: str) -> str:
     """
     name = model.rsplit("/", 1)[-1]
     for ext in (".tflite", ".onnx"):
-        name = name.removesuffix(ext)
+        if name.endswith(ext):
+            name = name[: -len(ext)]
     name = name.replace("_", " ").replace("-", " ")
     # Drop a trailing token that is just a version like "v0.1".
     parts = [p for p in name.split() if not (p.startswith("v") and any(c.isdigit() for c in p))]
@@ -257,7 +258,7 @@ def _wav_to_pcm16k(wav_bytes: bytes) -> bytes:
     if ch > 1:
         a = a.reshape(-1, ch).mean(axis=1)
     if rate != _TARGET_RATE and a.size:
-        new_len = round(a.size * _TARGET_RATE / rate)
+        new_len = int(round(a.size * _TARGET_RATE / rate))
         if new_len > 0:
             xp = np.linspace(0.0, 1.0, num=a.size, endpoint=False)
             x = np.linspace(0.0, 1.0, num=new_len, endpoint=False)
@@ -291,7 +292,7 @@ def count_detections(uri: str, model: str, pcm: bytes, *, settle: float = 1.5,
         while time.time() < deadline:
             try:
                 data = sock.recv(4096)
-            except TimeoutError:
+            except socket.timeout:
                 break  # server quiet for `settle`s → done
             if not data:
                 break

@@ -1,3 +1,0 @@
-## 2026-08-12 — Prevent Unbounded Buffer Reads (Sentinel)
-**Learning:** Found and patched a potential DoS / Memory exhaustion vulnerability where `wakeword.py` and `wakeword_bench.py` lacked bounds checks on incoming parsed socket streams from external untrusted processes. A malicious payload over 64KB would have caused out-of-memory or connection hangs. Avoid running global `--fix` commands to prevent sweeping refactoring changes.
-**Action:** Enforced hard 64KB limits on `len(line)`, `data_len`, and `payload_len` across Wyoming stream handlers, exiting cleanly to degrade gracefully without hanging main loops.

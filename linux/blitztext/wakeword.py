@@ -35,7 +35,7 @@ def set_muted(muted: bool) -> None:
             open(MUTE_FILE, "a").close()
         elif os.path.exists(MUTE_FILE):
             os.remove(MUTE_FILE)
-    except OSError as e:
+    except OSError as e:  # noqa: BLE001 - mute is best-effort, never crash
         logbuffer.log(f"[wakeword] Could not update mute flag: {e}", level="WARNING")
 
 
@@ -146,7 +146,7 @@ class WakewordListener:
                             if msg.get("type") == "detection":
                                 name = msg.get("data", {}).get("name", "")
                                 self._handle_detection(name)
-                        except TimeoutError:
+                        except socket.timeout:
                             pass
                 except Exception:
                     pass
@@ -217,7 +217,7 @@ class WakewordActionListener:
         # ``feed``). Avoids a second/competing ``pw-record`` on the same device,
         # which made real-time cancel/send/stop detection flaky during recording.
         self.external_audio = external_audio
-        self._audio_q: queue.Queue[bytes | None] = queue.Queue()
+        self._audio_q: "queue.Queue[bytes | None]" = queue.Queue()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -331,7 +331,7 @@ class WakewordActionListener:
                                         f"[wakeword-action] '{name}' detected — firing action")
                                     self._stop_event.set()   # one-shot: stop after first fire
                                     cb()
-                        except TimeoutError:
+                        except socket.timeout:
                             pass
                 except Exception:
                     pass
