@@ -25,8 +25,7 @@ def test_wakeword_phrase():
 def test_build_utterances_deterministic_and_covers_voices():
     a = wb.build_utterances("computer", 8, "de", voices=["nova", "onyx"], rng=random.Random(7))
     b = wb.build_utterances("computer", 8, "de", voices=["nova", "onyx"], rng=random.Random(7))
-    def key(us):
-        return [(u.text, u.has_wakeword, u.voice) for u in us]
+    key = lambda us: [(u.text, u.has_wakeword, u.voice) for u in us]
     assert key(a) == key(b)                                   # seeded → reproducible
     assert sum(u.has_wakeword for u in a) == 8
     assert all(u.voice in ("nova", "onyx") for u in a)
