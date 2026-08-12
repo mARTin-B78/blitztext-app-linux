@@ -120,8 +120,7 @@ def wakeword_phrase(model: str) -> str:
     """
     name = model.rsplit("/", 1)[-1]
     for ext in (".tflite", ".onnx"):
-        if name.endswith(ext):
-            name = name[: -len(ext)]
+        name = name.removesuffix(ext)
     name = name.replace("_", " ").replace("-", " ")
     # Drop a trailing token that is just a version like "v0.1".
     parts = [p for p in name.split() if not (p.startswith("v") and any(c.isdigit() for c in p))]
@@ -258,7 +257,7 @@ def _wav_to_pcm16k(wav_bytes: bytes) -> bytes:
     if ch > 1:
         a = a.reshape(-1, ch).mean(axis=1)
     if rate != _TARGET_RATE and a.size:
-        new_len = int(round(a.size * _TARGET_RATE / rate))
+        new_len = round(a.size * _TARGET_RATE / rate)
         if new_len > 0:
             xp = np.linspace(0.0, 1.0, num=a.size, endpoint=False)
             x = np.linspace(0.0, 1.0, num=new_len, endpoint=False)
@@ -292,7 +291,7 @@ def count_detections(uri: str, model: str, pcm: bytes, *, settle: float = 1.5,
         while time.time() < deadline:
             try:
                 data = sock.recv(4096)
-            except socket.timeout:
+            except TimeoutError:
                 break  # server quiet for `settle`s → done
             if not data:
                 break
@@ -317,17 +316,23 @@ def _drain_detections(buf: bytes) -> tuple[bytes, int]:
     found = 0
     while b"\n" in buf:
         line, rest = buf.split(b"\n", 1)
+        if len(line) > 65536:
+            raise ValueError("Line length exceeded 64KB")
         try:
             msg = json.loads(line.decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             return rest, found
         plen = msg.get("payload_length", 0) or 0
+        if plen > 65536:
+            raise ValueError("Payload length exceeded 64KB")
         if len(rest) < plen:
             return buf, found  # payload not fully arrived yet; wait for more
         rest = rest[plen:]
         if msg.get("type") == "detection":
             found += 1
         buf = rest
+    if len(buf) > 65536:
+        raise ValueError("Buffer length exceeded 64KB")
     return buf, found
 
 
