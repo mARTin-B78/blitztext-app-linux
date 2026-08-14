@@ -103,8 +103,10 @@ class WakewordListener:
                                 if not byte:
                                     break
                                 line += byte
+                                if len(line) > 65536:
+                                    break
                             
-                            if not line:
+                            if not line or len(line) > 65536:
                                 break
 
                             msg = json.loads(line.decode("utf-8"))
@@ -115,6 +117,8 @@ class WakewordListener:
                             # always do. Read it so the wake-word name is
                             # available and the stream stays in sync.
                             data_len = msg.get("data_length", 0)
+                            if data_len > 65536:
+                                break
                             if data_len > 0:
                                 data_bytes = b""
                                 while len(data_bytes) < data_len:
@@ -128,6 +132,8 @@ class WakewordListener:
                                     pass
 
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len > 65536:
+                                break
                             if payload_len > 0:
                                 # Consume payload
                                 remaining = payload_len
