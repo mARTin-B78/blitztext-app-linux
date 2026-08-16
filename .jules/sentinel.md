@@ -1,0 +1,3 @@
+## 2026-08-16 — Fixed shell=True injection in blitztext/talk.py
+ **Learning:** When replacing shell pipelines (`|`) with secure chained `subprocess.Popen` calls, ensure `shell=False` is used, and the first process's stdout is closed in the parent process immediately after starting the second process (e.g., `p1.stdout.close()`) so the first process can receive a SIGPIPE if the second process exits early. Additionally, `shlex.quote()` is not needed and must be removed for `subprocess` argument lists since quoting breaks the JSON payload.
+ **Action:** Removed `shell=True` and `shlex.quote()` in `linux/blitztext/talk.py` for curl payload, replaced with chained `subprocess.Popen` execution with `p1.stdout.close()`.
