@@ -13,6 +13,8 @@ from __future__ import annotations
 import shutil
 import subprocess
 import threading
+import math
+from array import array
 
 from .recorder import detect_recorder
 
@@ -108,8 +110,6 @@ class LevelMeter:
         return True
 
     def _loop(self) -> None:
-        import numpy as np
-
         proc = self._proc
         if proc is None or proc.stdout is None:
             return
@@ -120,8 +120,16 @@ class LevelMeter:
                     break
                 if self.on_chunk:
                     self.on_chunk(chunk)
-                samples = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0
-                level = float(np.sqrt(np.mean(np.square(samples)))) if samples.size else 0.0
+                # Keep the meter dependency-free. The packaged app does not
+                # require NumPy, and importing it here used to silently stop
+                # all level callbacks on systems without it.
+                samples = array("h")
+                samples.frombytes(chunk[:len(chunk) & ~1])
+                if samples:
+                    mean_square = sum(sample * sample for sample in samples) / len(samples)
+                    level = math.sqrt(mean_square) / 32768.0
+                else:
+                    level = 0.0
                 if self.on_level:
                     # Scale RMS (typically small) into a usable 0..1 range.
                     self.on_level(min(1.0, level * 12.0))

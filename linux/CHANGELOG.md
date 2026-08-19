@@ -9,6 +9,12 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.63] - 2026-08-19
+
+### Fixed
+- **STT microphone feedback:** The live level meter no longer depends on
+  NumPy, so the settings waveform works in the packaged installation.
+
 ## [2.03.62] - 2026-08-19
 
 ### Added
