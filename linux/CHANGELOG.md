@@ -9,6 +9,12 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.62] - 2026-08-19
+
+### Added
+- **STT test waveform:** The STT Engines test now shows live microphone activity
+  while the four-second recording is in progress.
+
 ## [2.03.54] - 2026-06-23
 
 ### Changed

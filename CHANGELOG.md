@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.03.62] - 2026-08-19
+
+### Added
+- **STT test waveform:** The STT Engines test now shows live microphone activity
+  while the four-second recording is in progress.
+
 ## [2.03.61] - 2026-07-07
 
 ### Added

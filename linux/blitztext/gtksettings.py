@@ -15,6 +15,7 @@ Pages:
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 import threading
@@ -428,6 +429,57 @@ def _type_key(combo: Gtk.ComboBoxText, types: list[tuple[str, str]], fallback: s
     return types[i][0] if 0 <= i < len(types) else fallback
 
 
+class STTWaveform(Gtk.DrawingArea):
+    """Small live microphone waveform used by the STT test control."""
+
+    def __init__(self):
+        super().__init__()
+        self._bars = [0.0] * 24
+        self._active = False
+        self.set_size_request(180, 28)
+        self.connect("draw", self._draw)
+
+    def set_active(self, active: bool) -> None:
+        self._active = active
+        if not active:
+            self._bars = [0.0] * len(self._bars)
+        self.queue_draw()
+
+    def push_level(self, level: float) -> bool:
+        if not self._active:
+            return False
+        level = max(0.0, min(1.0, float(level)))
+        self._bars = self._bars[1:] + [level]
+        self.queue_draw()
+        return False
+
+    def _draw(self, widget, cr):
+        width = widget.get_allocated_width()
+        height = widget.get_allocated_height()
+        cr.set_source_rgb(0.94, 0.95, 0.97)
+        cr.rectangle(0, 0, width, height)
+        cr.fill()
+        cr.set_line_width(1.0)
+        cr.set_source_rgb(0.82, 0.84, 0.88)
+        cr.move_to(0, height / 2)
+        cr.line_to(width, height / 2)
+        cr.stroke()
+
+        color = (0.20, 0.78, 0.35) if self._active else (0.65, 0.67, 0.71)
+        cr.set_source_rgb(*color)
+        gap = 2.0
+        bar_width = max(1.0, (width - gap * (len(self._bars) - 1)) / len(self._bars))
+        for i, level in enumerate(self._bars):
+            # Give the scalar RMS level a natural-looking mirrored waveform.
+            shaped = level * (0.45 + 0.55 * abs(math.sin(i * 1.7)))
+            bar_height = max(2.0, shaped * (height - 6))
+            x = i * (bar_width + gap)
+            y = (height - bar_height) / 2
+            cr.rectangle(x, y, bar_width, bar_height)
+            cr.fill()
+        return False
+
+
 class ModelPicker(Gtk.Box):
     """An editable model field + a ▾ button opening a popover with a search bar
     on top and a scrollable, filtered list of models."""
@@ -763,6 +815,7 @@ class SettingsDialog:
         self.cfg = cfg
         self.daemon = daemon
         self._meter = None
+        self._stt_recording = False
         self._tr_cache: dict = {}
         self._wf_idx = self._stt_idx = self._llm_idx = 0
 
@@ -1555,6 +1608,10 @@ class SettingsDialog:
         stt_test_btn.connect("clicked", self._stt_test)
         stt_test_btn.set_valign(Gtk.Align.START)
         test_row.pack_start(stt_test_btn, False, False, 0)
+        self.stt_waveform = STTWaveform()
+        self.stt_waveform.set_tooltip_text("Live microphone level while recording")
+        self.stt_waveform.set_valign(Gtk.Align.START)
+        test_row.pack_start(self.stt_waveform, False, False, 4)
         self.stt_result = Gtk.Label(xalign=0.0)
         self.stt_result.set_line_wrap(True)
         self.stt_result.set_max_width_chars(50)
@@ -1709,6 +1766,8 @@ class SettingsDialog:
         if e.is_streaming:
             self.stt_result.set_markup("<i>Streaming engines are live-only. Use a preset with mode = stream.</i>")
             return
+        self._stt_recording = True
+        self.stt_waveform.set_active(True)
         self.stt_result.set_markup("<i>Recording 4s — speak now…</i>")
         threading.Thread(target=self._run_stt_test, args=(e,), daemon=True).start()
 
@@ -1730,6 +1789,7 @@ class SettingsDialog:
 
     def _run_stt_test(self, engine):
         from .recorder import Recording, detect_recorder
+        wav = None
         try:
             rec = Recording(detect_recorder(self.cfg.recorder), self.cfg.mic)
             time.sleep(4.0)
@@ -1737,13 +1797,17 @@ class SettingsDialog:
             GLib.idle_add(self.stt_result.set_markup, "<i>Transcribing…</i>")
             tr = self._transcriber_for(engine)
             res = stt.benchmark(engine, wav, language=self.cfg.language, local_transcriber=tr)
-            wav.unlink(missing_ok=True)
             if res.ok:
                 msg = f"<b>{res.seconds:.2f}s</b> · {GLib.markup_escape_text(res.text or '(empty)')}"
             else:
                 msg = f'<span foreground="{RED}">{GLib.markup_escape_text(res.error)}</span>'
         except Exception as exc:  # noqa: BLE001
             msg = f'<span foreground="{RED}">{GLib.markup_escape_text(str(exc))}</span>'
+        finally:
+            if wav is not None:
+                wav.unlink(missing_ok=True)
+            self._stt_recording = False
+            GLib.idle_add(self.stt_waveform.set_active, False)
         GLib.idle_add(self.stt_result.set_markup, msg)
 
     # -- LLM engine editor ---
@@ -2347,6 +2411,8 @@ class SettingsDialog:
                 GLib.idle_add(self.mic_level.set_value, v)
             if hasattr(self, "ww_mic_level"):
                 GLib.idle_add(self.ww_mic_level.set_value, v)
+            if self._stt_recording and hasattr(self, "stt_waveform"):
+                GLib.idle_add(self.stt_waveform.push_level, v)
         self._meter = audio.LevelMeter(self._selected_mic_name(), on_level=on_level)
         self._meter.start()
 
