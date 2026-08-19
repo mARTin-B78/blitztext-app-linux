@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.03.64] - 2026-08-19
+
+### Fixed
+- **STT test waveform stream:** The test now uses a dedicated microphone level
+  capture while recording, avoiding contention with the background settings meter.
+
 ## [2.03.63] - 2026-08-19
 
 ### Fixed

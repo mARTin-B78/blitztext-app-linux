@@ -815,6 +815,7 @@ class SettingsDialog:
         self.cfg = cfg
         self.daemon = daemon
         self._meter = None
+        self._stt_meter = None
         self._stt_recording = False
         self._tr_cache: dict = {}
         self._wf_idx = self._stt_idx = self._llm_idx = 0
@@ -1766,6 +1767,15 @@ class SettingsDialog:
         if e.is_streaming:
             self.stt_result.set_markup("<i>Streaming engines are live-only. Use a preset with mode = stream.</i>")
             return
+        # Give the test its own level stream so the waveform does not depend
+        # on whether the General settings page initialized its meter first.
+        self._stop_meter()
+        self._stt_meter = audio.LevelMeter(
+            self._selected_mic_name(),
+            on_level=lambda v: GLib.idle_add(self.stt_waveform.push_level, v),
+        )
+        if not self._stt_meter.start():
+            self._stt_meter = None
         self._stt_recording = True
         self.stt_waveform.set_active(True)
         self.stt_result.set_markup("<i>Recording 4s — speak now…</i>")
@@ -1806,8 +1816,12 @@ class SettingsDialog:
         finally:
             if wav is not None:
                 wav.unlink(missing_ok=True)
+            if self._stt_meter is not None:
+                self._stt_meter.stop()
+                self._stt_meter = None
             self._stt_recording = False
             GLib.idle_add(self.stt_waveform.set_active, False)
+            GLib.idle_add(self._start_meter)
         GLib.idle_add(self.stt_result.set_markup, msg)
 
     # -- LLM engine editor ---

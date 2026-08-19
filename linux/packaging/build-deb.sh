@@ -11,7 +11,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 LINUX_DIR="$(dirname "$HERE")"            # .../linux
 PKG="blitztext"
 ARCH="$(dpkg --print-architecture)"
-VER="2.03.63"
+VER="2.03.64"
 PYBIN="${PYBIN:-/usr/bin/python3}"
 
 BUILD="$(mktemp -d)"
