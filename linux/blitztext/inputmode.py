@@ -45,6 +45,10 @@ class ModifierScheme:
         self.cancel = parse_tokens(cancel)
         self.ptt = push_to_talk
         self._pressed: set[str] = set()
+        # A listener can miss a modifier release (for example after another
+        # process synthesizes key events). Do not let that stale entry satisfy
+        # a new start chord: every key in the chord must be freshly pressed.
+        self._start_seen: set[str] = set()
         self._state = "idle"          # idle | arming | armed
         self._listener = None
 
@@ -73,6 +77,8 @@ class ModifierScheme:
         if token is None:
             return
         self._pressed.add(token)
+        if self._state == "idle":
+            self._start_seen.add(token)
 
         # Cancel works while arming/armed AND when the daemon is recording via
         # wakeword (state stays "idle" in the scheme because wakeword bypasses
@@ -84,7 +90,7 @@ class ModifierScheme:
             return
 
         if self._state == "idle":
-            if self.start.issubset(self._pressed):
+            if self.start.issubset(self._pressed) and self.start.issubset(self._start_seen):
                 self._state = "arming"
                 self.daemon.start_dictation()
             return
@@ -101,6 +107,9 @@ class ModifierScheme:
         token = _token(key)
         if token is not None:
             self._pressed.discard(token)
+            if self._state == "idle":
+                # Start a fresh chord after any completed/aborted key gesture.
+                self._start_seen.clear()
 
         if self._state != "arming":
             return

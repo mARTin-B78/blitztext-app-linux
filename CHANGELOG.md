@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.03.65] - 2026-08-20
+
+### Fixed
+- **Keyboard shortcut state:** Prevent stale Windows/Super-key state from
+  accidentally starting dictation when Ctrl is pressed.
+- **TTS modifier handling:** Stop forcibly releasing global modifiers during
+  clipboard selection, avoiding desynchronization with keyboard listeners.
+
+### Added
+- **Keyboard TTS shortcut:** Added a synchronized TTS shortcut field to the
+  Keyboard settings page.
+
 ## [2.03.64] - 2026-08-19
 
 ### Fixed

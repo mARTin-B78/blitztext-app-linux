@@ -59,9 +59,13 @@ def get_selected_text():
     # 3. Wait for physical keys to be released
     time.sleep(0.4)
     
-    # 4. Simulate Ctrl+C via xdotool/wtype (pynput crashes with BadRRModeError on some X11 configs)
+    # 4. Simulate Ctrl+C via xdotool/wtype (pynput crashes with BadRRModeError on some X11 configs).
+    # Do not explicitly key up the global modifiers here: that changes the
+    # desktop state without necessarily producing matching release events for
+    # pynput's listeners. In particular, it can leave the Ctrl+Super modifier
+    # scheme stuck after TTS runs. --clearmodifiers handles the synthetic copy
+    # without desynchronizing the listeners.
     if shutil.which("xdotool"):
-        subprocess.run(['xdotool', 'keyup', 'Control_L', 'Control_R', 'Alt_L', 'Alt_R', 'Shift_L', 'Shift_R', 'Super_L', 'Super_R'], stderr=subprocess.DEVNULL)
         subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+c'], stderr=subprocess.DEVNULL)
     elif shutil.which("wtype"):
         subprocess.run(['wtype', '-M', 'ctrl', 'c', '-m', 'ctrl'], stderr=subprocess.DEVNULL)

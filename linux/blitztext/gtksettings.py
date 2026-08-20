@@ -1240,6 +1240,34 @@ class SettingsDialog:
         _lb_add(lb, box)
         return entry
 
+    def _wire_talk_hotkeys(self) -> None:
+        """Keep the duplicate TTS shortcut fields synchronized.
+
+        Settings pages are built lazily, so this is called from both the
+        Keyboard and TTS page builders once their respective entry exists.
+        """
+        keyboard_entry = getattr(self, "keyboard_talk_hotkey", None)
+        talk_entry = getattr(self, "talk_hotkey", None)
+        if keyboard_entry is None or talk_entry is None:
+            return
+        if getattr(self, "_talk_hotkeys_wired", False):
+            return
+
+        self._talk_hotkeys_wired = True
+
+        def mirror(source, target):
+            if getattr(self, "_syncing_talk_hotkey", False):
+                return
+            self._syncing_talk_hotkey = True
+            try:
+                target.set_text(source.get_text())
+            finally:
+                self._syncing_talk_hotkey = False
+
+        keyboard_entry.connect("changed", lambda entry: mirror(entry, talk_entry))
+        talk_entry.connect("changed", lambda entry: mirror(entry, keyboard_entry))
+        keyboard_entry.set_text(talk_entry.get_text())
+
     def _show_emoji_picker(self, anchor: Gtk.Widget, entry: Gtk.Entry) -> None:
         pop = Gtk.Popover(relative_to=anchor)
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -1407,7 +1435,8 @@ class SettingsDialog:
         # Voice & Trigger Card
         vcard = _card_section(page, "Playback", icon="audio-speakers-symbolic")
         self.talk_voice = _labeled(vcard, "Voice", _model_combo("DE_M_Privat_mARTin"), tooltip="The ID of the voice to use.")
-        self.talk_hotkey = self._key_field_lb(vcard, "Hotkey", "", placeholder="click Set, or e.g. <ctrl>+<alt>+t")
+        self.talk_hotkey = self._key_field_lb(vcard, "Hotkey", "", placeholder="click Set, or e.g. <cmd>+s")
+        self._wire_talk_hotkeys()
         
         self.talk_active_btn = Gtk.Button(label="Make Default")
         self.talk_active_btn.get_style_context().add_class("suggested-action")
@@ -2129,6 +2158,15 @@ class SettingsDialog:
         self.in_stop   = self._key_field_lb(mode_card, "Stop + paste",       self.cfg.key_stop,   width=LW)
         self.in_send   = self._key_field_lb(mode_card, "Stop + paste + Enter", self.cfg.key_send, width=LW)
         self.in_cancel = self._key_field_lb(mode_card, "Cancel",             self.cfg.key_cancel, width=LW)
+
+        # TTS is configured on the TTS Engines page as well, but it is a
+        # keyboard shortcut and should be discoverable here too. Both fields
+        # are wired to the same config value when the lazy-built pages exist.
+        talk_card = _card_section(page, "Text-to-speech shortcut", icon="audio-speakers-symbolic")
+        self.keyboard_talk_hotkey = self._key_field_lb(
+            talk_card, "Speak selected text", self.cfg.talk_hotkey,
+            placeholder="click Set, or e.g. <cmd>+s", width=LW)
+        self._wire_talk_hotkeys()
 
         # ── Quality gate card ─────────────────────────────────────────────────
         q_card = _card_section(page, "Quality gate", icon="security-high-symbolic")
@@ -3878,7 +3916,8 @@ class SettingsDialog:
         ("wakeword",            ("wakeword_enabled", "wakeword_active",
                                  "wakeword_engines")),
         ("hotkeys",             ("input_mode", "push_to_talk",
-                                 "key_start", "key_stop", "key_send", "key_cancel")),
+                                 "key_start", "key_stop", "key_send", "key_cancel",
+                                 "talk_hotkey")),
         ("microphone",          ("mic",)),
     ]
 
