@@ -1,0 +1,3 @@
+## 2024-10-18 — Unbounded network reads in wakeword parsing
+**Learning:** `wakeword.py` and `wakeword_bench.py` parse line-delimited JSON and binary payloads from Wyoming wakeword servers. They were missing bounds checks on `data_length`, `payload_length`, and the initial newline buffer reading, creating a remote OOM/DoS vector if an attacker or misconfigured server sent enormous sizing values or missing newlines.
+**Action:** Added hard 64KB (65536 bytes) caps across `WakewordListener.read_loop`, `WakewordActionListener.read_loop`, `count_detections`, and `_drain_detections`. When hit, the read loops cleanly disconnect by breaking/returning rather than truncating (which would desynchronize the stream).
