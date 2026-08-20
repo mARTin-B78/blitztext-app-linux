@@ -1,0 +1,1 @@
+# 📖 Scribe (Documentation accuracy) Journal
