@@ -297,6 +297,8 @@ def count_detections(uri: str, model: str, pcm: bytes, *, settle: float = 1.5,
             if not data:
                 break
             buf += data
+            if len(buf) > 65536:
+                break # safeguard against unbounded buffer growth
             buf, n = _drain_detections(buf)
             detections += n
     return detections
@@ -322,6 +324,8 @@ def _drain_detections(buf: bytes) -> tuple[bytes, int]:
         except (ValueError, UnicodeDecodeError):
             return rest, found
         plen = msg.get("payload_length", 0) or 0
+        if plen > 65536:
+            return rest, found
         if len(rest) < plen:
             return buf, found  # payload not fully arrived yet; wait for more
         rest = rest[plen:]
