@@ -1,0 +1,1 @@
+# 🛡️ Sentinel (Security vulnerabilities) Journal
