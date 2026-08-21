@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.03.62] - 2026-08-21
+
+### Fixed
+- **Security:** Addressed a command injection vulnerability where a shell execution combined with an unquoted endpoint URL could allow arbitrary execution. Replaced `shell=True` with explicitly constructed argument lists.
+
 ## [2.03.61] - 2026-07-07
 
 ### Added
