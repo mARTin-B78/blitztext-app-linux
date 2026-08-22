@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.03.62] - 2026-07-07
+
+### Fixed
+- Fixed unbounded read/DoS vulnerabilities in `wakeword.py` and `wakeword_bench.py` untrusted parsing. Now enforces size limits on lengths of network-provided fields (`payload_length`, `data_length`, `len(line)`).
+
 ## [2.03.61] - 2026-07-07
 
 ### Added
