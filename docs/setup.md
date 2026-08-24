@@ -16,7 +16,7 @@ This guide is for people who want to build and inspect Blitztext App Linux thems
 On Ubuntu/Debian:
 
 ```bash
-sudo apt install xdotool libnotify-bin pipewire-bin python3-gi
+sudo apt install xdotool libnotify-bin pipewire-bin python3-gi gir1.2-gtk-3.0 gir1.2-appindicator3-0.1 libgirepository1.0-dev libgirepository-2.0-dev pkg-config build-essential libcairo2-dev python3-dev
 ```
 
 ## 2. Clone And Install
@@ -87,7 +87,7 @@ Rewrite workflows use an OpenAI-compatible chat endpoint. You can point them at 
 For OpenAI:
 
 ```bash
-export OPENAI_API_KEY=sk-...
+export OPENAI_API_KEY=<your-api-key>
 ```
 
 Then set the LLM engine in **Settings > Engines** or edit `~/.config/blitztext/config.toml`.

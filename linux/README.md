@@ -157,7 +157,7 @@ access to every page. Click any image to open it full size.
 - Host tools: `xdotool`, `notify-send` (libnotify-bin), and a recorder
   (`pw-record` from pipewire, or `arecord`/`parecord`).
   ```bash
-  sudo apt install xdotool libnotify-bin pipewire-bin
+  sudo apt install xdotool libnotify-bin pipewire-bin python3-gi gir1.2-gtk-3.0 gir1.2-appindicator3-0.1 libgirepository1.0-dev libgirepository-2.0-dev pkg-config build-essential libcairo2-dev python3-dev
   ```
 - Python 3.11+.
 - Optional realtime STT streaming: a Riva/NIM realtime server such as Nemotron
@@ -202,7 +202,7 @@ Three front-ends, same engine layer (STT engines + global hotkeys + xdotool typi
 
 ```bash
 # optional: only needed for the "rewrite" workflows
-export OPENAI_API_KEY=sk-...
+export OPENAI_API_KEY=<your-api-key>
 
 .venv/bin/python -m blitztext tray   # system-tray menu (macOS-menu-bar-like, default)
 .venv/bin/python -m blitztext gui    # control-panel window

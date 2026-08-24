@@ -213,7 +213,7 @@ The first-run wizard guides you through the essentials in a few steps.
 - **Host tools:**
 
   ```bash
-  sudo apt install xdotool libnotify-bin pipewire-bin python3-gi
+  sudo apt install xdotool libnotify-bin pipewire-bin python3-gi gir1.2-gtk-3.0 gir1.2-appindicator3-0.1 libgirepository1.0-dev libgirepository-2.0-dev pkg-config build-essential libcairo2-dev python3-dev
   ```
 
   - `xdotool` — text delivery into the focused window
@@ -268,7 +268,7 @@ cd blitztext-app-linux/linux
 The only environment variable needed is for rewrite workflows that use a cloud LLM:
 
 ```bash
-export OPENAI_API_KEY=sk-...    # only if using OpenAI or a keyed endpoint
+export OPENAI_API_KEY=<your-api-key>    # only if using OpenAI or a keyed endpoint
 ```
 
 The config file (`~/.config/blitztext/config.toml`) references environment variable *names*, never the keys themselves. Local STT and local LLM endpoints typically require no key.
@@ -283,7 +283,7 @@ The config file (`~/.config/blitztext/config.toml`) references environment varia
 
 ```bash
 # Ubuntu/Debian — install host tools
-sudo apt install xdotool libnotify-bin pipewire-bin python3-gi
+sudo apt install xdotool libnotify-bin pipewire-bin python3-gi gir1.2-gtk-3.0 gir1.2-appindicator3-0.1 libgirepository1.0-dev libgirepository-2.0-dev pkg-config build-essential libcairo2-dev python3-dev
 
 # Clone and set up
 git clone https://github.com/mARTin-B78/blitztext-app-linux.git
@@ -312,7 +312,7 @@ That's it. The transcribed text appears where your cursor was.
 ### 4. Try a rewrite workflow
 
 ```bash
-export OPENAI_API_KEY=sk-...   # or point at a local LLM in Settings
+export OPENAI_API_KEY=<your-api-key>   # or point at a local LLM in Settings
 ```
 
 1. Press `Ctrl+Super` → speak something rough like "hey john can you send me the report"
