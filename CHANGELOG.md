@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.03.62] - 2026-08-25
+
+### Fixed
+- **Security:** Removed `shell=True` from the TTS audio playback command in `talk.py` to prevent potential command injection vulnerabilities. The audio pipeline now uses direct `subprocess.Popen` chaining.
+
 ## [2.03.61] - 2026-07-07
 
 ### Added

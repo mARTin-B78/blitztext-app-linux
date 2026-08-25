@@ -1,5 +1,4 @@
 import json
-import shlex
 import subprocess
 import time
 
@@ -123,11 +122,13 @@ def play(cfg, _notify_func):
             pass
     
     payload_json = json.dumps(payload)
-    safe_payload = shlex.quote(payload_json)
     
-    cmd = f"curl -s -N {url} -H 'Content-Type: application/json' -d {safe_payload} | ffplay -nodisp -autoexit -hide_banner -i - > /dev/null 2>&1"
+    cmd_curl = ["curl", "-s", "-N", url, "-H", "Content-Type: application/json", "-d", payload_json]
+    cmd_ffplay = ["ffplay", "-nodisp", "-autoexit", "-hide_banner", "-i", "-"]
     
     try:
-        subprocess.Popen(cmd, shell=True)
+        p1 = subprocess.Popen(cmd_curl, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        p2 = subprocess.Popen(cmd_ffplay, stdin=p1.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        p1.stdout.close()
     except Exception as e:
         _notify_func("Blitztalk Error", f"Error playing audio: {e}", "critical")
