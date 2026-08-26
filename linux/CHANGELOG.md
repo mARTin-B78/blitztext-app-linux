@@ -9,6 +9,11 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.62] - 2026-06-26
+
+### Fixed
+- **Command Injection:** Refactored the `play` function in `talk.py` to use `subprocess.Popen` with `shell=False` and `subprocess.PIPE` instead of an insecure shell pipeline.
+
 ## [2.03.54] - 2026-06-23
 
 ### Changed
