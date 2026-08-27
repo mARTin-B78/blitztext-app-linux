@@ -34,9 +34,9 @@ def _q(segment: str) -> str:
     """URL-encode a single path segment (folder names may contain spaces)."""
     return urllib.parse.quote(segment, safe="")
 
+# Built-in default (also the seed value for Config.wakeword_sources); other
+# github_collection sources pass their own "owner/repo" as ``repo`` below.
 REPO = "fwartner/home-assistant-wakewords-collection"
-API = f"https://api.github.com/repos/{REPO}/contents"
-RAW = f"https://raw.githubusercontent.com/{REPO}/main"
 _UA = {"User-Agent": "Blitztext-wakeword-downloader"}
 
 # Fallback if the GitHub API is rate-limited when listing the repo root.
@@ -47,16 +47,24 @@ KNOWN_LANGUAGES = ["en", "dk", "fi", "ru", "zh"]
 MODEL_EXTS = (".tflite", ".onnx")
 
 
+def _api(repo: str) -> str:
+    return f"https://api.github.com/repos/{repo}/contents"
+
+
+def _raw(repo: str) -> str:
+    return f"https://raw.githubusercontent.com/{repo}/main"
+
+
 def _get_json(url: str):
     req = urllib.request.Request(url, headers=_UA)
     with urllib.request.urlopen(req, timeout=20) as r:
         return json.loads(r.read().decode("utf-8"))
 
 
-def list_languages() -> list[str]:
+def list_languages(repo: str = REPO) -> list[str]:
     """Top-level language folders in the collection (en, dk, …)."""
     try:
-        items = _get_json(API)
+        items = _get_json(_api(repo))
         langs = sorted(x["name"] for x in items
                        if x["type"] == "dir" and not x["name"].startswith("."))
         return langs or KNOWN_LANGUAGES
@@ -64,21 +72,21 @@ def list_languages() -> list[str]:
         return KNOWN_LANGUAGES
 
 
-def list_models(lang: str) -> list[str]:
+def list_models(lang: str, repo: str = REPO) -> list[str]:
     """Wakeword names available for a language (each is a sub-folder)."""
-    items = _get_json(f"{API}/{_q(lang)}")
+    items = _get_json(f"{_api(repo)}/{_q(lang)}")
     return sorted((x["name"] for x in items if x["type"] == "dir"),
                   key=str.lower)
 
 
-def list_variants(lang: str, name: str) -> list[dict]:
+def list_variants(lang: str, name: str, repo: str = REPO) -> list[dict]:
     """Downloadable model files in one wakeword folder.
 
     Returns dicts ``{file, ext, version, size, url}``, sorted so the preferred
     format (``.tflite``) and newest version come first. Empty if the folder has
     no usable model file (e.g. only a README).
     """
-    items = _get_json(f"{API}/{_q(lang)}/{_q(name)}")
+    items = _get_json(f"{_api(repo)}/{_q(lang)}/{_q(name)}")
     out = []
     for x in items:
         fn = x["name"]
@@ -92,7 +100,7 @@ def list_variants(lang: str, name: str) -> list[dict]:
             "version": int(m.group(1)) if m else 0,
             "size": x.get("size", 0),
             "url": x.get("download_url")
-            or f"{RAW}/{_q(lang)}/{_q(name)}/{_q(fn)}",
+            or f"{_raw(repo)}/{_q(lang)}/{_q(name)}/{_q(fn)}",
         })
     # tflite before onnx, then newest version first.
     out.sort(key=lambda v: (MODEL_EXTS.index(v["ext"]), -v["version"]))
@@ -103,8 +111,8 @@ def has_tflite(variants: list[dict]) -> bool:
     return any(v["ext"] == ".tflite" for v in variants)
 
 
-def readme_url(lang: str, name: str) -> str:
-    return f"{RAW}/{_q(lang)}/{_q(name)}/README.md"
+def readme_url(lang: str, name: str, repo: str = REPO) -> str:
+    return f"{_raw(repo)}/{_q(lang)}/{_q(name)}/README.md"
 
 
 def phrase_from_name(name: str) -> str:
@@ -166,7 +174,7 @@ def _download(url: str, dest: Path, *, ext: str) -> int:
 
 
 def install(lang: str, name: str, model_dir: str | Path,
-            *, variants: list[dict] | None = None,
+            *, repo: str = REPO, variants: list[dict] | None = None,
             all_formats: bool = True) -> dict:
     """Download a wake model into ``model_dir`` for openWakeWord.
 
@@ -183,7 +191,7 @@ def install(lang: str, name: str, model_dir: str | Path,
         raise FileNotFoundError(f"Model directory does not exist: {model_dir}")
 
     if variants is None:
-        variants = list_variants(lang, name)
+        variants = list_variants(lang, name, repo=repo)
     if not variants:
         raise ValueError(f"No openWakeWord model files found for '{name}' ({lang}).")
 

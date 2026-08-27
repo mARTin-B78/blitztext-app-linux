@@ -57,6 +57,37 @@ class WakewordEngine:
 
 
 @dataclass
+class WakewordSource:
+    """One online catalog the wakeword model downloader can search.
+
+    ``kind`` selects how ``url`` is interpreted:
+    - ``"github_collection"``: an ``owner/repo`` GitHub repo laid out like
+      fwartner/home-assistant-wakewords-collection (one folder per language,
+      one sub-folder per wake word, model files inside). Free, instant install.
+    - ``"openwakeword_api"``: the base URL of an openwakeword.com-compatible
+      "agent" REST API (``https://openwakeword.com/api/agent``,
+      ``https://microwakeword.com/api/agent``, …). Searching is free; the
+      matching website requires a (free) sign-in to download a model file, so
+      results are installed via "open in browser, then pick the downloaded
+      file" rather than a direct fetch.
+    """
+    name: str
+    kind: str  # "github_collection" | "openwakeword_api"
+    url: str
+    enabled: bool = True
+
+
+DEFAULT_WW_SOURCES: list[WakewordSource] = [
+    WakewordSource(name="fwartner community collection (GitHub)",
+                   kind="github_collection",
+                   url="fwartner/home-assistant-wakewords-collection"),
+    WakewordSource(name="openwakeword.com library",
+                   kind="openwakeword_api",
+                   url="https://openwakeword.com/api/agent"),
+]
+
+
+@dataclass
 class Config:
     # general
     recorder: str = "auto"
@@ -148,6 +179,10 @@ class Config:
     # Wakeword engines to compare in the benchmark (each a wyoming-openwakeword
     # endpoint). Empty → the benchmark falls back to the live [wakeword] above.
     wakeword_engines: list[WakewordEngine] = field(default_factory=list)
+    # Online catalogs the wakeword model downloader searches. Empty → seeded
+    # with DEFAULT_WW_SOURCES on load.
+    wakeword_sources: list[WakewordSource] = field(
+        default_factory=lambda: list(DEFAULT_WW_SOURCES))
     # STT benchmark: last-used WAV / reference transcript paths and options
     bench_wav: str = ""
     bench_ref: str = ""
@@ -421,6 +456,18 @@ def load(path: Path = CONFIG_PATH) -> Config:
         if not active.stop_model:
             active.stop_model = cfg.wakeword_stop_model
 
+    # Wakeword model catalogs (Download… dialog). Empty on first run / older
+    # configs → seed with the built-in sources.
+    cfg.wakeword_sources = [
+        WakewordSource(
+            name=s.get("name", ""),
+            kind=s.get("kind", "github_collection"),
+            url=s.get("url", ""),
+            enabled=s.get("enabled", True),
+        )
+        for s in data.get("wakeword_source", [])
+    ] or list(DEFAULT_WW_SOURCES)
+
     # LLM engines (default: synthesized from the legacy [rewrite] block).
     cfg.llm_engines = [
         LLMEngine(
@@ -542,6 +589,10 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
              "cancel_model": e.cancel_model, "send_model": e.send_model,
              "stop_model": e.stop_model}
             for e in cfg.wakeword_engines
+        ],
+        "wakeword_source": [
+            {"name": s.name, "kind": s.kind, "url": s.url, "enabled": s.enabled}
+            for s in cfg.wakeword_sources
         ],
         "stt": {"active": cfg.stt_active},
         "stt_engine": [
