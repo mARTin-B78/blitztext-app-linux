@@ -119,6 +119,36 @@ def slug(name: str) -> str:
     return s or "wakeword"
 
 
+def install_local(file_paths: list[str | Path], model_dir: str | Path,
+                  *, word: str | None = None) -> list[str]:
+    """Install one or more already-downloaded model files into ``model_dir``.
+
+    For models grabbed by hand from a site like openwakeword.com/library
+    (e.g. after signing in there to download for free) rather than fetched by
+    this module. Each file is copied in as ``<slug><ext>``, keeping its
+    original extension; ``word`` (or the first file's stem if omitted) is used
+    to derive the clean id so an .onnx and .tflite for the same word land
+    under matching names. Returns the filenames written.
+    """
+    paths = [Path(p) for p in file_paths]
+    if not paths:
+        raise ValueError("No file selected.")
+    model_dir = Path(model_dir)
+    if not model_dir.is_dir():
+        raise FileNotFoundError(f"Model directory does not exist: {model_dir}")
+
+    model_id = slug(word) if word else slug(paths[0].stem)
+    written = []
+    for src in paths:
+        ext = src.suffix.lower()
+        if ext not in MODEL_EXTS:
+            raise ValueError(f"Not a recognized model file (.onnx/.tflite): {src.name}")
+        dest = model_dir / f"{model_id}{ext}"
+        dest.write_bytes(src.read_bytes())
+        written.append(dest.name)
+    return written
+
+
 def _download(url: str, dest: Path, *, ext: str) -> int:
     req = urllib.request.Request(url, headers=_UA)
     with urllib.request.urlopen(req, timeout=60) as r:

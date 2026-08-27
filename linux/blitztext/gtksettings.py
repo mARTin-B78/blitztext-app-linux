@@ -2205,7 +2205,9 @@ class SettingsDialog:
             "To add new wakeword models: place your .onnx model files in the server’s "
             "model directory and restart it, e.g.:\n"
             "  docker run … -v ~/wakewords:/data/models  homeassistant/wyoming-openwakeword\n"
-            "Common built-in models: okay_computer · hey_jarvis · alexa · hey_mycroft · computer")
+            "Common built-in models: okay_computer · hey_jarvis · alexa · hey_mycroft · computer\n\n"
+            "Use Download… for the free GitHub model collection, or Import… to search and "
+            "buy a model from the openwakeword.com community library (accountless, ~1.50 CHF).")
         LW = 170
 
         # ── Wakeword enable card ──────────────────────────────────────────────
@@ -2246,6 +2248,11 @@ class SettingsDialog:
                             "openWakeWord server's model folder")
         dl.connect("clicked", self._show_ww_downloader)
         ww_bar.pack_start(dl, False, False, 0)
+        imp = Gtk.Button(label="Import…")
+        imp.set_tooltip_text("Search and buy a model from the openwakeword.com "
+                             "community library (accountless, ~1.50 CHF per model)")
+        imp.connect("clicked", self._show_ww_library_import)
+        ww_bar.pack_start(imp, False, False, 0)
         for label, cb, tip in (
             ("Delete", self._ww_delete, "Remove this wakeword engine preset"),
             ("⟳",      lambda _b: self._ww_reload(), "Re-check connection and reload models from the server"),
@@ -2794,6 +2801,164 @@ class SettingsDialog:
                 name = _selected_name()
                 if name:
                     _do_download(name)
+                return
+            dlg.destroy()
+
+        dlg.connect("response", _on_response)
+        dlg.show_all()
+
+    # ── openwakeword.com library import (manual download + install) ──────────
+    def _show_ww_library_import(self, _b=None) -> None:
+        """Dialog to install a model downloaded by hand from
+        openwakeword.com/library (free with a website account) into the
+        openWakeWord server's model folder. Opens the library in the default
+        browser, then lets the user pick the downloaded .onnx/.tflite file(s)
+        to copy into place and offers to restart the container.
+        """
+        from . import wwdownload as WD
+
+        dlg = Gtk.Dialog(title="Import from openwakeword.com library",
+                         transient_for=self.dlg, modal=True)
+        dlg.set_default_size(560, 320)
+        box = dlg.get_content_area()
+        box.set_spacing(8)
+        box.set_border_width(12)
+
+        intro = Gtk.Label(xalign=0.0)
+        intro.set_line_wrap(True)
+        intro.set_markup(
+            "1. Sign in (free) at "
+            "<a href='https://openwakeword.com/library'>openwakeword.com/library</a> "
+            "and click <b>ONNX</b> (or TFLite) next to the model you want — it "
+            "downloads straight to your Downloads folder.\n"
+            "2. Pick that downloaded file below and click Install — it's "
+            "copied into the model folder and the server can be restarted "
+            "to pick it up.")
+        box.pack_start(intro, False, False, 0)
+
+        open_btn = Gtk.Button(label="Open openwakeword.com/library in browser")
+        open_btn.connect("clicked", lambda _b: Gtk.show_uri_on_window(
+            dlg, "https://openwakeword.com/library", Gdk.CURRENT_TIME))
+        box.pack_start(open_btn, False, False, 0)
+
+        det = WD.autodetect_for_uri(self.ww_uri.get_text())
+        det_dir = det["model_dir"]
+        det_containers = det["containers"]
+
+        warn_lbl = Gtk.Label(xalign=0.0)
+        warn_lbl.set_line_wrap(True)
+        if not det["compatible"]:
+            fw = det["framework"] or "this"
+            warn_lbl.set_markup(
+                f"<span foreground='#b35900'>⚠ The selected engine is a "
+                f"<b>{GLib.markup_escape_text(fw)}</b> server — this model "
+                f"won't load there. It'll be saved to your openWakeWord "
+                f"folder below; switch the active engine to an openWakeWord "
+                f"server to use it.</span>")
+            box.pack_start(warn_lbl, False, False, 0)
+
+        dir_row = Gtk.Box(spacing=6)
+        dir_row.pack_start(Gtk.Label(label="Model folder:", xalign=0.0), False, False, 0)
+        dir_entry = Gtk.Entry()
+        dir_entry.set_hexpand(True)
+        dir_entry.set_text(det_dir or "")
+        dir_row.pack_start(dir_entry, True, True, 0)
+        browse_dir = Gtk.Button(label="Browse…")
+        dir_row.pack_start(browse_dir, False, False, 0)
+        box.pack_start(dir_row, False, False, 0)
+
+        def _browse_dir(_b):
+            fc = Gtk.FileChooserDialog(
+                title="Select openWakeWord model folder", transient_for=dlg,
+                action=Gtk.FileChooserAction.SELECT_FOLDER)
+            fc.add_buttons("Cancel", Gtk.ResponseType.CANCEL,
+                           "Select", Gtk.ResponseType.OK)
+            if dir_entry.get_text():
+                fc.set_current_folder(dir_entry.get_text())
+            if fc.run() == Gtk.ResponseType.OK:
+                dir_entry.set_text(fc.get_filename())
+            fc.destroy()
+        browse_dir.connect("clicked", _browse_dir)
+
+        file_row = Gtk.Box(spacing=6)
+        file_row.pack_start(Gtk.Label(label="Downloaded file(s):", xalign=0.0), False, False, 0)
+        file_entry = Gtk.Entry()
+        file_entry.set_hexpand(True)
+        file_entry.set_editable(False)
+        file_entry.set_placeholder_text("Select the .onnx/.tflite file(s) you downloaded…")
+        file_row.pack_start(file_entry, True, True, 0)
+        browse_file = Gtk.Button(label="Choose…")
+        file_row.pack_start(browse_file, False, False, 0)
+        box.pack_start(file_row, False, False, 0)
+
+        name_row = Gtk.Box(spacing=6)
+        name_row.pack_start(Gtk.Label(label="Wake word name:", xalign=0.0), False, False, 0)
+        name_entry = Gtk.Entry()
+        name_entry.set_hexpand(True)
+        name_entry.set_placeholder_text("e.g. hey_computer — used as the model's filename")
+        name_row.pack_start(name_entry, True, True, 0)
+        box.pack_start(name_row, False, False, 0)
+
+        state = {"files": []}
+
+        def _browse_file(_b):
+            fc = Gtk.FileChooserDialog(
+                title="Select downloaded model file(s)", transient_for=dlg,
+                action=Gtk.FileChooserAction.OPEN)
+            fc.add_buttons("Cancel", Gtk.ResponseType.CANCEL,
+                           "Select", Gtk.ResponseType.OK)
+            fc.set_select_multiple(True)
+            filt = Gtk.FileFilter()
+            filt.set_name("openWakeWord models (.onnx, .tflite)")
+            filt.add_pattern("*.onnx")
+            filt.add_pattern("*.tflite")
+            fc.add_filter(filt)
+            downloads = str(Path.home() / "Downloads")
+            if Path(downloads).is_dir():
+                fc.set_current_folder(downloads)
+            if fc.run() == Gtk.ResponseType.OK:
+                files = fc.get_filenames()
+                state["files"] = files
+                file_entry.set_text(", ".join(Path(f).name for f in files))
+                if files and not name_entry.get_text().strip():
+                    name_entry.set_text(Path(files[0]).stem)
+            fc.destroy()
+        browse_file.connect("clicked", _browse_file)
+
+        status = Gtk.Label(xalign=0.0)
+        status.set_line_wrap(True)
+        status.get_style_context().add_class("dim-label")
+        box.pack_start(status, False, False, 0)
+
+        install_btn = dlg.add_button("Install", Gtk.ResponseType.APPLY)
+        dlg.add_button("Close", Gtk.ResponseType.CLOSE)
+
+        def _do_install():
+            model_dir = dir_entry.get_text().strip()
+            files = state["files"]
+            word = name_entry.get_text().strip()
+            if not files:
+                status.set_markup("<span foreground='#cc0000'>Choose a downloaded file first.</span>")
+                return
+            if not model_dir or not Path(model_dir).is_dir():
+                status.set_markup("<span foreground='#cc0000'>Set a valid model folder first.</span>")
+                return
+            try:
+                written = WD.install_local(files, model_dir, word=word or None)
+            except Exception as e:
+                status.set_markup(f"<span foreground='#cc0000'>{GLib.markup_escape_text(str(e))}</span>")
+                return
+            status.set_markup(
+                f"<span foreground='#1a7f37'>Installed "
+                f"{GLib.markup_escape_text(', '.join(written))}.</span>")
+            self.cfg.wakeword_model_dir = model_dir
+            if det_containers:
+                self.cfg.wakeword_model_container = ",".join(det_containers)
+            self._ww_offer_restart(det_containers, dlg)
+
+        def _on_response(_d, resp):
+            if resp == Gtk.ResponseType.APPLY:
+                _do_install()
                 return
             dlg.destroy()
 
