@@ -3,5 +3,8 @@ pynput>=1.7
 tomli-w>=1.0
 sounddevice>=0.4
 websockets>=12.0
-openwakeword>=0.6
+# Pinned exactly: 0.5+ unconditionally requires tflite-runtime on Linux,
+# which has no wheel for this platform/Python combo. 0.4.0 needs only
+# onnxruntime and is what the live wakeword tester is written against.
+openwakeword==0.4.0
 onnxruntime>=1.16
