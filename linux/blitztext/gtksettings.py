@@ -996,7 +996,6 @@ class SettingsDialog:
         _reg("General",     "General",              "preferences-system-symbolic",       self._build_general)
         _reg("Input",       "Keyboard",             "input-keyboard-symbolic",           self._build_keyboard)
         _reg(None,          "Wakeword",             "audio-input-microphone-symbolic",   self._build_wakeword)
-        _reg(None,          "Wakeword Sources",     "folder-remote-symbolic",            self._build_ww_sources)
         _reg("Engines",     "STT Engines (listen)", "network-server-symbolic",           self._build_stt_engines)
         _reg(None,          "LLM Engines (think)",  "applications-science-symbolic",     self._build_llm_engines)
         _reg(None,          "TTS Engines (talk)",   "audio-speakers-symbolic",           self._build_talk)
@@ -2207,8 +2206,8 @@ class SettingsDialog:
             "model directory and restart it, e.g.:\n"
             "  docker run … -v ~/wakewords:/data/models  homeassistant/wyoming-openwakeword\n"
             "Common built-in models: okay_computer · hey_jarvis · alexa · hey_mycroft · computer\n\n"
-            "Download… searches every enabled catalog from the Wakeword Sources page — "
-            "add or remove catalogs there.")
+            "Download… searches every enabled catalog — add or remove catalogs "
+            "via its Manage sources… button.")
         LW = 170
 
         # ── Wakeword enable card ──────────────────────────────────────────────
@@ -2245,9 +2244,8 @@ class SettingsDialog:
         qs.set_tooltip_text("Fill the form from a common wakeword server template")
         qs.connect("clicked", self._show_ww_templates); ww_bar.pack_start(qs, False, False, 0)
         dl = Gtk.Button(label="Download…")
-        dl.set_tooltip_text("Search all enabled sources (see the Wakeword "
-                            "Sources page) and install a model into your "
-                            "openWakeWord server's model folder")
+        dl.set_tooltip_text("Search all enabled sources and install a model "
+                            "into your openWakeWord server's model folder")
         dl.connect("clicked", self._show_ww_downloader)
         ww_bar.pack_start(dl, False, False, 0)
         for label, cb, tip in (
@@ -2480,7 +2478,21 @@ class SettingsDialog:
             self._meter.stop(); self._meter = None
 
     # ===== Wakeword Sources =================================================
-    def _build_ww_sources(self, page: Gtk.Box) -> None:
+    def _show_ww_sources_dialog(self, _b=None, transient_for=None) -> None:
+        """Manage the online catalogs the Download… dialog searches."""
+        dlg = Gtk.Dialog(title="Wakeword Sources",
+                         transient_for=transient_for or self.dlg, modal=True)
+        dlg.set_default_size(640, 420)
+        box = dlg.get_content_area()
+        box.set_spacing(8)
+        box.set_border_width(12)
+        self._ww_sources_ui(box)
+        dlg.add_button("Close", Gtk.ResponseType.CLOSE)
+        dlg.show_all()
+        dlg.run()   # block until closed so callers can react to changes made
+        dlg.destroy()
+
+    def _ww_sources_ui(self, page: Gtk.Box) -> None:
         from .config import WakewordSource, DEFAULT_WW_SOURCES
 
         _infobox(page,
@@ -2684,11 +2696,6 @@ class SettingsDialog:
                      if s.enabled and s.kind == "github_collection"]
         oww_sources = [s for s in self.cfg.wakeword_sources
                        if s.enabled and s.kind == "openwakeword_api"]
-        if not gh_sources and not oww_sources:
-            self._error("No wakeword sources enabled — add one on the "
-                        "Wakeword Sources page.")
-            return
-
         dlg = Gtk.Dialog(title="Download wakeword models",
                          transient_for=self.dlg, modal=True)
         dlg.set_default_size(640, 560)
@@ -2696,15 +2703,38 @@ class SettingsDialog:
         box.set_spacing(8)
         box.set_border_width(12)
 
+        intro_row = Gtk.Box(spacing=8)
         intro = Gtk.Label(xalign=0.0)
         intro.set_line_wrap(True)
         intro.set_markup(
-            "Searches every enabled catalog from the Wakeword Sources page. "
-            "GitHub collections install instantly and for free; "
-            "openwakeword.com-style libraries need a quick browser step — "
-            "sign in there for free, download the model, then pick the file "
-            "here.")
-        box.pack_start(intro, False, False, 0)
+            "Searches every enabled catalog below. GitHub collections install "
+            "instantly and for free; openwakeword.com-style libraries need a "
+            "quick browser step — sign in there for free, download the model, "
+            "then pick the file here.")
+        intro_row.pack_start(intro, True, True, 0)
+        manage_src_btn = Gtk.Button(label="Manage sources…")
+        manage_src_btn.set_valign(Gtk.Align.START)
+        intro_row.pack_start(manage_src_btn, False, False, 0)
+        box.pack_start(intro_row, False, False, 0)
+
+        def _reopen_downloader(_d=None, _r=None):
+            dlg.destroy()
+            self._show_ww_downloader()
+        manage_src_btn.connect("clicked", lambda _b: (
+            self._show_ww_sources_dialog(transient_for=dlg),
+            _reopen_downloader()))
+
+        if not gh_sources and not oww_sources:
+            status0 = Gtk.Label(xalign=0.0)
+            status0.set_line_wrap(True)
+            status0.set_markup(
+                "<span foreground='#b35900'>No wakeword sources enabled — "
+                "click <b>Manage sources…</b> above to add or enable one.</span>")
+            box.pack_start(status0, False, False, 0)
+            dlg.add_button("Close", Gtk.ResponseType.CLOSE)
+            dlg.connect("response", lambda _d, _r: dlg.destroy())
+            dlg.show_all()
+            return
 
         # Resolve the target folder from the *currently selected engine's*
         # server so the download lands where that engine actually reads from.
