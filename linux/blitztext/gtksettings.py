@@ -2787,10 +2787,16 @@ class SettingsDialog:
         filt_row.pack_start(search, True, True, 0)
         box.pack_start(filt_row, False, False, 0)
 
+        hint = Gtk.Label(xalign=0.0)
+        hint.set_markup("<small>Ctrl+Click or Shift+Click to select several models at once</small>")
+        hint.get_style_context().add_class("dim-label")
+        box.pack_start(hint, False, False, 0)
+
         # Model list: display, kind ('gh'/'oww'), source name, payload.
         store = Gtk.ListStore(str, str, str, object)
         view = Gtk.TreeView(model=Gtk.TreeModelFilter(child_model=store))
         view.set_headers_visible(False)
+        view.get_selection().set_mode(Gtk.SelectionMode.MULTIPLE)
         view.append_column(Gtk.TreeViewColumn("", Gtk.CellRendererText(), text=0))
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -2828,32 +2834,43 @@ class SettingsDialog:
         aux_btn.set_sensitive(False)
         act_btn.set_sensitive(False)
 
-        state = {"sel": None, "oww_stage": 0, "search_seq": 0}
+        state = {"sel": [], "oww_stage": 0, "search_seq": 0}
 
-        def _selected():
-            m, it = view.get_selection().get_selected()
-            if not it:
-                return None
-            return {"kind": m[it][1], "source": m[it][2], "payload": m[it][3]}
+        def _selected_list():
+            m, paths = view.get_selection().get_selected_rows()
+            out = []
+            for p in paths:
+                it = m.get_iter(p)
+                out.append({"kind": m[it][1], "source": m[it][2], "payload": m[it][3]})
+            return out
 
         def _on_sel(_s):
-            sel = _selected()
-            state["sel"] = sel
+            sels = _selected_list()
+            state["sel"] = sels
             state["oww_stage"] = 0
-            if not sel:
+            if not sels:
                 act_btn.set_sensitive(False)
                 aux_btn.set_sensitive(False)
                 return
-            if sel["kind"] == "gh":
-                act_btn.set_label("Download")
+            n = len(sels)
+            kinds = {s["kind"] for s in sels}
+            if len(kinds) > 1:
+                act_btn.set_sensitive(False)
+                aux_btn.set_sensitive(False)
+                status.set_markup("<span foreground='#b35900'>Select only GitHub or "
+                                  "only online results at once.</span>")
+                return
+            kind = next(iter(kinds))
+            if kind == "gh":
+                act_btn.set_label(f"Download & Install ({n})" if n > 1 else "Download & Install")
                 act_btn.set_sensitive(True)
                 aux_btn.set_label("View README")
-                aux_btn.set_sensitive(True)
+                aux_btn.set_sensitive(n == 1)
             else:
-                act_btn.set_label("Open in browser…")
+                act_btn.set_label(f"Download in Browser ({n})…" if n > 1 else "Download in Browser…")
                 act_btn.set_sensitive(True)
                 aux_btn.set_label("Test live (mic)")
-                aux_btn.set_sensitive(bool(sel["payload"].get("human_test_url")))
+                aux_btn.set_sensitive(n == 1 and bool(sels[0]["payload"].get("human_test_url")))
         view.get_selection().connect("changed", _on_sel)
 
         def _status_counts():
@@ -2982,51 +2999,49 @@ class SettingsDialog:
         search.connect("search-changed", _on_search_changed)
 
         # ── Actions ─────────────────────────────────────────────────────
-        def _do_gh_download(payload):
+        def _do_gh_download(payloads):
             model_dir = dir_entry.get_text().strip()
             if not model_dir or not Path(model_dir).is_dir():
                 status.set_markup("<span foreground='#cc0000'>Set a valid model "
                                   "folder first.</span>")
                 return
-            name, lang, repo = payload["name"], payload["lang"], payload["repo"]
-            status.set_text(f"Downloading {name}…")
+            status.set_text(f"Downloading {len(payloads)} model(s)…")
             act_btn.set_sensitive(False)
             all_fmt = both_chk.get_active()
 
             def work():
-                try:
-                    variants = WD.list_variants(lang, name, repo=repo)
-                    if not WD.has_tflite(variants) and variants:
-                        warn = (" (only .onnx available — needs the server's "
-                                "onnx framework)")
-                    else:
-                        warn = ""
-                    res = WD.install(lang, name, model_dir, repo=repo,
-                                     variants=variants, all_formats=all_fmt)
-                    err = None
-                except Exception as e:
-                    res, warn, err = None, "", str(e)
+                installed, errors = [], []
+                for payload in payloads:
+                    name, lang, repo = payload["name"], payload["lang"], payload["repo"]
+                    try:
+                        variants = WD.list_variants(lang, name, repo=repo)
+                        res = WD.install(lang, name, model_dir, repo=repo,
+                                         variants=variants, all_formats=all_fmt)
+                        installed.append(res["model_id"])
+                    except Exception as e:
+                        errors.append(f"{name}: {e}")
 
                 def apply():
                     act_btn.set_sensitive(True)
-                    if err:
-                        status.set_markup(
-                            f"<span foreground='#cc0000'>{GLib.markup_escape_text(err)}</span>")
-                        return False
-                    files = ", ".join(res["files"])
-                    status.set_markup(
-                        f"<span foreground='#1a7f37'>Installed "
-                        f"<b>{GLib.markup_escape_text(res['model_id'])}</b></span> "
-                        f"({GLib.markup_escape_text(files)}){GLib.markup_escape_text(warn)}.")
-                    self.cfg.wakeword_model_dir = model_dir
-                    if det_containers:
-                        self.cfg.wakeword_model_container = ",".join(det_containers)
-                    self._ww_offer_restart(det_containers, dlg)
+                    parts = []
+                    if installed:
+                        parts.append(
+                            f"<span foreground='#1a7f37'>Installed "
+                            f"{GLib.markup_escape_text(', '.join(installed))}.</span>")
+                    if errors:
+                        parts.append(
+                            f"<span foreground='#cc0000'>{GLib.markup_escape_text('; '.join(errors))}</span>")
+                    status.set_markup(" ".join(parts) or "Nothing installed.")
+                    if installed:
+                        self.cfg.wakeword_model_dir = model_dir
+                        if det_containers:
+                            self.cfg.wakeword_model_container = ",".join(det_containers)
+                        self._ww_offer_restart(det_containers, dlg)
                     return False
                 GLib.idle_add(apply)
             threading.Thread(target=work, daemon=True).start()
 
-        def _pick_and_install_oww(payload):
+        def _pick_and_install_oww(payloads):
             model_dir = dir_entry.get_text().strip()
             if not model_dir or not Path(model_dir).is_dir():
                 status.set_markup("<span foreground='#cc0000'>Set a valid model "
@@ -3052,50 +3067,71 @@ class SettingsDialog:
             fc.destroy()
             if not files:
                 return
-            try:
-                written = WD.install_local(files, model_dir, word=payload.get("wake_word"))
-            except Exception as e:
-                status.set_markup(f"<span foreground='#cc0000'>{GLib.markup_escape_text(str(e))}</span>")
-                return
-            status.set_markup(
-                f"<span foreground='#1a7f37'>Installed "
-                f"{GLib.markup_escape_text(', '.join(written))}.</span>")
-            self.cfg.wakeword_model_dir = model_dir
-            if det_containers:
-                self.cfg.wakeword_model_container = ",".join(det_containers)
+
+            written, errors = [], []
+            if len(payloads) == 1:
+                # One model: group same-word files (onnx+tflite pair) under its name.
+                try:
+                    written = WD.install_local(files, model_dir, word=payloads[0].get("wake_word"))
+                except Exception as e:
+                    errors.append(str(e))
+            else:
+                # Several different models picked at once: each file keeps its own name.
+                for f in files:
+                    try:
+                        written += WD.install_local([f], model_dir, word=None)
+                    except Exception as e:
+                        errors.append(f"{Path(f).name}: {e}")
+
+            parts = []
+            if written:
+                parts.append(f"<span foreground='#1a7f37'>Installed "
+                             f"{GLib.markup_escape_text(', '.join(written))}.</span>")
+            if errors:
+                parts.append(f"<span foreground='#cc0000'>{GLib.markup_escape_text('; '.join(errors))}</span>")
+            status.set_markup(" ".join(parts) or "Nothing installed.")
+            if written:
+                self.cfg.wakeword_model_dir = model_dir
+                if det_containers:
+                    self.cfg.wakeword_model_container = ",".join(det_containers)
+                self._ww_offer_restart(det_containers, dlg)
             state["oww_stage"] = 0
-            act_btn.set_label("Open in browser…")
-            self._ww_offer_restart(det_containers, dlg)
+            _on_sel(None)  # restore the normal per-selection button label
 
         def _on_response(_d, resp):
-            sel = state.get("sel")
-            if resp == 1:  # README / test-live
-                if sel and sel["kind"] == "gh":
-                    p = sel["payload"]
+            sels = state.get("sel") or []
+            if resp == 1:  # README / test-live (only offered for a single selection)
+                if len(sels) == 1 and sels[0]["kind"] == "gh":
+                    p = sels[0]["payload"]
                     Gtk.show_uri_on_window(
                         dlg, WD.readme_url(p["lang"], p["name"], repo=p["repo"]),
                         Gdk.CURRENT_TIME)
-                elif sel and sel["kind"] == "oww":
-                    url = sel["payload"].get("human_test_url")
+                elif len(sels) == 1 and sels[0]["kind"] == "oww":
+                    url = sels[0]["payload"].get("human_test_url")
                     if url:
                         Gtk.show_uri_on_window(dlg, url, Gdk.CURRENT_TIME)
                 return
             if resp == Gtk.ResponseType.APPLY:
-                if not sel:
+                if not sels:
                     return
-                if sel["kind"] == "gh":
-                    _do_gh_download(sel["payload"])
+                kind = sels[0]["kind"]
+                if kind == "gh":
+                    _do_gh_download([s["payload"] for s in sels])
                 else:
                     if state.get("oww_stage", 0) == 0:
-                        url = OL.library_page_url(sel["payload"]["base_url"],
-                                                  sel["payload"]["model_id"])
-                        Gtk.show_uri_on_window(dlg, url, Gdk.CURRENT_TIME)
+                        for s in sels:
+                            url = OL.library_page_url(s["payload"]["base_url"],
+                                                      s["payload"]["model_id"])
+                            Gtk.show_uri_on_window(dlg, url, Gdk.CURRENT_TIME)
                         state["oww_stage"] = 1
-                        act_btn.set_label("Choose downloaded file & Install")
-                        status.set_text("Opened in your browser — sign in and download "
-                                        "the model, then click again to pick the file.")
+                        n = len(sels)
+                        act_btn.set_label(f"Pick Downloaded File(s) & Install"
+                                         + (f" ({n})" if n > 1 else ""))
+                        status.set_text(f"Opened {n} page(s) in your browser — sign in "
+                                        "and download the model(s), then click again "
+                                        "to pick the file(s).")
                     else:
-                        _pick_and_install_oww(sel["payload"])
+                        _pick_and_install_oww([s["payload"] for s in sels])
                 return
             dlg.destroy()
 
