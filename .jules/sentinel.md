@@ -1,0 +1,3 @@
+## 2026-08-27 — Talk Command Injection
+**Learning:** Found an instance in `blitztext/talk.py` where a shell pipe combined with `subprocess.Popen(..., shell=True)` created a command injection vulnerability because a configuration value (the engine URL) was directly embedded into the string. Although the JSON payload was escaped, the URL wasn't, which could lead to arbitrary execution if `talk.url` were manipulated. Refactoring to pipe `subprocess` standard streams instead of using `shell=True` is much safer and eliminates the attack vector.
+**Action:** Refactored `subprocess.Popen(cmd, shell=True)` in `blitztext/talk.py` by separating the `curl` and `ffplay` commands into a list-based `Popen` pipeline, passing the `curl_proc.stdout` directly to `ffplay_cmd`.
