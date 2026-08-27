@@ -2089,9 +2089,10 @@ class SettingsDialog:
         status.set_max_width_chars(10)
         status.set_ellipsize(Pango.EllipsizeMode.END)
         test_btn = Gtk.Button(label="Test")
-        test_btn.set_tooltip_text("Listen ~10s and check this wake model fires")
+        test_btn.set_tooltip_text("One model: live confidence chart against your mic. "
+                                  "Several: listen ~10s and check they fire.")
         test_btn.connect("clicked",
-                         lambda _b, p=picker, s=status, b=test_btn: self._ww_test_picker(p, s, b))
+                         lambda _b, p=picker, s=status, b=test_btn: self._ww_test_or_live(p, s, b))
         row.pack_start(test_btn, False, False, 0)
         row.pack_start(status, False, False, 0)
         if tooltip:
@@ -3268,6 +3269,241 @@ class SettingsDialog:
                             f'<span foreground="#c44" size="small">Unreachable: {exc}</span>')
                 GLib.idle_add(show_err)
         threading.Thread(target=work, daemon=True).start()
+
+    def _ww_test_or_live(self, picker, status_lbl, btn) -> None:
+        """Route Test: a single model gets the live confidence-chart dialog,
+        several models fall back to the plain ~10s listen-and-report test."""
+        models = [m.strip() for m in _combo_text(picker).split(",") if m.strip()]
+        if len(models) == 1:
+            self._show_ww_live_test(models[0])
+        else:
+            self._ww_test_picker(picker, status_lbl, btn)
+
+    def _show_ww_live_test(self, model_name: str) -> None:
+        """Live confidence-chart test, like openwakeword.com/library's tester.
+
+        Runs the model directly (via the `openwakeword` Python package)
+        against live mic audio instead of round-tripping through the wyoming
+        server, since the Wyoming protocol only ever reports a one-shot
+        detection event — never a continuous score. Only works for a model
+        that exists as an actual .onnx file in the server's custom model
+        folder (i.e. one downloaded via Download…/Import… with the "Also
+        download .onnx copy" option) — built-in models baked into the
+        wyoming-openwakeword docker image aren't reachable from the host.
+        """
+        from . import wwdownload as WD
+        from . import wwlivetest as LT
+        import time
+        from collections import deque
+
+        det = WD.autodetect_for_uri(self.ww_uri.get_text())
+        path = LT.find_model_file(det["model_dir"], model_name)
+        if not path:
+            self._error(
+                f"No local .onnx file found for '{model_name}' in "
+                f"{det['model_dir'] or '(no model folder detected)'}.\n\n"
+                "Live testing only works for models downloaded into the "
+                "server's custom model folder with the \"Also download .onnx "
+                "copy\" option — built-in models baked into the server's "
+                "docker image can't be tested this way.")
+            return
+        try:
+            import openwakeword  # noqa: F401
+        except ImportError:
+            self._error("The 'openwakeword' Python package is not installed, "
+                        "so live testing is unavailable.")
+            return
+
+        dlg = Gtk.Dialog(title="Test Wake Word", transient_for=self.dlg, modal=True)
+        dlg.set_default_size(420, 660)
+        box = dlg.get_content_area()
+        box.set_spacing(10)
+        box.set_border_width(16)
+
+        title = Gtk.Label(xalign=0.0)
+        title.set_markup("<span size='large'><b>Test Wake Word</b></span>")
+        box.pack_start(title, False, False, 0)
+        subtitle = Gtk.Label(xalign=0.0)
+        subtitle.set_markup(
+            f"Say “<b>{GLib.markup_escape_text(WD.phrase_from_name(model_name))}</b>” "
+            "to test detection")
+        box.pack_start(subtitle, False, False, 0)
+
+        state = {"alive": True, "threshold": 0.5, "flash_until": 0.0, "count": 0}
+        WINDOW = 20.0
+        samples: deque = deque()
+        detections: deque = deque()
+
+        indicator = Gtk.DrawingArea()
+        indicator.set_size_request(96, 96)
+
+        def _draw_indicator(_w, cr):
+            w, h = indicator.get_allocated_width(), indicator.get_allocated_height()
+            cx, cy, r = w / 2, h / 2, min(w, h) / 2 - 4
+            if time.monotonic() < state["flash_until"]:
+                cr.set_source_rgb(0.13, 0.75, 0.4)
+            else:
+                cr.set_source_rgba(0.85, 0.25, 0.25, 0.9)
+            cr.arc(cx, cy, r, 0, 2 * 3.14159265)
+            cr.fill()
+        indicator.connect("draw", _draw_indicator)
+        ind_box = Gtk.Box()
+        ind_box.set_halign(Gtk.Align.CENTER)
+        ind_box.pack_start(indicator, False, False, 0)
+        box.pack_start(ind_box, False, False, 4)
+
+        status_lbl = Gtk.Label(xalign=0.5)
+        status_lbl.set_markup("<span foreground='#4a7dff'>Listening… Say your wake word!</span>")
+        box.pack_start(status_lbl, False, False, 0)
+
+        lvl_row = Gtk.Box(spacing=8)
+        lvl_row.pack_start(Gtk.Label(label="Audio Level", xalign=0.0), False, False, 0)
+        level_bar = Gtk.LevelBar()
+        level_bar.set_min_value(0)
+        level_bar.set_max_value(1)
+        level_bar.set_hexpand(True)
+        lvl_row.pack_start(level_bar, True, True, 0)
+        level_pct = Gtk.Label(label="0%")
+        lvl_row.pack_start(level_pct, False, False, 0)
+        box.pack_start(lvl_row, False, False, 0)
+        no_audio_lbl = Gtk.Label(xalign=0.5)
+        no_audio_lbl.set_markup(
+            "<span foreground='#b35900' size='small'>No audio detected — check your microphone</span>")
+        no_audio_lbl.set_no_show_all(True)
+        box.pack_start(no_audio_lbl, False, False, 0)
+
+        th_row = Gtk.Box(spacing=8)
+        th_row.pack_start(Gtk.Label(label="Sensitivity (Threshold)", xalign=0.0), False, False, 0)
+        th_pct = Gtk.Label(label="50%")
+        th_row.pack_start(th_pct, False, False, 0)
+        box.pack_start(th_row, False, False, 0)
+        threshold = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 1, 99, 1)
+        threshold.set_value(50)
+        threshold.set_draw_value(False)
+        box.pack_start(threshold, False, False, 0)
+        sens_row = Gtk.Box()
+        l1 = Gtk.Label(label="More Sensitive", xalign=0.0)
+        l1.set_hexpand(True)
+        l2 = Gtk.Label(label="Less Sensitive", xalign=1.0)
+        l2.set_hexpand(True)
+        sens_row.pack_start(l1, True, True, 0)
+        sens_row.pack_start(l2, True, True, 0)
+        box.pack_start(sens_row, False, False, 0)
+
+        def _on_threshold(s):
+            state["threshold"] = s.get_value() / 100.0
+            th_pct.set_text(f"{int(s.get_value())}%")
+        threshold.connect("value-changed", _on_threshold)
+
+        chart_lbl = Gtk.Label(xalign=0.0)
+        chart_lbl.set_markup(f"Confidence ({int(WINDOW)}s window)")
+        box.pack_start(chart_lbl, False, False, 0)
+        chart = Gtk.DrawingArea()
+        chart.set_size_request(-1, 160)
+        box.pack_start(chart, False, False, 0)
+        hint = Gtk.Label(xalign=0.0)
+        hint.set_markup(
+            "<span size='small' foreground='#888'>Yellow dashed line = detection "
+            "threshold • Green dots = detections</span>")
+        box.pack_start(hint, False, False, 0)
+
+        def _draw_chart(_w, cr):
+            w, h = chart.get_allocated_width(), chart.get_allocated_height()
+            cr.set_source_rgb(0.06, 0.08, 0.14)
+            cr.paint()
+            cr.set_source_rgba(1, 1, 1, 0.08)
+            for frac in (0.0, 0.25, 0.5, 0.75, 1.0):
+                y = h - frac * h
+                cr.move_to(0, y)
+                cr.line_to(w, y)
+                cr.stroke()
+            th_y = h - state["threshold"] * h
+            cr.set_source_rgb(0.95, 0.65, 0.1)
+            cr.set_dash([4, 3])
+            cr.move_to(0, th_y)
+            cr.line_to(w, th_y)
+            cr.stroke()
+            cr.set_dash([])
+            now = time.monotonic()
+            pts = [(t, s) for t, s in samples if now - t <= WINDOW]
+            if len(pts) >= 2:
+                cr.set_source_rgb(0.25, 0.7, 0.95)
+                cr.set_line_width(1.6)
+                for i, (t, s) in enumerate(pts):
+                    x = w * (1 - (now - t) / WINDOW)
+                    y = h - min(1.0, s) * h
+                    if i:
+                        cr.line_to(x, y)
+                    else:
+                        cr.move_to(x, y)
+                cr.stroke()
+            cr.set_source_rgb(0.2, 0.85, 0.45)
+            for t in detections:
+                if now - t > WINDOW:
+                    continue
+                x = w * (1 - (now - t) / WINDOW)
+                cr.arc(x, th_y, 4, 0, 2 * 3.14159265)
+                cr.fill()
+        chart.connect("draw", _draw_chart)
+
+        banner = Gtk.Box()
+        banner.get_style_context().add_class("bt-card")
+        banner_lbl = Gtk.Label(xalign=0.5)
+        banner_lbl.set_markup("<span foreground='#888'>Listening for detections…</span>")
+        banner.pack_start(banner_lbl, True, True, 8)
+        box.pack_start(banner, False, False, 4)
+
+        dlg.add_button("Close", Gtk.ResponseType.CLOSE)
+
+        tester = LT.LiveModelTester(str(path), device=self._selected_mic_name())
+
+        def _on_score(score: float) -> None:
+            def apply():
+                if not state["alive"]:
+                    return False
+                t = time.monotonic()
+                samples.append((t, score))
+                while samples and t - samples[0][0] > WINDOW + 1:
+                    samples.popleft()
+                if score >= state["threshold"] and (not detections or t - detections[-1] > 1.0):
+                    detections.append(t)
+                    state["count"] += 1
+                    state["flash_until"] = t + 0.6
+                    n = state["count"]
+                    banner_lbl.set_markup(
+                        f"<span foreground='#1a7f37'><b>Detected {n} time"
+                        f"{'s' if n != 1 else ''}!</b></span>")
+                return False
+            GLib.idle_add(apply)
+
+        def _on_level(level: float) -> None:
+            def apply():
+                if not state["alive"]:
+                    return False
+                level_bar.set_value(level)
+                level_pct.set_text(f"{int(level * 100)}%")
+                no_audio_lbl.set_visible(level < 0.02)
+                return False
+            GLib.idle_add(apply)
+
+        ok = tester.start(on_score=_on_score, on_level=_on_level)
+        if not ok:
+            status_lbl.set_markup("<span foreground='#cc0000'>Could not start microphone capture.</span>")
+
+        def _tick():
+            if not state["alive"]:
+                return False
+            indicator.queue_draw()
+            chart.queue_draw()
+            return True
+        GLib.timeout_add(150, _tick)
+
+        def _on_response(_d, _r):
+            state["alive"] = False
+            tester.stop()
+            dlg.destroy()
+        dlg.connect("response", _on_response)
+        dlg.show_all()
 
     def _ww_test_picker(self, picker, status_lbl, btn) -> None:
         """Listen ~10s for the model(s) in one picker row and report the result."""
