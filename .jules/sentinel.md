@@ -1,0 +1,3 @@
+## 2024-05-18 — Sentinel Fix Shell Injection in talk.py
+**Learning:** `talk.py` uses an unescaped f-string via `subprocess.Popen(cmd, shell=True)` for curl parameters leading to shell injection. When migrating pipelines like `curl ... | ffplay ...` out of `shell=True`, use two `subprocess.Popen` processes piped together. Crucially, explicitly close the stdout of the upstream producer (`curl_proc.stdout.close()`) in the parent process to ensure proper cleanup if the consumer `ffplay` crashes.
+**Action:** Replaced `subprocess.Popen(..., shell=True)` with array-based arguments and direct piping to resolve the command injection risk in `blitztext/talk.py`.
