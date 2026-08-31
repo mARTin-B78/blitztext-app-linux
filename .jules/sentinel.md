@@ -1,0 +1,3 @@
+## YYYY-MM-DD — Fix shell injection in blitztext/talk.py
+**Learning:** `talk.py` uses `subprocess.Popen(..., shell=True)` passing a dynamically built curl command pipeline. This is a shell injection vector if `url` (engine URL from config) is manipulated. While the payload is escaped via `shlex.quote()`, it is safer to eliminate `shell=True` and use a pipeline of explicit `subprocess.Popen` commands with lists of arguments. Also when doing so, it is important to remove `shlex.quote` around the JSON string.
+**Action:** Refactor `talk.py` to use `subprocess.Popen` with argument lists for `curl` and `ffplay`, connecting them via `stdin` and `stdout=subprocess.PIPE`. Close `p1.stdout` in the parent process to avoid deadlocks. Drop `import shlex` as it is unused.
