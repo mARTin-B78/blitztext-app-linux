@@ -1,0 +1,3 @@
+## 2025-02-28 — Shell Injection in Blitztalk Playback
+**Learning:** Found `subprocess.Popen(..., shell=True)` directly passing a user-configurable TTS URL variable into a `curl | ffplay` bash pipeline in `linux/blitztext/talk.py`. This permitted arbitrary command injection. While `payload_json` was escaped with `shlex.quote`, the URL wasn't, meaning a malicious config (`tts_url = "http://example.com; rm -rf /"`) could execute arbitrary code.
+**Action:** Refactored the `curl | ffplay` command into two separate, piped `subprocess.Popen(..., shell=False)` calls, passing arguments as lists and safely routing `stdout=subprocess.PIPE`.
