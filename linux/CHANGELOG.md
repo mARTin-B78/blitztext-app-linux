@@ -9,6 +9,11 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.62] - 2026-09-02
+
+### Fixed
+- **Security:** Fix command injection vulnerability in TTS audio playback (`talk.py`) where a malicious URL could be executed by the shell.
+
 ## [2.03.54] - 2026-06-23
 
 ### Changed
