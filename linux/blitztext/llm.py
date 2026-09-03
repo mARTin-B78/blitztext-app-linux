@@ -12,8 +12,8 @@ import json
 import os
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from .stt import reachable
 
@@ -99,7 +99,7 @@ def chat(
         # stops sending data mid-stream. Not wrapped in URLError — must be caught
         # separately or it would propagate uncaught and kill the background thread.
         raise LLMError(f"Request timed out or connection lost: {exc}") from exc
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise LLMError(f"Unexpected error: {exc}") from exc
 
     content = (content or "").strip()

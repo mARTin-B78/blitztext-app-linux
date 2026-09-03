@@ -100,7 +100,7 @@ def validate_sound_path(path: str) -> str | None:
     return resolved_str
 
 
-def play(path: str = "", *, fallback: str | None = None) -> "subprocess.Popen | None":
+def play(path: str = "", *, fallback: str | None = None) -> subprocess.Popen | None:
     """Play `path` (WAV/MP3/OGG/FLAC/…); fallback to a freedesktop system sound.
 
     User-supplied paths are validated via :func:`validate_sound_path` before
