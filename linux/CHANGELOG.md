@@ -9,6 +9,11 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.62] - 2024-10-27
+
+### Security
+- **Fix Command Injection:** The TTS playback pipeline in `blitztext/talk.py` has been refactored to eliminate a command injection vulnerability. The shell pipeline was replaced with explicit subprocess connections, removing the reliance on `shell=True` and protecting against malicious payloads.
+
 ## [2.03.54] - 2026-06-23
 
 ### Changed
