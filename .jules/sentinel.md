@@ -1,0 +1,3 @@
+## 2024-05-18 — [Untrusted Parsing DoS in Wakeword Stream]
+**Learning:** Wyoming protocol streaming parses JSON headers and binary payloads delimited by newlines (`\n`). `wakeword.py` (daemon) and `wakeword_bench.py` (offline bench) did not impose bounds on `payload_length` (could be arbitrarily huge, OOM) or on the length of `data_bytes`/buffer before reading a newline. Unbounded streams could exhaust memory.
+**Action:** Added hard upper bounds for JSON headers (64KB) and binary payloads (1MB). Handled DoS vector in `_drain_detections` by preventing buffer growth beyond `1MB + 64KB` if no newline is encountered.
