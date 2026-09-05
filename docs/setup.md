@@ -87,7 +87,7 @@ Rewrite workflows use an OpenAI-compatible chat endpoint. You can point them at 
 For OpenAI:
 
 ```bash
-export OPENAI_API_KEY=sk-...
+export OPENAI_API_KEY_HERE sk-...
 ```
 
 Then set the LLM engine in **Settings > Engines** or edit `~/.config/blitztext/config.toml`.
