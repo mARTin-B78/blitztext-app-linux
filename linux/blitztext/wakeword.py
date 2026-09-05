@@ -128,6 +128,11 @@ class WakewordListener:
                                     pass
 
                             payload_len = msg.get("payload_length", 0)
+
+                            if not isinstance(payload_len, int) or payload_len < 0 or payload_len > 1048576:
+                                logbuffer.log(f"[wakeword] Invalid payload_length: {payload_len}")
+                                break
+
                             if payload_len > 0:
                                 # Consume payload
                                 remaining = payload_len
