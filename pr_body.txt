@@ -1,0 +1,14 @@
+💡 What
+Added strict buffer limits (64KB for JSON headers, 1MB for binary payloads) to the Wyoming protocol networking logic in `wakeword.py` and `wakeword_bench.py`.
+
+🎯 Why
+When parsing untrusted Wyoming server responses, unbounded buffer accumulation logic meant that a missing newline or a deliberately massive `payload_length`/`data_length` could cause out-of-memory (OOM) errors and loop forever, leading to a Denial of Service.
+
+⚠️ Risk
+Low. 1MB per chunk and 64KB per JSON header is extremely high relative to actual Wyoming protocol traffic (where chunks are usually less than a few kilobytes). Normal operation will be unaffected.
+
+🔬 Verified
+Ran `pytest tests` and successfully verified against the new `tests/test_security_bounds.py` regression tests checking for correct DoS drop-buffer behavior.
+
+📎 Scope
+`linux/blitztext/wakeword.py`, `linux/blitztext/wakeword_bench.py`, and `linux/tests/test_security_bounds.py`
