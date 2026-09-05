@@ -54,6 +54,13 @@ def test_drain_detections_handles_payloads():
     assert n2 == 0 and rest2 == held                          # incomplete payload held, not misparsed
 
 
+def test_drain_detections_payload_length_limit():
+    import pytest
+    chunk = (json.dumps({"type": "audio-chunk", "payload_length": wb.MAX_PAYLOAD_BYTES + 1}) + "\n").encode() + b"a"
+    with pytest.raises(ValueError, match="exceeds maximum allowed size"):
+        wb._drain_detections(chunk)
+
+
 def test_bench_result_metrics():
     r = wb.BenchResult(utterances=[
         wb.Utterance("a", True, "nova", detections=1, ok=True),

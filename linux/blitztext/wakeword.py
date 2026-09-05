@@ -20,6 +20,8 @@ from urllib.parse import urlparse
 
 from . import logbuffer
 
+MAX_PAYLOAD_BYTES = 10 * 1024 * 1024  # 10 MB limit for incoming binary payloads
+
 MUTE_FILE = "/tmp/wake_muted"
 
 
@@ -128,6 +130,9 @@ class WakewordListener:
                                     pass
 
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len > MAX_PAYLOAD_BYTES:
+                                logbuffer.log(f"[wakeword] Error: Payload too large ({payload_len} > {MAX_PAYLOAD_BYTES})", level="WARNING")
+                                break
                             if payload_len > 0:
                                 # Consume payload
                                 remaining = payload_len
@@ -294,6 +299,9 @@ class WakewordActionListener:
                                     pass
 
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len > MAX_PAYLOAD_BYTES:
+                                logbuffer.log(f"[wakeword-action] Error: Payload too large ({payload_len} > {MAX_PAYLOAD_BYTES})", level="WARNING")
+                                break
                             if payload_len > 0:
                                 remaining = payload_len
                                 while remaining > 0:
