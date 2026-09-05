@@ -1,0 +1,3 @@
+## 2026-09-05 — [Fix shell injection in audio playback pipeline]
+ **Learning:** Using `subprocess.Popen` with `shell=True` along with user or config derived values is a high severity security vulnerability (Command Injection). We must avoid constructing shell strings. Furthermore, passing `shlex.quote()`-ed strings into an array of arguments for a `shell=False` `Popen` corrupts the argument format because array-based arguments do the quoting correctly by themselves.
+ **Action:** Replaced the `shell=True` pipeline construction in `blitztext/talk.py` with two explicitly connected `subprocess.Popen` calls using `subprocess.PIPE` to securely pass the JSON payload without escaping.

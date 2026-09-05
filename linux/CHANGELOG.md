@@ -9,6 +9,9 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+### Fixed
+- **Security:** Resolved a shell injection vulnerability in the audio playback pipeline (`talk.py`) by removing `shell=True` and adopting explicit subprocess lists chained via pipes.
+
 ## [2.03.54] - 2026-06-23
 
 ### Changed
