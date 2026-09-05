@@ -103,6 +103,8 @@ class WakewordListener:
                                 if not byte:
                                     break
                                 line += byte
+                                if len(line) > 65536:
+                                    break
                             
                             if not line:
                                 break
@@ -116,6 +118,8 @@ class WakewordListener:
                             # available and the stream stays in sync.
                             data_len = msg.get("data_length", 0)
                             if data_len > 0:
+                                if data_len > 1048576:
+                                    break
                                 data_bytes = b""
                                 while len(data_bytes) < data_len:
                                     r = sock.recv(min(data_len - len(data_bytes), 4096))
@@ -129,6 +133,8 @@ class WakewordListener:
 
                             payload_len = msg.get("payload_length", 0)
                             if payload_len > 0:
+                                if payload_len > 1048576:
+                                    break
                                 # Consume payload
                                 remaining = payload_len
                                 while remaining > 0:
@@ -273,6 +279,8 @@ class WakewordActionListener:
                                 if not byte:
                                     return
                                 line += byte
+                                if len(line) > 65536:
+                                    return
                             if not line:
                                 return
                             msg = json.loads(line.decode("utf-8"))
@@ -282,6 +290,8 @@ class WakewordActionListener:
                             # wrong action (or none) fires.
                             data_len = msg.get("data_length", 0)
                             if data_len > 0:
+                                if data_len > 1048576:
+                                    break
                                 data_bytes = b""
                                 while len(data_bytes) < data_len:
                                     r = sock.recv(min(data_len - len(data_bytes), 4096))
@@ -295,6 +305,8 @@ class WakewordActionListener:
 
                             payload_len = msg.get("payload_length", 0)
                             if payload_len > 0:
+                                if payload_len > 1048576:
+                                    break
                                 remaining = payload_len
                                 while remaining > 0:
                                     chunk = sock.recv(min(remaining, 4096))
