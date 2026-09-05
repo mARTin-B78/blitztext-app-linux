@@ -128,6 +128,9 @@ class WakewordListener:
                                     pass
 
                             payload_len = msg.get("payload_length", 0)
+                            if not isinstance(payload_len, int) or payload_len < 0 or payload_len > 10 * 1024 * 1024:
+                                break
+
                             if payload_len > 0:
                                 # Consume payload
                                 remaining = payload_len
@@ -294,6 +297,9 @@ class WakewordActionListener:
                                     pass
 
                             payload_len = msg.get("payload_length", 0)
+                            if not isinstance(payload_len, int) or payload_len < 0 or payload_len > 10 * 1024 * 1024:
+                                return
+
                             if payload_len > 0:
                                 remaining = payload_len
                                 while remaining > 0:
