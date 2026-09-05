@@ -1,0 +1,16 @@
+💡 What
+Added byte bounds (64KB for lines, 1MB for payloads and data) to Wyoming protocol JSON framing reads in `wakeword.py` and `wakeword_bench.py`.
+
+🎯 Why
+Fixes a potential Denial of Service (DoS) vulnerability where unbounded network streams (especially those deliberately missing newlines) could cause the client to allocate arbitrary amounts of memory while buffering.
+
+⚠️ Risk
+Low. Legitimate Wyoming protocol JSON headers and payloads are extremely small (tens of bytes for headers, chunked bytes for audio), so 64KB and 1MB bounds provide significant headroom without causing false positives.
+
+🔭 Verified
+- Ensured logic limits `len(line)`, `data_length`, and `payload_length` appropriately in both files.
+- Ran pytest suite successfully to ensure no regressions in testing.
+- Ran `ruff` over modified files.
+
+📎 Scope
+Modified `linux/blitztext/wakeword.py` and `linux/blitztext/wakeword_bench.py`.
