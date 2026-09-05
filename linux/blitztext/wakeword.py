@@ -103,6 +103,8 @@ class WakewordListener:
                                 if not byte:
                                     break
                                 line += byte
+                                if len(line) > 65536:
+                                    raise ValueError("Line length exceeded 64KB")
                             
                             if not line:
                                 break
@@ -128,6 +130,8 @@ class WakewordListener:
                                     pass
 
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len > 10 * 1024 * 1024:
+                                raise ValueError(f"Payload length {payload_len} exceeded 10MB")
                             if payload_len > 0:
                                 # Consume payload
                                 remaining = payload_len
