@@ -1,0 +1,6 @@
+# Polish Journal
+
+Append critical codebase learnings using the format:
+## YYYY-MM-DD — [Title]
+**Learning:** ...
+**Action:** ...
