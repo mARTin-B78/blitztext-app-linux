@@ -1,0 +1,3 @@
+## 2024-05-28 — [Untrusted Parsing: Wyoming DoS Vulnerability]
+**Learning:** Network protocols that parse frames like newline-separated JSON followed by binary payload blobs are highly susceptible to memory exhaustion (DoS) attacks if lengths are implicitly trusted or lack bounds. In `wakeword.py` and `wakeword_bench.py`, the code used `msg.get("payload_length", 0)` and `sock.recv(1)` in loops without size caps.
+**Action:** Added hard limits of 64KB on incoming JSON headers and 1MB on `data_length` and `payload_length` values, raising a `ValueError` if the bounds are exceeded to abort the malformed parsing attempt safely.
