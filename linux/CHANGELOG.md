@@ -9,6 +9,11 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.62] - 2026-09-07
+
+### Security
+- Fixed command injection vulnerability in `blitztext/talk.py` by removing `shell=True` and chaining `subprocess.Popen` calls directly.
+
 ## [2.03.54] - 2026-06-23
 
 ### Changed
