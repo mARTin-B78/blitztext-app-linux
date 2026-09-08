@@ -130,7 +130,7 @@ def play(cfg, _notify_func):
             stderr=subprocess.DEVNULL
         )
         try:
-            p2 = subprocess.Popen(
+            subprocess.Popen(
                 ['ffplay', '-nodisp', '-autoexit', '-hide_banner', '-i', '-'],
                 stdin=p1.stdout,
                 stdout=subprocess.DEVNULL,
