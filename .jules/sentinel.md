@@ -1,0 +1,3 @@
+## 2025-02-27 — Fix shell=True command injection in talk.py
+**Learning:** The `subprocess.Popen(cmd, shell=True)` call with string formatting can lead to command injection if untrusted data is part of the command string. `shlex.quote` does not protect against all shell escapes and is unnecessary when using `shell=False`.
+**Action:** Refactored `subprocess.Popen` in `blitztext/talk.py` to use a list of arguments and `shell=False`. Replaced the shell pipeline with two separate `subprocess.Popen` calls connected via `subprocess.PIPE` to securely pass the JSON payload to `curl` and then to `ffplay`.
