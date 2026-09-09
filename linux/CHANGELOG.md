@@ -9,6 +9,11 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.62] - 2026-06-25
+
+### Fixed
+- **Command Injection Vulnerability:** Removed a security vulnerability in `talk.py` where a TTS audio playback command was assembled with string formatting and `shell=True`, which could allow arbitrary command execution. This has been refactored to securely pipe standard IO between multiple processes without invoking a shell.
+
 ## [2.03.54] - 2026-06-23
 
 ### Changed
