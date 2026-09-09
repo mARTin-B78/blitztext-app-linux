@@ -1,0 +1,3 @@
+## 2024-10-18 — Sentinel Fix: Command Injection in talk.py
+**Learning:** Found and fixed a shell injection vulnerability in `blitztext/talk.py` where `subprocess.Popen(..., shell=True)` was used with `shlex.quote` for JSON payloads. Constructing a bash pipeline as a string is unsafe because quoting mechanisms are complex and fragile.
+**Action:** Refactored the piped command (`curl | ffplay`) into two discrete `subprocess.Popen` processes connected via `subprocess.PIPE` without `shell=True`. Ensured the first process's stdout is properly closed in the parent process using a `try...finally` block to prevent leaks and deadlocks.
