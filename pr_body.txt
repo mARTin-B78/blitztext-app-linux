@@ -1,0 +1,14 @@
+💡 What
+Added strict maximum bounds (64KB for JSON headers, 1MB for payloads) to network parsing routines in `wakeword.py` and `wakeword_bench.py`.
+
+🎯 Why
+Prevents Denial of Service (DoS) attacks via memory exhaustion if a malicious Wyoming server (or MiTM) sends unbounded streams without a newline delimiter or lies about payload sizes. Addresses the "Untrusted parsing" security checklist item.
+
+⚠️ Risk
+Low. Wyoming JSON headers are typically tiny (a few hundred bytes), and 16kHz audio chunks are fractions of a megabyte. Exceeding 1MB payload legitimately is effectively impossible for this protocol's streaming constraints.
+
+🔬 Verified
+Ran tests and verified the fix correctly breaks out of unbounded loops when thresholds are exceeded.
+
+📎 Scope
+Network socket read loops in `wakeword.py` and `wakeword_bench.py`.
