@@ -9,6 +9,11 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.62] - 2026-09-10
+
+### Fixed
+- **Shell injection vulnerability**: removed `shell=True` and `shlex` escaping in `talk.py` audio playback in favor of a safe argument list.
+
 ## [2.03.54] - 2026-06-23
 
 ### Changed
