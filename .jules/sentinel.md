@@ -1,0 +1,3 @@
+## 2025-02-23 — Fix shell=True command injection in blitztext/talk.py
+ **Learning:** Using shell=True in subprocess calls with external or configuration-derived arguments, like JSON payloads, creates a command injection vulnerability. When chaining commands, it's safer to use separate Popen calls connected by stdout=subprocess.PIPE. Additionally, Popen argument lists handle quoting automatically, meaning manual quoting like shlex.quote() should be removed when converting from shell=True to shell=False.
+ **Action:** Removed shell=True from subprocess.Popen in linux/blitztext/talk.py by splitting the curl and ffplay pipeline into two separate Popen calls connected via PIPE. Also removed shlex.quote() and import shlex.
