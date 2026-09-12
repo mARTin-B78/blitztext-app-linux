@@ -1,10 +1,9 @@
 import json
-import shlex
+import os
+import shutil
 import subprocess
 import time
 
-import shutil
-import os
 
 def _read_clip(primary=False):
     if os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland":
@@ -123,11 +122,16 @@ def play(cfg, _notify_func):
             pass
     
     payload_json = json.dumps(payload)
-    safe_payload = shlex.quote(payload_json)
     
-    cmd = f"curl -s -N {url} -H 'Content-Type: application/json' -d {safe_payload} | ffplay -nodisp -autoexit -hide_banner -i - > /dev/null 2>&1"
+    cmd1 = ["curl", "-s", "-N", url, "-H", "Content-Type: application/json", "-d", payload_json]
+    cmd2 = ["ffplay", "-nodisp", "-autoexit", "-hide_banner", "-i", "-"]
     
     try:
-        subprocess.Popen(cmd, shell=True)
+        p1 = subprocess.Popen(cmd1, stdout=subprocess.PIPE)
+        try:
+            subprocess.Popen(cmd2, stdin=p1.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        finally:
+            if p1.stdout:
+                p1.stdout.close()
     except Exception as e:
         _notify_func("Blitztalk Error", f"Error playing audio: {e}", "critical")
