@@ -9,6 +9,11 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.62] - 2024-05-18
+
+### Security
+- Fixed shell injection vulnerability in `talk.py` TTS player by removing `shell=True` and migrating to safe `subprocess` argument lists.
+
 ## [2.03.54] - 2026-06-23
 
 ### Changed
