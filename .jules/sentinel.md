@@ -1,0 +1,3 @@
+## 2024-09-14 — [Fix shell injection vulnerability in TTS playback]
+**Learning:** Using `shell=True` with `subprocess.Popen` exposes the application to command injection, especially when variables (even properly quoted ones) are used in shell pipelines. Passing a string command to `shell=True` means the shell parses it.
+**Action:** Replaced `shell=True` pipeline with two chained `subprocess.Popen` calls connected via `subprocess.PIPE` using list arguments.
