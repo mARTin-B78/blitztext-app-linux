@@ -20,7 +20,8 @@ from urllib.parse import urlparse
 
 from . import logbuffer
 
-MUTE_FILE = "/tmp/wake_muted"
+_runtime_dir = os.environ.get("XDG_RUNTIME_DIR", os.path.join(os.path.expanduser("~"), ".cache"))
+MUTE_FILE = os.path.join(_runtime_dir, "blitztext_wake_muted")
 
 
 def is_muted() -> bool:
