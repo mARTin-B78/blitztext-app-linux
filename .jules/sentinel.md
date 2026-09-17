@@ -1,0 +1,3 @@
+## 2024-05-15 — [Fix unbounded read DoS in network parsing]
+**Learning:** Found an unbounded read DoS vulnerability in network parsing loops handling Wyoming protocol messages where `payload_length` and `data_length` in JSON headers were not validated, leading to potential endless reads/memory issues if an attacker sent an extremely large size.
+**Action:** Added explicit bounds checking to `payload_length` and `data_length` fields in `linux/blitztext/wakeword.py` and `linux/blitztext/wakeword_bench.py` before doing network reads. Exceeding lengths now throw a `ValueError` to cleanly break the connection loop.
