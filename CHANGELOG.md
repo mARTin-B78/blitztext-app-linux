@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.03.62] - 2026-07-07
+
+### Fixed
+- Fixed command injection vulnerability in TTS playback by securely chaining `curl` and `ffplay` subprocesses.
+
 ## [2.03.61] - 2026-07-07
 
 ### Added
