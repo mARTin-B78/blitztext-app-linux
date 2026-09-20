@@ -128,6 +128,8 @@ class WakewordListener:
                                     pass
 
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len > 1048576:
+                                raise ValueError(f"Payload too large: {payload_len} bytes")
                             if payload_len > 0:
                                 # Consume payload
                                 remaining = payload_len
@@ -294,6 +296,8 @@ class WakewordActionListener:
                                     pass
 
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len > 1048576:
+                                raise ValueError(f"Payload too large: {payload_len} bytes")
                             if payload_len > 0:
                                 remaining = payload_len
                                 while remaining > 0:
