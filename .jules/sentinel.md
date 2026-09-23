@@ -1,0 +1,3 @@
+## 2024-09-23 — Unbounded Read DoS in Network Parsing Loops
+**Learning:** When reading binary payloads over a socket based on a user-controlled `payload_length` or `data_length` header, parsing loops must assert maximum upper bounds (e.g., 1MB) and raise an exception like `ValueError` to break the loop and prevent Denial of Service due to uncontrolled memory allocation or stalling the read loop. Simply returning early is insufficient as it causes callers to block indefinitely.
+**Action:** Enforced an absolute 1MB limit on `payload_length` and `data_length` fields during JSON message parsing across `wakeword.py`, `wakeword_bench.py`, and `gtksettings.py` by raising a `ValueError` if the upper bound is exceeded.
