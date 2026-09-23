@@ -1,10 +1,10 @@
 import json
+import os
 import shlex
+import shutil
 import subprocess
 import time
 
-import shutil
-import os
 
 def _read_clip(primary=False):
     if os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland":

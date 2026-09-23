@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import os
-import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import tomllib
 
 from .llm import LLMEngine
 from .stt import STTEngine
@@ -177,7 +178,7 @@ class Config:
             return e
         return self.stt_engines[0] if self.stt_engines else STTEngine("Local", "local", model=self.model)
 
-    def stt_engine_for(self, workflow: "Workflow | None") -> STTEngine:
+    def stt_engine_for(self, workflow: Workflow | None) -> STTEngine:
         """The STT engine a preset should use: its own override, else active."""
         if workflow and workflow.stt_engine:
             e = next((x for x in self.stt_engines if x.name == workflow.stt_engine), None)
@@ -194,13 +195,13 @@ class Config:
             return self.llm_engines[0]
         return LLMEngine("Default", self.base_url, self.rewrite_model, self.api_key_env, self.temperature)
 
-    def preset_by_name(self, name: str | None) -> "Workflow | None":
+    def preset_by_name(self, name: str | None) -> Workflow | None:
         if not name:
             return None
         return next((w for w in self.workflows if w.name == name), None)
 
     @property
-    def default_preset(self) -> "Workflow | None":
+    def default_preset(self) -> Workflow | None:
         named = self.preset_by_name(self.routing_default)
         if named:
             return named
