@@ -2,7 +2,7 @@
 
 ## Environment / Verify
 Mirror CI (`.github/workflows/ci.yml`):
-```bash
+\`\`\`bash
 sudo apt-get update && sudo apt-get install -y \
   python3-gi gir1.2-gtk-3.0 gir1.2-appindicator3-0.1 \
   libgirepository1.0-dev libcairo2-dev python3-dev
@@ -11,7 +11,7 @@ pip install -r requirements.txt && pip install pytest ruff PyGObject
 python -m py_compile blitztext/*.py     # syntax gate
 PYTHONPATH=. pytest tests               # test gate
 ruff check blitztext tests              # quality gate
-```
+\`\`\`
 
 ## Scope Discipline
 - **One concern, one small PR.** No drive-by refactors (the repo's CONTRIBUTING says so explicitly).
@@ -24,14 +24,14 @@ ruff check blitztext tests              # quality gate
 ## Journal
 Read `.jules/<name>.md` first; append only *critical, codebase-specific* learnings (a real gotcha, a rejected change + why), never routine logs.
 Format:
-```
+\`\`\`
 ## YYYY-MM-DD — [Title]
 **Learning:** …
 **Action:** …
-```
+\`\`\`
 
 ## PR Format
-```
+\`\`\`
 Title: "<emoji> <Name>: <one-line change>"
 Body:
   💡 What  — the change
@@ -39,4 +39,4 @@ Body:
   ⚠️ Risk  — blast radius + how mitigated
   🔬 Verified — exact commands run (py_compile / pytest / ruff / build-deb)
   📎 Scope — files touched; confirm no unrelated changes
-```
+\`\`\`
