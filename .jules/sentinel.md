@@ -1,0 +1,3 @@
+## 2026-09-24 — Unbounded read DoS on wakeword network payloads
+ **Learning:** The wakeword network parsing loops lacked bounds checking for `data_length` and `payload_length` fields extracted from unauthenticated JSON messages, which could lead to an unbounded `recv()` loop and excessive memory allocation, causing a Denial of Service (DoS) vulnerability.
+ **Action:** Added bounds checking to enforce a 1MB limit on both `data_length` and `payload_length` fields across `wakeword.py` and `wakeword_bench.py`, explicitly raising a `ValueError` to break the loop/connection if the limit is exceeded.
