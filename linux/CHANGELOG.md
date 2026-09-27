@@ -9,6 +9,12 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.62] - 2026-06-08
+
+### Fixed
+- **Sentinel**: Bounded `payload_length` in Wyoming protocol parsers (`wakeword.py` and `wakeword_bench.py`) to prevent DoS via unbounded reads.
+
+
 ## [2.03.54] - 2026-06-23
 
 ### Changed
