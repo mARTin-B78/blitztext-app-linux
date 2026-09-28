@@ -2760,6 +2760,8 @@ class SettingsDialog:
                         line += chunk
                     info = json.loads(line.decode("utf-8"))
                     payload_len = info.get("data_length", info.get("payload_length", 0))
+                    if not isinstance(payload_len, int) or payload_len < 0 or payload_len > 1048576:
+                        raise ValueError("Invalid payload length")
                     payload = b""
                     while len(payload) < payload_len:
                         chunk = s.recv(payload_len - len(payload))
