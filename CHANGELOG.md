@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.03.62] - 2026-09-29
+
+### Fixed
+- **Security:** Addressed a command injection vulnerability in TTS playback by replacing `shell=True` with a direct `subprocess.Popen` array invocation.
+
 ## [2.03.61] - 2026-07-07
 
 ### Added
