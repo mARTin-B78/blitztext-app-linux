@@ -120,7 +120,8 @@ def wakeword_phrase(model: str) -> str:
     """
     name = model.rsplit("/", 1)[-1]
     for ext in (".tflite", ".onnx"):
-        name = name.removesuffix(ext)
+        if name.endswith(ext):
+            name = name[: -len(ext)]
     name = name.replace("_", " ").replace("-", " ")
     # Drop a trailing token that is just a version like "v0.1".
     parts = [p for p in name.split() if not (p.startswith("v") and any(c.isdigit() for c in p))]
@@ -291,7 +292,7 @@ def count_detections(uri: str, model: str, pcm: bytes, *, settle: float = 1.5,
         while time.time() < deadline:
             try:
                 data = sock.recv(4096)
-            except TimeoutError:
+            except socket.timeout:
                 break  # server quiet for `settle`s → done
             if not data:
                 break
