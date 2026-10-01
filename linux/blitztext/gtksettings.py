@@ -26,13 +26,30 @@ import gi
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
-from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402  # type: ignore[import-untyped]
+from gi.repository import (  # type: ignore[import-untyped]
+    Gdk,
+    GLib,
+    Gtk,
+    Pango,
+)
 
-from . import __version__, audio, autostart, benchmark, llm, logbuffer, stt, wakeword_bench  # noqa: E402
-from .config import Config, save  # noqa: E402
-from .llm import LLMEngine  # noqa: E402
-from .stt import STTEngine  # noqa: E402
-from .config import Workflow  # noqa: E402
+from . import (
+    __version__,
+    audio,
+    autostart,
+    benchmark,
+    llm,
+    logbuffer,
+    stt,
+    wakeword_bench,
+)
+from .config import (
+    Config,
+    Workflow,
+    save,
+)
+from .llm import LLMEngine
+from .stt import STTEngine
 
 RESP_SAVE = 1
 RESP_SAVE_RESTART = 2
@@ -1427,7 +1444,7 @@ class SettingsDialog:
                     if voices:
                         _fill_combo(self.talk_voice, voices, current_voice)
                 GLib.idle_add(apply)
-            except Exception as e:
+            except Exception:
                 pass
         import threading
         threading.Thread(target=work, daemon=True).start()
@@ -2745,7 +2762,8 @@ class SettingsDialog:
         """Background fetch of model list from wyoming server."""
         uri = self.ww_uri.get_text().strip()  # capture on GTK thread
         def work():
-            import socket, json
+            import json
+            import socket
             from urllib.parse import urlparse
             parsed = urlparse(uri)
             host = parsed.hostname or "127.0.0.1"
@@ -2823,8 +2841,9 @@ class SettingsDialog:
         status_lbl.set_markup("<span foreground='#888'>Listening…</span>")
 
         def work():
-            from .wakeword import WakewordListener
             import time
+
+            from .wakeword import WakewordListener
             detected = False
             def on_detect():
                 nonlocal detected
@@ -3523,7 +3542,8 @@ class SettingsDialog:
                         "Recall %", "False fires", "Time (s)"]
 
     def _wwbench_csv_text(self) -> str:
-        import csv, io
+        import csv
+        import io
         out = io.StringIO()
         w = csv.writer(out)
         w.writerow(self._WWB_CSV_HEADERS)
@@ -3834,7 +3854,6 @@ class SettingsDialog:
         if getattr(self, "_talk_idx", -1) >= 0:
             self._talk_commit()
         if resp == RESP_SAVE:
-            import copy
             snap_before = self._cfg_snapshot(self.cfg)
             if self._collect():
                 save(self.cfg)

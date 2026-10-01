@@ -1,5 +1,5 @@
-import pytest
-from blitztext.quality import too_quiet, is_hallucination, clean
+from blitztext.quality import clean, is_hallucination, too_quiet
+
 
 def test_too_quiet():
     # Below duration

@@ -6,7 +6,7 @@ content delta to the callback, and still return the complete text.
 
 import io
 
-import blitztext.llm as llm
+from blitztext import llm
 
 
 def test_read_stream_accumulates_and_calls_back():
