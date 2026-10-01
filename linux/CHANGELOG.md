@@ -9,6 +9,13 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.62] - 2026-10-01
+
+### Fixed
+- **Local Whisper transcription failed** with `open() got an unexpected keyword
+  argument 'metadata_errors'`: PyAV 19 removed it, faster-whisper 1.2.1 still
+  passes it. Pinned `av<19`.
+
 ## [2.03.54] - 2026-06-23
 
 ### Changed
