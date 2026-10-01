@@ -10,7 +10,8 @@ Bare modifier taps are risky (a stray Ctrl+C could misfire), so stop/send/cancel
 are only armed *while recording* and only after the start modifiers are released.
 A push-to-talk variant records while the start chord is held and stops on release.
 
-Uses a low-level pynput Listener (press/release), not GlobalHotKeys.
+Uses a low-level pynput Listener (press/release), not GlobalHotKeys; on Wayland
+the evdev Listener instead (see evdevkeys).
 """
 
 from __future__ import annotations
@@ -18,6 +19,8 @@ from __future__ import annotations
 
 def _token(key) -> str | None:
     """Canonical token for a pynput key: ctrl/alt/cmd/shift/esc or a char."""
+    if isinstance(key, str):  # evdev listener already delivers tokens
+        return key
     from pynput import keyboard
 
     if isinstance(key, keyboard.Key):
@@ -50,7 +53,12 @@ class ModifierScheme:
 
     # -- listener lifecycle ---------------------------------------------------
     def start_listener(self):
-        from pynput import keyboard
+        from . import evdevkeys
+
+        if evdevkeys.use_evdev():
+            keyboard = evdevkeys
+        else:
+            from pynput import keyboard
 
         self._listener = keyboard.Listener(on_press=self._on_press, on_release=self._on_release)
         self._listener.start()

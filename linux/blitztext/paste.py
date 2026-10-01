@@ -15,6 +15,8 @@ import shutil
 import subprocess
 import time
 
+from . import xkbtype
+
 
 def _is_wayland() -> bool:
     return os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
@@ -47,6 +49,31 @@ def _focus(window_id: str | None) -> None:
 # single clipboard paste instead, which is instantaneous.
 _TYPE_THRESHOLD = 300
 
+# ydotool >= 1.0 takes raw evdev keycodes (<code>:<1=down|0=up>), not key names.
+_YDOTOOL_CTRL_V = ["29:1", "47:1", "47:0", "29:0"]
+_YDOTOOL_ENTER = ["28:1", "28:0"]
+_YDOTOOL_MAX_ARGS = 400  # keystroke args per ydotool call
+
+
+def _ydotool_type_layout(text: str, type_delay_ms: int) -> bool:
+    """Type via raw keycodes for the active layout; False if it can't be resolved."""
+    layout = xkbtype.gnome_layout() if xkbtype.available() else None
+    keys = xkbtype.keystrokes(text, *layout) if layout else None
+    if not keys:
+        return False
+    # -d is per key event (down and up), so halve it to keep ~type_delay_ms per char.
+    delay = str(max(1, type_delay_ms // 2))
+    batch: list[str] = []
+    for key in [*keys, xkbtype.PAUSE]:
+        if key != xkbtype.PAUSE:
+            batch.append(key)
+            if len(batch) < _YDOTOOL_MAX_ARGS:
+                continue
+        if batch:
+            subprocess.run(["ydotool", "key", "-d", delay, *batch], check=False)
+            batch = []
+    return True
+
 
 def deliver(text: str, *, mode: str = "type", window_id: str | None = None, type_delay_ms: int = 4) -> None:
     if not text:
@@ -66,17 +93,24 @@ def deliver(text: str, *, mode: str = "type", window_id: str | None = None, type
     # xdotool type at 12ms/char for a 15 000-char code block takes ~3 minutes and
     # sends so many synchronous X11 events that the server's per-client buffer
     # overflows, freezing the entire X11 session.
-    if mode == "type" and (len(text) > _TYPE_THRESHOLD or "\n" in text):
-        if _set_clipboard(text):
-            mode = "paste"
-        # If clipboard isn't available we fall through to xdotool type as before.
+    # `ydotool type` sends US-layout keycodes (no umlauts, wrong z/y/punctuation
+    # elsewhere) and wtype is unavailable on GNOME: type layout-aware keycodes,
+    # else paste. No X11 flood risk here, so long/multi-line text is typed too.
+    ydotool_only = wayland and not shutil.which("wtype")
+    if mode == "type" and ydotool_only and _ydotool_type_layout(text, type_delay_ms):
+        return
+    if mode == "type" and (ydotool_only or len(text) > _TYPE_THRESHOLD or "\n" in text):
+        # If clipboard isn't available we fall through to typing as before.
+        mode = "paste" if _set_clipboard(text) else mode
+    elif mode == "paste" and not _set_clipboard(text):
+        mode = "type"
 
-    if mode == "paste" and _set_clipboard(text):
+    if mode == "paste":
         if wayland:
             if shutil.which("wtype"):
                 subprocess.run(["wtype", "-M", "ctrl", "v", "-m", "ctrl"], check=False)
             else:
-                subprocess.run(["ydotool", "key", "ctrl+v"], check=False)
+                subprocess.run(["ydotool", "key", *_YDOTOOL_CTRL_V], check=False)
         else:
             subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+v"], check=False)
         return
@@ -105,7 +139,7 @@ def press_enter(window_id: str | None = None) -> None:
         if shutil.which("wtype"):
             subprocess.run(["wtype", "-k", "Return"], check=False)
         else:
-            subprocess.run(["ydotool", "key", "enter"], check=False)
+            subprocess.run(["ydotool", "key", *_YDOTOOL_ENTER], check=False)
     else:
         subprocess.run(["xdotool", "key", "--clearmodifiers", "Return"], check=False)
 

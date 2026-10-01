@@ -9,6 +9,35 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.64] - 2026-10-01
+
+### Fixed
+- **Wayland: umlauts and punctuation typed wrong** (`ydotool type` sends
+  US-layout keycodes). Without `wtype` (unavailable on GNOME), text is now
+  typed as raw keycodes resolved for the active GNOME layout (libxkbcommon), so
+  the clipboard is untouched. Characters missing from the layout use IBus
+  unicode entry (Ctrl+Shift+U); line breaks are Shift+Enter. Clipboard paste
+  only if the layout can't be determined.
+- **Wayland: Ctrl+V / Enter not sent** — ydotool ≥ 1.0 needs raw keycodes,
+  not `ctrl+v` / `enter`.
+- **Wayland: overlay stole focus** from the target window. GTK now runs under
+  XWayland, where the overlay is focus-free (`GDK_BACKEND` overrides).
+
+## [2.03.63] - 2026-10-01
+
+### Fixed
+- **Hotkeys on Wayland** (e.g. Ubuntu 26.04 / GNOME 50, which has no Xorg
+  session): pynput only saw keys in XWayland windows. On Wayland, keys are now
+  read from `/dev/input` via evdev (requires the `input` group). Keys injected
+  by `ydotool` are ignored. Letters map by physical (US) position.
+
+## [2.03.62] - 2026-10-01
+
+### Fixed
+- **Local Whisper transcription failed** with `open() got an unexpected keyword
+  argument 'metadata_errors'`: PyAV 19 removed it, faster-whisper 1.2.1 still
+  passes it. Pinned `av<19`.
+
 ## [2.03.54] - 2026-06-23
 
 ### Changed

@@ -499,6 +499,8 @@ systemctl --user enable --now blitztext
 ## Current Limitations
 
 - **Wayland support** requires `wtype` or `ydotool`. Wayland security prevents global window focus manipulation, so text is delivered to whatever window is active when delivery occurs.
+- **Wayland typing without `wtype`** (GNOME): keycodes are resolved for the active GNOME layout via libxkbcommon and sent with `ydotool`. Characters not on the layout use IBus unicode entry (Ctrl+Shift+U), which apps without IBus don't support. Line breaks are typed as Shift+Enter.
+- **Wayland hotkeys** read the keyboard via `/dev/input` (evdev), so your user must be in the `input` group (`sudo usermod -aG input $USER`, then log out/in). Letter keys map by physical US position (e.g. `z`/`y` swapped on QWERTZ).
 - **No automated tests yet.** Contributions welcome (routing, quality gate, config parsing are all highly testable).
 - **Realtime streaming** requires a compatible Riva/NIM server.
 - **The on-screen overlay is X11-only** (it positions a window at the cursor and reads the pointer/caret); on Wayland it falls back to a fixed screen corner. Caret-accurate anchoring further needs the focused app to expose its text caret over AT-SPI accessibility — otherwise it follows the mouse pointer.

@@ -31,6 +31,28 @@ def _acquire_single_instance() -> bool:
     return True
 
 
+def _prefer_xwayland() -> None:
+    """Run GTK under XWayland on Wayland sessions.
+
+    Native Wayland GTK maps the overlay's POPUP as a toplevel and GNOME ignores
+    accept_focus=False, so it stole focus from the dictation target. Under X11
+    it stays an override-redirect, focus-free window. GDK_BACKEND still wins.
+    """
+    import os
+
+    if (os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
+            and os.environ.get("DISPLAY") and "GDK_BACKEND" not in os.environ):
+        # Importing Gtk opens the display; unset afterwards so child processes
+        # (wl-copy, players, browsers) keep the native backend.
+        os.environ["GDK_BACKEND"] = "x11"
+        import gi
+
+        gi.require_version("Gtk", "3.0")
+        from gi.repository import Gtk  # noqa: F401
+
+        del os.environ["GDK_BACKEND"]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="blitztext", description="Native dictation for Linux.")
     parser.add_argument("--version", action="version", version=f"blitztext {__version__}")
@@ -61,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if cmd in ("gui", "tray"):
         ensure_default(CONFIG_PATH)
+        _prefer_xwayland()
         from .gtkui import run_gui
 
         return run_gui(tray_mode=(cmd == "tray"))

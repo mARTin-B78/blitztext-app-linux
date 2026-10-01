@@ -887,8 +887,13 @@ class Daemon:
         return mapping
 
     def start_hotkeys(self):
-        """Register global hotkeys non-blocking; returns the pynput listener."""
-        from pynput import keyboard  # type: ignore
+        """Register global hotkeys non-blocking; returns the listener."""
+        from . import evdevkeys
+
+        if evdevkeys.use_evdev():
+            keyboard = evdevkeys
+        else:
+            from pynput import keyboard  # type: ignore
 
         self._listener = keyboard.GlobalHotKeys(self._build_mapping())
         self._listener.start()

@@ -1,5 +1,7 @@
 faster-whisper>=1.0
+av<19  # av 19 dropped open(metadata_errors=), still used by faster-whisper 1.2.1
 pynput>=1.7
+evdev>=1.6; sys_platform == "linux"  # Wayland hotkeys (pynput only sees XWayland)
 tomli-w>=1.0
 sounddevice>=0.4
 websockets>=12.0
