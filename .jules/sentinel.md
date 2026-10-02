@@ -1,0 +1,3 @@
+## 2024-10-02 — Fix DoS from unbounded network reads in wakeword parsing
+**Learning:** Discovered that the network parsing loops in `wakeword.py`, `gtksettings.py`, and `wakeword_bench.py` unconditionally trust the `payload_length` and `data_length` fields from remote servers. This can lead to unbounded reads (DoS) if a malicious or faulty server sends a large length.
+**Action:** Added a 10MB maximum length bounds check before reading the payloads. If exceeded, a `ValueError` is raised, breaking the loop and avoiding blocking reads or memory exhaustion. Added a specific security regression test.
