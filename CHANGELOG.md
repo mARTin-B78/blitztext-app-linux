@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.03.71] - 2026-10-03
+
+### Fixed
+- **TTS cut off mid-sentence on long text:** "Speak selected text" now splits
+  the selection at paragraph/sentence ends (about 1200 characters per chunk)
+  and plays the chunks one after another, so no single request reaches the
+  server's generation limit. Sentences are never split.
+
 ## [2.03.65] - 2026-08-20
 
 ### Fixed

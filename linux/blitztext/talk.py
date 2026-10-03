@@ -1,4 +1,5 @@
 import json
+import re
 import shlex
 import subprocess
 import time
@@ -91,6 +92,29 @@ def get_selected_text():
         
     return text
 
+# ~1200 chars is ~80 s of speech: far below the server's max-seq-len cap (2048 tokens ~170 s).
+MAX_CHUNK_CHARS = 1200
+
+def split_text(text, limit=MAX_CHUNK_CHARS):
+    """Split at paragraph/sentence ends only, packing up to `limit` chars.
+    A single sentence longer than `limit` stays whole (never cut mid-sentence)."""
+    chunks, cur = [], ""
+    for para in re.split(r"\n\s*\n", text):
+        for sent in re.split(r"(?<=[.!?…])\s+", para.strip()):
+            if not sent:
+                continue
+            if cur and len(cur) + len(sent) + 1 > limit:
+                chunks.append(cur)
+                cur = ""
+            cur = f"{cur} {sent}" if cur else sent
+        # paragraph end: flush if the next paragraph would likely not fit anyway
+        if len(cur) > limit * 0.7:
+            chunks.append(cur)
+            cur = ""
+    if cur:
+        chunks.append(cur)
+    return chunks
+
 def play(cfg, _notify_func):
     text = get_selected_text()
     if not text:
@@ -112,26 +136,27 @@ def play(cfg, _notify_func):
         else:
             url = url.rstrip("/") + "/v1/audio/speech"
 
-    payload = {
-        "model": engine.model or "tts-1",
-        "voice": cfg.talk_voice,
-        "input": text
-    }
-    
+    extra = {}
     if hasattr(engine, "extra_payload") and engine.extra_payload:
         try:
             extra = json.loads(engine.extra_payload)
-            if isinstance(extra, dict):
-                payload.update(extra)
+            if not isinstance(extra, dict):
+                extra = {}
         except Exception:
-            pass
-    
-    payload_json = json.dumps(payload)
-    safe_payload = shlex.quote(payload_json)
-    
-    cmd = f"curl -s -N {url} -H 'Content-Type: application/json' -d {safe_payload} | ffplay -nodisp -autoexit -hide_banner -i - > /dev/null 2>&1"
-    
-    try:
-        subprocess.Popen(cmd, shell=True)
-    except Exception as e:
-        _notify_func("Blitztalk Error", f"Error playing audio: {e}", "critical")
+            extra = {}
+
+    # play() already runs in its own thread, so chunks are played sequentially here
+    for chunk in split_text(text):
+        payload = {
+            "model": engine.model or "tts-1",
+            "voice": cfg.talk_voice,
+            "input": chunk
+        }
+        payload.update(extra)
+        safe_payload = shlex.quote(json.dumps(payload))
+        cmd = f"curl -s -N {url} -H 'Content-Type: application/json' -d {safe_payload} | ffplay -nodisp -autoexit -hide_banner -i - > /dev/null 2>&1"
+        try:
+            subprocess.run(cmd, shell=True)
+        except Exception as e:
+            _notify_func("Blitztalk Error", f"Error playing audio: {e}", "critical")
+            return
