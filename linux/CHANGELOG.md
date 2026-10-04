@@ -9,6 +9,11 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.72] - 2024-05-18
+
+### Fixed
+- **Security:** Fix unbounded read loop vulnerability in wakeword payload parsing.
+
 ## [2.03.71] - 2026-10-03
 
 ### Fixed
