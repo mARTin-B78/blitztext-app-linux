@@ -9,6 +9,11 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.72] - 2026-10-06
+
+### Security
+- **Unbounded payload length DoS:** Enforced a 1MB limit on `data_length` and `payload_length` values sent by external wakeword servers, preventing unbounded reads or resource exhaustion.
+
 ## [2.03.71] - 2026-10-03
 
 ### Fixed

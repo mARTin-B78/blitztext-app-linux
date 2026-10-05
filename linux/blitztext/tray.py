@@ -92,8 +92,9 @@ class Tray:
             talk_item = Gtk.MenuItem(label=lbl)
             
             def _play_talk():
-                from . import talk
                 import threading
+
+                from . import talk
                 threading.Thread(target=talk.play, args=(self.app.cfg, self.app.daemon._dnotify), daemon=True).start()
                 
             talk_item.connect("activate", lambda _i: _play_talk())
