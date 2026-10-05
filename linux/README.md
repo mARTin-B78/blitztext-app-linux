@@ -202,7 +202,7 @@ Three front-ends, same engine layer (STT engines + global hotkeys + xdotool typi
 
 ```bash
 # optional: only needed for the "rewrite" workflows
-export OPENAI_API_KEY=sk-...
+export MY_OPENAI_KEY=sk-...
 
 .venv/bin/python -m blitztext tray   # system-tray menu (macOS-menu-bar-like, default)
 .venv/bin/python -m blitztext gui    # control-panel window
@@ -285,7 +285,7 @@ compute_type = "auto"
 ```toml
 [rewrite]
 base_url = "https://api.openai.com/v1"   # or e.g. http://localhost:8000/v1 for vLLM/llama-swap
-api_key_env = "OPENAI_API_KEY"
+api_key_env = "MY_OPENAI_KEY"
 model = "gpt-4o-mini"
 ```
 
