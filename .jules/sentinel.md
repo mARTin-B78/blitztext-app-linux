@@ -1,0 +1,3 @@
+## 2024-05-18 — Unbounded network reads DoS in parsing loop
+**Learning:** Found unbounded network read vulnerability in `wakeword.py`, `wakeword_bench.py`, and `gtksettings.py`. These files parse lengths (`data_length`, `payload_length`) from network sockets and loop `sock.recv()` until that length is met. A malicious or misbehaving server could send an enormous length, causing an out-of-memory DoS or infinite blocking. Simply returning early from a parsing helper without draining the socket or terminating the connection will cause the caller to block indefinitely or loop endlessly.
+**Action:** Applied boundary bounds check to break loops and raise `ValueError` on length > 1048576 (1MB).
