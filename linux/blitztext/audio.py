@@ -10,10 +10,10 @@ default input on some PipeWire systems).
 
 from __future__ import annotations
 
-import math
 import shutil
 import subprocess
 import threading
+import math
 from array import array
 
 from .recorder import detect_recorder
