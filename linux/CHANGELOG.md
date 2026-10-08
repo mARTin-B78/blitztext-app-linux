@@ -9,6 +9,11 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.72] - 2026-10-18
+
+### Fixed
+- **Security:** Added strict bounds checking for wakeword JSON/binary lengths to prevent unbounded memory read / DoS vulnerabilities.
+
 ## [2.03.71] - 2026-10-03
 
 ### Fixed
