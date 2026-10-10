@@ -257,7 +257,7 @@ def _wav_to_pcm16k(wav_bytes: bytes) -> bytes:
     if ch > 1:
         a = a.reshape(-1, ch).mean(axis=1)
     if rate != _TARGET_RATE and a.size:
-        new_len = round(a.size * _TARGET_RATE / rate)
+        new_len = int(round(a.size * _TARGET_RATE / rate))
         if new_len > 0:
             xp = np.linspace(0.0, 1.0, num=a.size, endpoint=False)
             x = np.linspace(0.0, 1.0, num=new_len, endpoint=False)
