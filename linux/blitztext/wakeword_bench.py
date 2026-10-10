@@ -120,8 +120,7 @@ def wakeword_phrase(model: str) -> str:
     """
     name = model.rsplit("/", 1)[-1]
     for ext in (".tflite", ".onnx"):
-        if name.endswith(ext):
-            name = name[: -len(ext)]
+        name = name.removesuffix(ext)
     name = name.replace("_", " ").replace("-", " ")
     # Drop a trailing token that is just a version like "v0.1".
     parts = [p for p in name.split() if not (p.startswith("v") and any(c.isdigit() for c in p))]
@@ -292,7 +291,7 @@ def count_detections(uri: str, model: str, pcm: bytes, *, settle: float = 1.5,
         while time.time() < deadline:
             try:
                 data = sock.recv(4096)
-            except socket.timeout:
+            except TimeoutError:
                 break  # server quiet for `settle`s → done
             if not data:
                 break
@@ -322,6 +321,8 @@ def _drain_detections(buf: bytes) -> tuple[bytes, int]:
         except (ValueError, UnicodeDecodeError):
             return rest, found
         plen = msg.get("payload_length", 0) or 0
+        if plen > 5 * 1024 * 1024:
+            raise ValueError(f"Payload length {plen} exceeds maximum allowed size")
         if len(rest) < plen:
             return buf, found  # payload not fully arrived yet; wait for more
         rest = rest[plen:]

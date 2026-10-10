@@ -35,7 +35,7 @@ def set_muted(muted: bool) -> None:
             open(MUTE_FILE, "a").close()
         elif os.path.exists(MUTE_FILE):
             os.remove(MUTE_FILE)
-    except OSError as e:  # noqa: BLE001 - mute is best-effort, never crash
+    except OSError as e:
         logbuffer.log(f"[wakeword] Could not update mute flag: {e}", level="WARNING")
 
 
@@ -128,6 +128,8 @@ class WakewordListener:
                                     pass
 
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len > 5 * 1024 * 1024:
+                                raise ValueError(f"Payload length {payload_len} too large")
                             if payload_len > 0:
                                 # Consume payload
                                 remaining = payload_len
@@ -140,7 +142,7 @@ class WakewordListener:
                             if msg.get("type") == "detection":
                                 name = msg.get("data", {}).get("name", "")
                                 self._handle_detection(name)
-                        except socket.timeout:
+                        except TimeoutError:
                             pass
                 except Exception:
                     pass
@@ -211,7 +213,7 @@ class WakewordActionListener:
         # ``feed``). Avoids a second/competing ``pw-record`` on the same device,
         # which made real-time cancel/send/stop detection flaky during recording.
         self.external_audio = external_audio
-        self._audio_q: "queue.Queue[bytes | None]" = queue.Queue()
+        self._audio_q: queue.Queue[bytes | None] = queue.Queue()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -294,6 +296,8 @@ class WakewordActionListener:
                                     pass
 
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len > 5 * 1024 * 1024:
+                                raise ValueError(f"Payload length {payload_len} too large")
                             if payload_len > 0:
                                 remaining = payload_len
                                 while remaining > 0:
@@ -319,7 +323,7 @@ class WakewordActionListener:
                                         f"[wakeword-action] '{name}' detected — firing action")
                                     self._stop_event.set()   # one-shot: stop after first fire
                                     cb()
-                        except socket.timeout:
+                        except TimeoutError:
                             pass
                 except Exception:
                     pass

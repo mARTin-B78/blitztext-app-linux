@@ -31,7 +31,7 @@ jobs:
             echo "No patterns loaded from $patterns_file"
             exit 1
           fi
-          if grep -RInE \
+          if grep -RInP \
               --exclude-dir=.git \
               --exclude=secret-scan-patterns.txt \
               "$pattern" .; then
