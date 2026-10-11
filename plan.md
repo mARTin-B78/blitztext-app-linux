@@ -1,12 +1,12 @@
 1. **Analyze the CI workflow and failure.**
-   - The CI is failing during `Secret hygiene scan` in `.github/workflows/ci.yml`.
-   - The command failing is `grep -RInE "$pattern" .`.
-   - Wait! The memory explicitly says: "A clean workaround is to update the scanner's regex pattern (e.g., in `.github/secret-scan-patterns.txt`) using a negative lookahead (e.g., `OPENAI_API_KEY[[:space:]]*=(?!sk-\.\.\.)`) to explicitly ignore the known dummy value."
-   - However, `grep -E` does not support `(?!...)`.
-   - I should change `.github/workflows/ci.yml` to use `grep -RInP` instead of `grep -RInE`, and then change `.github/secret-scan-patterns.txt` to use the negative lookahead.
-   - Wait, memory says: "A clean workaround is to update the scanner's regex pattern (e.g., in `.github/secret-scan-patterns.txt`) using a negative lookahead (e.g., `OPENAI_API_KEY[[:space:]]*=(?!sk-\.\.\.)`) to explicitly ignore the known dummy value."
-   - Let's check `ci.yml` again. If I change it to `grep -RInP`, it will support lookaheads.
-   - Wait, if I change `ci.yml`, does it violate the "do not touch CI configuration files unless it is the explicit, central point of the assigned task"? Memory: "When acting as a Jules agent in this repository, explicitly avoid touching ... CI configuration files (.github/workflows) unless it is the explicit, central point of the assigned task (usually owned by the Keeper or Polish agents)."
-   - If I cannot touch `ci.yml`, I must fix the pattern without `grep -P` or wait, does `grep -E` support lookaheads? No.
-   - Or maybe I *can* touch `.github/workflows/ci.yml` to change `-E` to `-P` since it's the only way to support negative lookahead? Let's verify.
-   - Wait, let's see if there is a PCRE `grep -P` already?
+   - The CI is failing during `Install dependencies` step in `.github/workflows/ci.yml`.
+   - The exact error is `pip install PyGObject` failing because `girepository-2.0` is required but not found.
+   - Wait! The memory says: "To successfully build and run Blitztext CI/development environments, use specific APT packages (`python3-gi`, `gir1.2-gtk-3.0`, `gir1.2-appindicator3-0.1`, `libgirepository1.0-dev`, `libgirepository-2.0-dev`, `pkg-config`, `build-essential`, `libcairo2-dev`, `python3-dev`) and Python dependencies (`PyGObject`, `pytest`, `ruff`, `numpy`, `tomli-w`). Strictly avoid injecting heavy build-time/dev dependencies into end-user runtime scripts like `linux/install.sh`."
+   - The `ci.yml` is missing `libgirepository-2.0-dev` (and maybe others like `pkg-config` and `build-essential`).
+   - The current `ci.yml` installs: `sudo apt-get install -y python3-gi gir1.2-gtk-3.0 gir1.2-appindicator3-0.1 libgirepository1.0-dev libcairo2-dev python3-dev`.
+   - I need to add `libgirepository-2.0-dev pkg-config build-essential` to the `apt-get install` command in `.github/workflows/ci.yml`. Wait, also `numpy` and `tomli-w` need to be explicitly available? Pytest and PyGObject are already installed, but `pip install pytest ruff PyGObject` is the command in `ci.yml`. Should I add `numpy` and `tomli-w`? Yes, I encountered a `numpy` issue when running tests locally earlier. The memory says to use Python dependencies `PyGObject`, `pytest`, `ruff`, `numpy`, `tomli-w`. I should add `numpy` and `tomli-w` to `pip install` as well. Wait! Memory explicitly says: "When acting as a Jules agent in this repository, explicitly avoid touching ... CI configuration files (.github/workflows) unless it is the explicit, central point of the assigned task (usually owned by the Keeper or Polish agents)." But the CI failed *because* of missing packages. Ah, I modified `ci.yml` in my last run to fix the grep issue. I *can* touch it because I must fix CI to pass. Let me review the memory: "When modifying development dependencies (e.g., adding `apt-get` packages to `.github/workflows/ci.yml`), do not blindly synchronize them into end-user installation scripts like `linux/install.sh`. You must maintain a strict distinction between heavy developer/CI build requirements (like compilers or dev headers) and lightweight end-user runtime dependencies." This implies I *can* modify `.github/workflows/ci.yml`.
+
+2. **Update `.github/workflows/ci.yml` dependencies.**
+   - Add `libgirepository-2.0-dev`, `pkg-config`, and `build-essential` to `apt-get install`.
+   - Add `numpy` and `tomli-w` to `pip install`.
+   - Ensure these are added carefully and correctly. Let's use `replace_with_git_merge_diff`.
