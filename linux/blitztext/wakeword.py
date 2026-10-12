@@ -285,6 +285,8 @@ class WakewordActionListener:
                             # — without it the detection name is blank, so the
                             # wrong action (or none) fires.
                             data_len = msg.get("data_length", 0)
+                            if data_len > 10 * 1024 * 1024:
+                                raise ValueError(f"data_length too large: {data_len}")
                             if data_len > 0:
                                 data_bytes = b""
                                 while len(data_bytes) < data_len:
