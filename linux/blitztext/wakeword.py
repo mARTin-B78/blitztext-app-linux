@@ -115,6 +115,8 @@ class WakewordListener:
                             # always do. Read it so the wake-word name is
                             # available and the stream stays in sync.
                             data_len = msg.get("data_length", 0)
+                            if data_len > 10 * 1024 * 1024:
+                                raise ValueError(f"data_length too large: {data_len}")
                             if data_len > 0:
                                 data_bytes = b""
                                 while len(data_bytes) < data_len:
@@ -128,6 +130,8 @@ class WakewordListener:
                                     pass
 
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len > 10 * 1024 * 1024:
+                                raise ValueError(f"payload_length too large: {payload_len}")
                             if payload_len > 0:
                                 # Consume payload
                                 remaining = payload_len
@@ -294,6 +298,8 @@ class WakewordActionListener:
                                     pass
 
                             payload_len = msg.get("payload_length", 0)
+                            if payload_len > 10 * 1024 * 1024:
+                                raise ValueError(f"payload_length too large: {payload_len}")
                             if payload_len > 0:
                                 remaining = payload_len
                                 while remaining > 0:
