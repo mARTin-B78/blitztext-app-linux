@@ -66,3 +66,10 @@ def test_bench_result_metrics():
     assert abs(r.recall - 2 / 3) < 1e-9
     assert r.false_fires == 1
     assert r.recall_by_voice() == {"nova": (1, 2), "onyx": (1, 1)}
+
+
+def test_drain_detections_dos_bounded():
+    import pytest
+    chunk = (json.dumps({"type": "audio-chunk", "payload_length": 10485761}) + "\n").encode() + b"a"
+    with pytest.raises(ValueError):
+        wb._drain_detections(chunk)
