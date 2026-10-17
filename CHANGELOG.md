@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.03.72] - 2026-10-04
+
+### Fixed
+- **Security:** Addressed a potential command injection vulnerability in TTS playback by eliminating shell evaluation of URLs.
+
 ## [2.03.71] - 2026-10-03
 
 ### Fixed

@@ -1,0 +1,1 @@
+## 2024-10-24 — [Command Injection in TTS via shell=True] \n **Learning:** Using `shell=True` with user-provided configuration values like URLs in `subprocess` calls enables command injection. \n **Action:** Replaced `curl | ffplay` shell pipeline in `blitztext.talk` with explicit `subprocess.Popen` chaining, passing the JSON payload via `stdin`.

@@ -1,11 +1,10 @@
 import json
+import os
 import re
-import shlex
+import shutil
 import subprocess
 import time
 
-import shutil
-import os
 
 def _read_clip(primary=False):
     if os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland":
@@ -153,10 +152,27 @@ def play(cfg, _notify_func):
             "input": chunk
         }
         payload.update(extra)
-        safe_payload = shlex.quote(json.dumps(payload))
-        cmd = f"curl -s -N {url} -H 'Content-Type: application/json' -d {safe_payload} | ffplay -nodisp -autoexit -hide_banner -i - > /dev/null 2>&1"
+        payload_bytes = json.dumps(payload).encode("utf-8")
         try:
-            subprocess.run(cmd, shell=True)
+            p_curl = subprocess.Popen(
+                ["curl", "-s", "-N", url, "-H", "Content-Type: application/json", "-d", "@-"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL
+            )
+            p_ffplay = subprocess.Popen(
+                ["ffplay", "-nodisp", "-autoexit", "-hide_banner", "-i", "-"],
+                stdin=p_curl.stdout,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            if p_curl.stdout:
+                p_curl.stdout.close()  # Allow curl to receive SIGPIPE if ffplay exits
+            if p_curl.stdin:
+                p_curl.stdin.write(payload_bytes)
+                p_curl.stdin.close()
+            p_curl.wait()
+            p_ffplay.wait()
         except Exception as e:
             _notify_func("Blitztalk Error", f"Error playing audio: {e}", "critical")
             return
