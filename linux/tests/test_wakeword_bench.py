@@ -44,6 +44,9 @@ def test_wav_to_pcm_resamples_to_16k_mono():
     assert len(pcm) == 16000 * 2                              # 1.0 s of 16 kHz mono s16le
 
 
+import pytest
+
+
 def test_drain_detections_handles_payloads():
     det = (json.dumps({"type": "detection", "data": {}}) + "\n").encode()
     chunk = (json.dumps({"type": "audio-chunk", "payload_length": 3}) + "\n").encode() + b"abc"
@@ -52,6 +55,12 @@ def test_drain_detections_handles_payloads():
     held = (json.dumps({"type": "x", "payload_length": 10}) + "\n").encode() + b"ab"
     rest2, n2 = wb._drain_detections(held)
     assert n2 == 0 and rest2 == held                          # incomplete payload held, not misparsed
+
+
+def test_drain_detections_rejects_huge_payloads():
+    chunk = (json.dumps({"type": "audio-chunk", "payload_length": 20_000_000}) + "\n").encode()
+    with pytest.raises(ValueError, match="too large"):
+        wb._drain_detections(chunk)
 
 
 def test_bench_result_metrics():
