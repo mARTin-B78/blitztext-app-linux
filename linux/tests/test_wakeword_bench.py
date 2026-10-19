@@ -44,6 +44,13 @@ def test_wav_to_pcm_resamples_to_16k_mono():
     assert len(pcm) == 16000 * 2                              # 1.0 s of 16 kHz mono s16le
 
 
+import pytest
+
+def test_drain_detections_bounds_checks():
+    malicious = (json.dumps({"type": "audio-chunk", "payload_length": 1048577}) + "\n").encode()
+    with pytest.raises(ValueError, match="too large"):
+        wb._drain_detections(malicious)
+
 def test_drain_detections_handles_payloads():
     det = (json.dumps({"type": "detection", "data": {}}) + "\n").encode()
     chunk = (json.dumps({"type": "audio-chunk", "payload_length": 3}) + "\n").encode() + b"abc"
