@@ -10,9 +10,9 @@ from __future__ import annotations
 import signal
 import sys
 import threading
-import typing
 import traceback
-from typing import Callable
+import typing
+from collections.abc import Callable
 
 from . import llm, quality, stt
 from .config import Config, Workflow
@@ -20,9 +20,9 @@ from .llm import LLMError
 from .logbuffer import log
 from .notify import notify
 from .paste import active_window_id, deliver
-from .streaming import RivaRealtimeStreamer
 from .recorder import Recording, detect_recorder
 from .routing import is_cancel, match_send, route
+from .streaming import RivaRealtimeStreamer
 from .transcribe import Transcriber
 
 # status_cb(state, workflow_name, message)
@@ -294,8 +294,10 @@ class Daemon:
     def _vad_start(self) -> None:
         self._vad_stop()
         import time
-        from . import audio
+
         from gi.repository import GLib  # type: ignore
+
+        from . import audio
         
         self._vad_started_at = time.time()
         self._vad_last_speech = time.time()
@@ -775,7 +777,6 @@ class Daemon:
                         return True
 
                     try:
-                        from gi.repository import GLib  # type: ignore as _GLib
                         # idle_add ensures timeout_add runs on the GTK main thread —
                         # calling timeout_add from a background thread is not safe.
                         _GLib.idle_add(lambda: _GLib.timeout_add(400, _pulse_thinking) and False)
@@ -879,6 +880,7 @@ class Daemon:
             
         if getattr(self.cfg, "talk_hotkey", ""):
             import threading
+
             from . import talk
             def run_talk():
                 threading.Thread(target=talk.play, args=(self.cfg, self._dnotify), daemon=True).start()

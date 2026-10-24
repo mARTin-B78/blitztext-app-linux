@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.03.72] - 2026-10-18
+
+### Security
+- **Command Injection:** Fixed a vulnerability in TTS playback (`talk.py`) where URL arguments could be executed in the shell by switching from `subprocess.run(shell=True)` to proper chained `subprocess.Popen` with argument lists.
+
 ## [2.03.71] - 2026-10-03
 
 ### Fixed
