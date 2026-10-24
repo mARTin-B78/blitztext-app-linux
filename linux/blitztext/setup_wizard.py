@@ -12,14 +12,12 @@ Pages in brackets are shown conditionally depending on the trigger choice.
 from __future__ import annotations
 
 import threading
-from pathlib import Path
 
 import gi
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
-from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
-
+from gi.repository import Gdk, GLib, Gtk, Pango
 
 # ---------------------------------------------------------------------------
 # Tiny style helpers
