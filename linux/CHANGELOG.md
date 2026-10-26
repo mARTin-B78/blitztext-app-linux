@@ -9,6 +9,11 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.72] - 2026-10-04
+
+### Security
+- **Wyoming protocol handler DoS:** Added bounds checking for `payload_length` and `data_length` in wake word network loops to prevent unbound memory reads and DoS.
+
 ## [2.03.71] - 2026-10-03
 
 ### Fixed
