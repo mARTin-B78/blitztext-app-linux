@@ -11,6 +11,7 @@ import random
 import wave
 
 import numpy as np
+import pytest
 
 from blitztext import wakeword_bench as wb
 
@@ -42,6 +43,12 @@ def test_wav_to_pcm_resamples_to_16k_mono():
         w.writeframes(np.repeat(tone, 2).tobytes())
     pcm = wb._wav_to_pcm16k(buf.getvalue())
     assert len(pcm) == 16000 * 2                              # 1.0 s of 16 kHz mono s16le
+
+
+def test_drain_detections_rejects_huge_payloads():
+    huge_chunk = (json.dumps({"type": "audio-chunk", "payload_length": 20 * 1024 * 1024}) + "\n").encode() + b"abc"
+    with pytest.raises(ValueError, match="too large"):
+        wb._drain_detections(huge_chunk)
 
 
 def test_drain_detections_handles_payloads():
