@@ -27,13 +27,25 @@ import gi
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
-from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402  # type: ignore[import-untyped]
+from gi.repository import Gdk, GLib, Gtk, Pango  # type: ignore[import-untyped]
 
-from . import __version__, audio, autostart, benchmark, llm, logbuffer, stt, wakeword_bench  # noqa: E402
-from .config import Config, save  # noqa: E402
-from .llm import LLMEngine  # noqa: E402
-from .stt import STTEngine  # noqa: E402
-from .config import Workflow  # noqa: E402
+from . import (
+    __version__,
+    audio,
+    autostart,
+    benchmark,
+    llm,
+    logbuffer,
+    stt,
+    wakeword_bench,
+)
+from .config import (
+    Config,
+    Workflow,
+    save,
+)
+from .llm import LLMEngine
+from .stt import STTEngine
 
 RESP_SAVE = 1
 RESP_SAVE_RESTART = 2
@@ -773,7 +785,7 @@ def _md_panel(text: str, height: int = 420) -> Gtk.ScrolledWindow:
             _insert_inline(raw[2:], end, t_quote)
         elif re.match(r'^-{3,}$', raw):
             buf.insert_with_tags(end, "─" * 64, t_hr)
-        elif raw.startswith("- ") or raw.startswith("* "):
+        elif raw.startswith(("- ", "* ")):
             buf.insert(end, "  • ")
             end = buf.get_end_iter()
             _insert_inline(raw[2:], end)
@@ -1006,7 +1018,7 @@ class SettingsDialog:
         _reg(None,          "About",                "help-about-symbolic",               self._build_about)
 
         # Show the first page on open
-        first_page = list(self._pending_pages)[0]
+        first_page = next(iter(self._pending_pages))
         self._show_page(first_page)
 
         self._bind_entry = None
@@ -1510,7 +1522,7 @@ class SettingsDialog:
                     if voices:
                         _fill_combo(self.talk_voice, voices, current_voice)
                 GLib.idle_add(apply)
-            except Exception as e:
+            except Exception:
                 pass
         import threading
         threading.Thread(target=work, daemon=True).start()
@@ -2494,7 +2506,7 @@ class SettingsDialog:
         dlg.destroy()
 
     def _ww_sources_ui(self, page: Gtk.Box) -> None:
-        from .config import WakewordSource, DEFAULT_WW_SOURCES
+        from .config import DEFAULT_WW_SOURCES, WakewordSource
 
         _infobox(page,
             "Online catalogs the Wakeword page's Download… dialog searches.\n\n"
@@ -2690,8 +2702,8 @@ class SettingsDialog:
         picking a result there opens its page in the browser first, then lets
         the user point the dialog at the file they downloaded.
         """
-        from . import wwdownload as WD
         from . import owwlibrary as OL
+        from . import wwdownload as WD
 
         gh_sources = [s for s in self.cfg.wakeword_sources
                      if s.enabled and s.kind == "github_collection"]
@@ -3126,7 +3138,7 @@ class SettingsDialog:
                             Gtk.show_uri_on_window(dlg, url, Gdk.CURRENT_TIME)
                         state["oww_stage"] = 1
                         n = len(sels)
-                        act_btn.set_label(f"Pick Downloaded File(s) & Install"
+                        act_btn.set_label("Pick Downloaded File(s) & Install"
                                          + (f" ({n})" if n > 1 else ""))
                         status.set_text(f"Opened {n} page(s) in your browser — sign in "
                                         "and download the model(s), then click again "
@@ -3202,7 +3214,8 @@ class SettingsDialog:
         """Background fetch of model list from wyoming server."""
         uri = self.ww_uri.get_text().strip()  # capture on GTK thread
         def work():
-            import socket, json
+            import json
+            import socket
             from urllib.parse import urlparse
             parsed = urlparse(uri)
             host = parsed.hostname or "127.0.0.1"
@@ -3291,10 +3304,11 @@ class SettingsDialog:
         download .onnx copy" option) — built-in models baked into the
         wyoming-openwakeword docker image aren't reachable from the host.
         """
-        from . import wwdownload as WD
-        from . import wwlivetest as LT
         import time
         from collections import deque
+
+        from . import wwdownload as WD
+        from . import wwlivetest as LT
 
         det = WD.autodetect_for_uri(self.ww_uri.get_text())
         path = LT.find_model_file(det["model_dir"], model_name)
@@ -3515,8 +3529,9 @@ class SettingsDialog:
         status_lbl.set_markup("<span foreground='#888'>Listening…</span>")
 
         def work():
-            from .wakeword import WakewordListener
             import time
+
+            from .wakeword import WakewordListener
             detected = False
             def on_detect():
                 nonlocal detected
@@ -4215,7 +4230,8 @@ class SettingsDialog:
                         "Recall %", "False fires", "Time (s)"]
 
     def _wwbench_csv_text(self) -> str:
-        import csv, io
+        import csv
+        import io
         out = io.StringIO()
         w = csv.writer(out)
         w.writerow(self._WWB_CSV_HEADERS)
@@ -4527,7 +4543,6 @@ class SettingsDialog:
         if getattr(self, "_talk_idx", -1) >= 0:
             self._talk_commit()
         if resp == RESP_SAVE:
-            import copy
             snap_before = self._cfg_snapshot(self.cfg)
             if self._collect():
                 save(self.cfg)

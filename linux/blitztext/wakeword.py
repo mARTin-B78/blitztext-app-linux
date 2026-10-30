@@ -35,7 +35,7 @@ def set_muted(muted: bool) -> None:
             open(MUTE_FILE, "a").close()
         elif os.path.exists(MUTE_FILE):
             os.remove(MUTE_FILE)
-    except OSError as e:  # noqa: BLE001 - mute is best-effort, never crash
+    except OSError as e:
         logbuffer.log(f"[wakeword] Could not update mute flag: {e}", level="WARNING")
 
 
@@ -115,6 +115,10 @@ class WakewordListener:
                             # always do. Read it so the wake-word name is
                             # available and the stream stays in sync.
                             data_len = msg.get("data_length", 0)
+                            payload_len = msg.get("payload_length", 0)
+                            if not (0 <= data_len <= 1048576) or not (0 <= payload_len <= 1048576):
+                                raise ValueError("payload or data length out of bounds")
+
                             if data_len > 0:
                                 data_bytes = b""
                                 while len(data_bytes) < data_len:
@@ -140,7 +144,7 @@ class WakewordListener:
                             if msg.get("type") == "detection":
                                 name = msg.get("data", {}).get("name", "")
                                 self._handle_detection(name)
-                        except socket.timeout:
+                        except TimeoutError:
                             pass
                 except Exception:
                     pass
@@ -211,7 +215,7 @@ class WakewordActionListener:
         # ``feed``). Avoids a second/competing ``pw-record`` on the same device,
         # which made real-time cancel/send/stop detection flaky during recording.
         self.external_audio = external_audio
-        self._audio_q: "queue.Queue[bytes | None]" = queue.Queue()
+        self._audio_q: queue.Queue[bytes | None] = queue.Queue()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -281,6 +285,10 @@ class WakewordActionListener:
                             # — without it the detection name is blank, so the
                             # wrong action (or none) fires.
                             data_len = msg.get("data_length", 0)
+                            payload_len = msg.get("payload_length", 0)
+                            if not (0 <= data_len <= 1048576) or not (0 <= payload_len <= 1048576):
+                                raise ValueError("payload or data length out of bounds")
+
                             if data_len > 0:
                                 data_bytes = b""
                                 while len(data_bytes) < data_len:
@@ -319,7 +327,7 @@ class WakewordActionListener:
                                         f"[wakeword-action] '{name}' detected — firing action")
                                     self._stop_event.set()   # one-shot: stop after first fire
                                     cb()
-                        except socket.timeout:
+                        except TimeoutError:
                             pass
                 except Exception:
                     pass
