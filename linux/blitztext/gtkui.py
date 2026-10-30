@@ -9,6 +9,7 @@ hacks). Status updates from worker threads are marshalled with GLib.idle_add.
 from __future__ import annotations
 
 import os
+import sys
 import threading
 from pathlib import Path
 
@@ -16,11 +17,11 @@ import gi
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
-from gi.repository import Gdk, GLib, Gtk
+from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
-from . import __version__
-from .config import Config, load, save
-from .daemon import Daemon
+from . import __version__  # noqa: E402
+from .config import Config, load, save  # noqa: E402
+from .daemon import Daemon  # noqa: E402
 
 ICON_PATHS = [
     "/usr/share/icons/hicolor/256x256/apps/blitztext.png",

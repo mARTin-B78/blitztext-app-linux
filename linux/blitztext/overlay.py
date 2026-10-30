@@ -27,9 +27,9 @@ import gi
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 gi.require_version("PangoCairo", "1.0")
-from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo
+from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 
-from . import caret
+from . import caret  # noqa: E402
 
 # Layout constants (logical px).
 _WIDTH = 360
@@ -383,7 +383,7 @@ class Overlay:
         w = _WIDTH
         body_top = _TAIL_H if self._tail_up else 0
         body_h = self._height - _TAIL_H
-        body_top + body_h
+        body_bottom = body_top + body_h
 
         # Bubble + tail as one path, so the fill/stroke wrap the tail cleanly.
         self._bubble_path(cr, 0, body_top, w, body_h)

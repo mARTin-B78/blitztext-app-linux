@@ -61,7 +61,9 @@ def is_hallucination(text: str, duration: float) -> bool:
     norm = _norm(text)
     if not norm:
         return True
-    return bool(duration <= 2.5 and norm in _HALLUCINATIONS)
+    if duration <= 2.5 and norm in _HALLUCINATIONS:
+        return True
+    return False
 
 
 def clean(text: str, *, strip_trailing_punctuation: bool = False) -> str:

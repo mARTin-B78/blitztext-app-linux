@@ -17,9 +17,9 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Callable
 
 from .stt import STTEngine
 
@@ -156,7 +156,7 @@ class RivaRealtimeStreamer:
                 await send_task
                 try:
                     await asyncio.wait_for(recv_task, timeout=8.0)
-                except TimeoutError:
+                except asyncio.TimeoutError:
                     recv_task.cancel()
         finally:
             await websocket.close()
@@ -247,7 +247,7 @@ class RivaRealtimeStreamer:
         while True:
             try:
                 raw = await asyncio.wait_for(websocket.recv(), timeout=1.0)
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 continue
             event = json.loads(raw)
             kind = event.get("type", "")

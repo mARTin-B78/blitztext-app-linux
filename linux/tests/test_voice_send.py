@@ -5,7 +5,7 @@ stripped from the transcript before the rest is delivered and submitted.
 """
 
 import blitztext.daemon as dm
-from blitztext import paste
+import blitztext.paste as paste
 from blitztext.config import Config, Workflow
 from blitztext.daemon import Daemon
 from blitztext.routing import match_send

@@ -22,8 +22,8 @@ Everything is stdlib (urllib + subprocess) so no extra dependency is pulled in.
 """
 from __future__ import annotations
 
-import json
 import re
+import json
 import subprocess
 import urllib.parse
 import urllib.request

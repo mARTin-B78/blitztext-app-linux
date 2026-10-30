@@ -1,7 +1,6 @@
+import pytest
 from dataclasses import dataclass
-
-from blitztext.routing import _strip_span, normalize, route
-
+from blitztext.routing import route, normalize, _strip_span
 
 @dataclass
 class DummyPreset:
