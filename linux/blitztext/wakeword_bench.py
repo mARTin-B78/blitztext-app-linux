@@ -120,8 +120,7 @@ def wakeword_phrase(model: str) -> str:
     """
     name = model.rsplit("/", 1)[-1]
     for ext in (".tflite", ".onnx"):
-        if name.endswith(ext):
-            name = name[: -len(ext)]
+        name = name.removesuffix(ext)
     name = name.replace("_", " ").replace("-", " ")
     # Drop a trailing token that is just a version like "v0.1".
     parts = [p for p in name.split() if not (p.startswith("v") and any(c.isdigit() for c in p))]
@@ -258,7 +257,7 @@ def _wav_to_pcm16k(wav_bytes: bytes) -> bytes:
     if ch > 1:
         a = a.reshape(-1, ch).mean(axis=1)
     if rate != _TARGET_RATE and a.size:
-        new_len = int(round(a.size * _TARGET_RATE / rate))
+        new_len = round(a.size * _TARGET_RATE / rate)
         if new_len > 0:
             xp = np.linspace(0.0, 1.0, num=a.size, endpoint=False)
             x = np.linspace(0.0, 1.0, num=new_len, endpoint=False)
@@ -292,7 +291,7 @@ def count_detections(uri: str, model: str, pcm: bytes, *, settle: float = 1.5,
         while time.time() < deadline:
             try:
                 data = sock.recv(4096)
-            except socket.timeout:
+            except TimeoutError:
                 break  # server quiet for `settle`s → done
             if not data:
                 break
@@ -321,10 +320,15 @@ def _drain_detections(buf: bytes) -> tuple[bytes, int]:
             msg = json.loads(line.decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             return rest, found
+
+        dlen = msg.get("data_length", 0) or 0
         plen = msg.get("payload_length", 0) or 0
-        if len(rest) < plen:
+        if not (0 <= dlen <= 1048576) or not (0 <= plen <= 1048576):
+            raise ValueError(f"lengths out of bounds: data={dlen}, payload={plen}")
+
+        if len(rest) < dlen + plen:
             return buf, found  # payload not fully arrived yet; wait for more
-        rest = rest[plen:]
+        rest = rest[dlen + plen:]
         if msg.get("type") == "detection":
             found += 1
         buf = rest
