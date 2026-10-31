@@ -9,6 +9,11 @@ The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
 
 ## [Unreleased]
 
+## [2.03.72] - 2026-10-07
+
+### Security
+- Fix DoS vulnerability from unbounded network lengths in Wyoming protocol
+
 ## [2.03.71] - 2026-10-03
 
 ### Fixed
