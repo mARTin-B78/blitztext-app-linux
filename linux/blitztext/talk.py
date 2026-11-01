@@ -1,11 +1,14 @@
 import json
 import re
-import shlex
 import subprocess
 import time
+import urllib.error
+import urllib.request
 
 import shutil
 import os
+
+from . import tts
 
 def _read_clip(primary=False):
     if os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland":
@@ -129,12 +132,12 @@ def play(cfg, _notify_func):
         _notify_func("Blitztalk Error", "No TTS engine configured.", "critical")
         return
         
-    url = engine.url
-    if not url.endswith("/audio/speech"):
-        if url.endswith("/v1"):
-            url = url + "/audio/speech"
-        else:
-            url = url.rstrip("/") + "/v1/audio/speech"
+    try:
+        url = tts.base_url(engine.url) + "/audio/speech"
+        headers = {"Content-Type": "application/json", **tts.auth_headers(engine.api_key_env, engine.url)}
+    except RuntimeError as exc:
+        _notify_func("Blitztalk Error", str(exc), "critical")
+        return
 
     extra = {}
     if hasattr(engine, "extra_payload") and engine.extra_payload:
@@ -153,10 +156,25 @@ def play(cfg, _notify_func):
             "input": chunk
         }
         payload.update(extra)
-        safe_payload = shlex.quote(json.dumps(payload))
-        cmd = f"curl -s -N {url} -H 'Content-Type: application/json' -d {safe_payload} | ffplay -nodisp -autoexit -hide_banner -i - > /dev/null 2>&1"
+        req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers)
         try:
-            subprocess.run(cmd, shell=True)
+            with tts.urlopen(req, timeout=60) as response:
+                player = subprocess.Popen(
+                    ["ffplay", "-nodisp", "-autoexit", "-hide_banner", "-i", "-"],
+                    stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                try:
+                    with player.stdin:
+                        shutil.copyfileobj(response, player.stdin)
+                    if player.wait(timeout=120):
+                        raise RuntimeError("Audio player failed.")
+                finally:
+                    if player.poll() is None:
+                        player.kill()
+                        player.wait()
+        except urllib.error.HTTPError as exc:
+            _notify_func("Blitztalk Error", f"TTS HTTP {exc.code}. Check the endpoint and API key.", "critical")
+            return
         except Exception as e:
-            _notify_func("Blitztalk Error", f"Error playing audio: {e}", "critical")
+            _notify_func("Blitztalk Error", "Audio request or playback failed. Check the endpoint and audio player.", "critical")
             return

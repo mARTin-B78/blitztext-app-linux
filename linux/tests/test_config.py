@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import patch
 import tempfile
 import os
 from pathlib import Path
@@ -91,3 +92,50 @@ def test_default_preset_honours_explicit_name():
     ]
     cfg.routing_default = "Improve text"
     assert cfg.default_preset.name == "Improve text"
+
+
+def test_legacy_tts_fallbacks_are_removed_without_persisting_keys(tmp_path, caplog):
+    from blitztext import tts
+    path = tmp_path / "config.toml"
+    path.write_text('[[workflow]]\nname = "Test"\nmode = "transcribe"\nhotkey = ""\n'
+                    '[tts]\napi_key_env = "synthetic-legacy-benchmark-key"\n'
+                    '[[talk_engine]]\nname = "Old"\napi_key_env = "synthetic-legacy-talk-key"\n'
+                    '[[talk_engine]]\nname = "Valid"\napi_key_env = "VALID_TTS_KEY"\n')
+    url = "http://example.invalid:8023/v1"
+    with patch.dict(tts._session_keys, {}, clear=True):
+        tts.set_session_key(url, "synthetic-session-key")
+        cfg = load(path)
+        assert cfg.tts_api_key_env == ""
+        assert [engine.api_key_env for engine in cfg.talk_engines] == ["", "VALID_TTS_KEY"]
+        assert "masked API key field" in caplog.text
+        assert "synthetic-" not in caplog.text
+        save(cfg, path)
+        assert "synthetic-" not in path.read_text()
+        assert load(path).talk_engines[1].api_key_env == "VALID_TTS_KEY"
+        assert tts.session_key(url) == "synthetic-session-key"
+        # Saving an already-running legacy Config must also avoid reserializing keys.
+        cfg.tts_api_key_env = "synthetic-old-key"
+        cfg.talk_engines[0].api_key_env = "synthetic-old-key"
+        save(cfg, path)
+        assert "synthetic-" not in path.read_text()
+
+
+def test_about_and_deb_use_current_version():
+    from blitztext import __version__
+    root = Path(__file__).parents[1]
+    import tomllib
+    assert __version__ == tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
+    assert 'pyproject.toml' in (root / "packaging/build-deb.sh").read_text()
+    assert 'Version {__version__}' in (root / "blitztext/gtksettings.py").read_text()
+
+
+def test_update_settings_roundtrip(tmp_path):
+    path = tmp_path / "config.toml"
+    cfg = load(path)
+    assert cfg.update_check is True and cfg.update_last_check == 0.0 and cfg.update_skipped_version == ""
+    cfg.update_check = False
+    cfg.update_last_check = 1234.5
+    cfg.update_skipped_version = "2.03.80"
+    save(cfg, path)
+    again = load(path)
+    assert (again.update_check, again.update_last_check, again.update_skipped_version) == (False, 1234.5, "2.03.80")

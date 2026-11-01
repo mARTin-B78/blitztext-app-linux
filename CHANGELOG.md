@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.03.73] - 2026-11-01
+
+### Changed
+- Version bump to test the in-app updater; no functional change.
+- Update check now tells "No update found" / "up to date" apart from "Could not reach GitHub".
+
+## [2.03.72] - 2026-11-01
+
+### Added
+- **Single version source:** `linux/pyproject.toml` is now the only place the version is set; `__version__` and `build-deb.sh` read it, and the build aborts if a git tag at HEAD differs.
+- **In-app updater:** on tray start (at most once a day, can be turned off in
+  Settings > About, "Check for updates automatically") Blitztext asks the GitHub
+  releases API for the latest release. If it is newer, a dialog offers
+  "Update now" / "Remind me later" / "Skip this version". "Update now" downloads
+  `blitztext_<ver>_<arch>.deb`, verifies it against the release's `.sha256`, installs
+  it with `pkexec apt install`, then restarts the tray. Settings > About also has a
+  "Check for updates" button. `build-deb.sh` now writes
+  `dist/blitztext_<ver>_<arch>.deb.sha256` next to the .deb. **Releases must be
+  tagged `v<ver>` (e.g. `v2.03.73`) and attach both the .deb and its .sha256**,
+  otherwise the updater ignores the release.
+
+### Fixed
+- Removed the "API key env (fallback)" field from the LLM and TTS Engines pages
+  (and the benchmark TTS field); only the masked, session-only API key field remains.
+  Saving never fails on it: an `api_key_env` in an old config that is not a valid
+  environment variable name (e.g. a pasted key) is cleared on save, valid names are
+  kept. LLM/TTS requests ignore an invalid name instead of raising.
+
 ## [2.03.71] - 2026-10-03
 
 ### Fixed

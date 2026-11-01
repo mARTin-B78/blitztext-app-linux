@@ -98,12 +98,13 @@ def _api_base(url: str) -> str:
     return urlunparse((p.scheme, p.netloc, path, "", "", ""))
 
 
-def list_models(base_url: str, api_key_env: str = "", timeout: float = 5.0) -> list[str]:
+def list_models(base_url: str, api_key_env: str = "", timeout: float = 5.0, api_key: str = "") -> list[str]:
     """Fetch model ids from an OpenAI-compatible, Ollama-style, or Riva/NIM /models endpoint."""
-    return [m.id for m in list_models_meta(base_url, api_key_env, timeout)]
+    return [m.id for m in list_models_meta(base_url, api_key_env, timeout, api_key)]
 
 
-def list_models_meta(base_url: str, api_key_env: str = "", timeout: float = 5.0) -> list[ModelMeta]:
+def list_models_meta(base_url: str, api_key_env: str = "", timeout: float = 5.0,
+                     api_key: str = "") -> list[ModelMeta]:
     """Like list_models() but returns ModelMeta with language info when available."""
     import os
 
@@ -111,7 +112,7 @@ def list_models_meta(base_url: str, api_key_env: str = "", timeout: float = 5.0)
         return []
     base = _api_base(base_url)
     headers: dict[str, str] = {}
-    key = os.environ.get(api_key_env) if api_key_env else None
+    key = api_key or (os.environ.get(api_key_env) if api_key_env else None)
     if key:
         headers["Authorization"] = f"Bearer {key}"
 

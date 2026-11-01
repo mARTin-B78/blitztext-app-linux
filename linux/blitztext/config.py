@@ -3,15 +3,28 @@
 from __future__ import annotations
 
 import os
+import logging
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .llm import LLMEngine
 from .stt import STTEngine
+from .tts import validate_env_name
 
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "blitztext"
 CONFIG_PATH = CONFIG_DIR / "config.toml"
+
+
+def _tts_fallback(name: str) -> str:
+    """Discard legacy pasted keys; only environment variable names belong on disk."""
+    try:
+        return validate_env_name(name)
+    except RuntimeError:
+        logging.getLogger(__name__).warning(
+            "Cleared an invalid legacy TTS API Key Env fallback. "
+            "Re-enter the key in the masked API key field (session only).")
+        return ""
 
 
 @dataclass
@@ -195,6 +208,10 @@ class Config:
     talk_active: str = ""
     talk_voice: str = "DE_M_Privat_mARTin"
     talk_hotkey: str = "<ctrl>+<alt>+t"
+    # in-app updater (GitHub releases)
+    update_check: bool = True            # contacts GitHub at most once a day
+    update_last_check: float = 0.0       # unix timestamp of the last automatic check
+    update_skipped_version: str = ""     # "Skip this version" choice
 
     @property
     def active_talk(self) -> TTSEngine:
@@ -376,7 +393,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
         wakeword_model_dir=ww.get("model_dir", ""),
         wakeword_model_container=ww.get("model_container", ""),
         tts_url=tts.get("url", "").rstrip("/"),
-        tts_api_key_env=tts.get("api_key_env", ""),
+        tts_api_key_env=_tts_fallback(tts.get("api_key_env", "")),
         tts_model=tts.get("model", ""),
         tts_voices=list(tts.get("voices", ["alloy", "echo", "fable", "onyx", "nova", "shimmer"])),
         bench_wav=data.get("benchmark", {}).get("wav", ""),
@@ -385,6 +402,9 @@ def load(path: Path = CONFIG_PATH) -> Config:
         bench_last=dict(data.get("benchmark", {}).get("last", {})),
         talk_voice=data.get("talk", {}).get("voice", "DE_M_Privat_mARTin"),
         talk_hotkey=data.get("talk", {}).get("hotkey", "<ctrl>+<alt>+t"),
+        update_check=bool(data.get("update", {}).get("check", True)),
+        update_last_check=float(data.get("update", {}).get("last_check", 0.0)),
+        update_skipped_version=str(data.get("update", {}).get("skipped_version", "")),
     )
 
     for entry in data.get("workflow", []):
@@ -487,7 +507,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
             name=e["name"],
             url=e.get("url", "http://localhost:8023/v1").rstrip("/"),
             model=e.get("model", "tts-1"),
-            api_key_env=e.get("api_key_env", ""),
+            api_key_env=_tts_fallback(e.get("api_key_env", "")),
             extra_payload=e.get("extra_payload", '{"app": "Blitztext"}'),
         )
         for e in data.get("talk_engine", [])
@@ -574,7 +594,7 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
         },
         "tts": {
             "url": cfg.tts_url,
-            "api_key_env": cfg.tts_api_key_env,
+            "api_key_env": _tts_fallback(cfg.tts_api_key_env),
             "model": cfg.tts_model,
             "voices": cfg.tts_voices,
         },
@@ -614,8 +634,13 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
             "voice": cfg.talk_voice,
             "hotkey": cfg.talk_hotkey,
         },
+        "update": {
+            "check": cfg.update_check,
+            "last_check": cfg.update_last_check,
+            "skipped_version": cfg.update_skipped_version,
+        },
         "talk_engine": [
-            {"name": e.name, "url": e.url, "model": e.model, "api_key_env": e.api_key_env, "extra_payload": e.extra_payload}
+            {"name": e.name, "url": e.url, "model": e.model, "api_key_env": _tts_fallback(e.api_key_env), "extra_payload": e.extra_payload}
             for e in cfg.talk_engines
         ],
         "workflow": [],

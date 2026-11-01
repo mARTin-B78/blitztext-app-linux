@@ -1,0 +1,6 @@
+# Single source of truth for the app version (read by blitztext/__init__.py
+# and packaging/build-deb.sh). Kept as "2.03.72" (PEP 440 would normalise it
+# to 2.3.72) to match existing tags and changelogs.
+[project]
+name = "blitztext"
+version = "2.03.73"

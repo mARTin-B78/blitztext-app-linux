@@ -29,7 +29,15 @@ class LLMEngine:
 
     @property
     def api_key(self) -> str | None:
-        return os.environ.get(self.api_key_env) if self.api_key_env else None
+        """Session key typed in Settings (in memory, per URL; same store as TTS) first,
+        then the env var named by api_key_env (ignored unless a valid name)."""
+        from . import tts
+        env = tts.clean_env_name(self.api_key_env)
+        key = tts.session_key(self.url) or (os.environ.get(env) if env else None)
+        if key and any(ord(ch) < 33 or ord(ch) > 126 for ch in key):
+            # an invalid header value would otherwise surface the key in a urllib error
+            raise LLMError("The API key contains spaces or invalid characters. Check Settings > LLM Engines.")
+        return key or None
 
 
 class LLMError(RuntimeError):

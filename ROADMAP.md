@@ -17,6 +17,19 @@ This is a preview roadmap, not a promise.
 
 ## Next Useful Work
 
+- [x] Ignore the local `SONARQUBE-LLM-GUIDE.md` instructions file.
+- [x] Add the SonarQube GitHub Actions workflow with full-history checkout,
+  tests, syntax checks, and Quality Gate waiting.
+- [x] Verify the local test suite and Python syntax checks pass.
+- [ ] Create or confirm the SonarQube project and verify the project key is
+  `blitztext-app-linux`.
+- [ ] Configure the GitHub organization variable `SONAR_HOST_URL` with
+  `https://sq.martin-bierschenk.de`.
+- [ ] Add the repository’s Project Analysis Token as the GitHub secret
+  `SONAR_TOKEN`.
+- [ ] Push the workflow to `main` and wait for the GitHub Actions quality job.
+- [ ] Review the SonarQube Quality Gate and open issues after the first scan.
+- [ ] Fix relevant issues in priority order and rerun tests and the scan.
 - Capture and add current Linux screenshots for the control panel, settings, benchmark, and About tab.
 - Improve first-run setup for STT engines, microphones, and output mode.
 - Add a guided realtime STT streaming test that does not type into the active window.

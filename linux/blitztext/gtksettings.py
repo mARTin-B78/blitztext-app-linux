@@ -29,8 +29,8 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402  # type: ignore[import-untyped]
 
-from . import __version__, audio, autostart, benchmark, llm, logbuffer, stt, wakeword_bench  # noqa: E402
-from .config import Config, save  # noqa: E402
+from . import __version__, audio, autostart, benchmark, llm, logbuffer, stt, updater, wakeword_bench  # noqa: E402
+from .config import Config, save, _tts_fallback  # noqa: E402
 from .llm import LLMEngine  # noqa: E402
 from .stt import STTEngine  # noqa: E402
 from .config import Workflow  # noqa: E402
@@ -366,6 +366,19 @@ def _entry(text="", placeholder="") -> Gtk.Entry:
     return e
 
 
+def _tts_session_key_field(parent, url_entry, tooltip=""):
+    from . import tts
+    entry = _entry(tts.session_key(url_entry.get_text()), placeholder="Paste API key (optional)")
+    entry.set_visibility(False)
+    entry.set_input_purpose(Gtk.InputPurpose.PASSWORD)
+    _labeled(parent, "API key (session only)", entry,
+             tooltip=tooltip or "Used immediately for this TTS URL in Talk and Benchmark. Kept only in memory; "
+                                "re-enter after quitting or Save & Restart. Clear to use API Key Env instead.")
+    entry.connect("changed", lambda widget: tts.set_session_key(url_entry.get_text(), widget.get_text()))
+    url_entry.connect("changed", lambda widget: entry.set_text(tts.session_key(widget.get_text())))
+    return entry
+
+
 def _block_scroll(combo: Gtk.ComboBoxText) -> Gtk.ComboBoxText:
     """Prevent accidental value changes from mouse-wheel hover-scrolling."""
     combo.connect("scroll-event", lambda _w, _e: True)
@@ -646,7 +659,7 @@ def _app_paths() -> dict[str, list[Path]]:
     linux_dir = pkg_dir.parent
     repo_dir = linux_dir.parent
     return {
-        "changelog": [linux_dir / "CHANGELOG.md", Path("/opt/blitztext/CHANGELOG.md")],
+        "changelog": [pkg_dir / "CHANGELOG.md", linux_dir / "CHANGELOG.md", Path("/opt/blitztext/CHANGELOG.md")],
         "license": [repo_dir / "LICENSE", Path("/usr/share/doc/blitztext/copyright")],
         "manual": [pkg_dir / "MANUAL.md", repo_dir / "MANUAL.md", Path("/opt/blitztext/MANUAL.md")],
     }
@@ -812,6 +825,9 @@ def _text_panel(text: str, *, monospace: bool = True, height: int = 180) -> Gtk.
 
 class SettingsDialog:
     def __init__(self, parent: Gtk.Window, cfg: Config, daemon=None):
+        cfg.tts_api_key_env = _tts_fallback(cfg.tts_api_key_env)
+        for engine in cfg.talk_engines:
+            engine.api_key_env = _tts_fallback(engine.api_key_env)
         self.cfg = cfg
         self.daemon = daemon
         self._meter = None
@@ -1428,7 +1444,7 @@ class SettingsDialog:
         self.talk_url = _url_field_lb(card, "URL", "http://localhost:8023/v1",
                                       on_reload=self._talk_reload,
                                       tooltip="Base URL for the TTS engine. Click the refresh button to load models & voices.")
-        self.talk_api_key_env = _labeled(card, "API Key Env", _entry(placeholder="OPENAI_API_KEY"), tooltip="Environment variable holding the API key.")
+        self.talk_api_key = _tts_session_key_field(card, self.talk_url)
         self.talk_model = _labeled(card, "Model", _model_combo("tts-1"), tooltip="TTS model ID.")
         self.talk_extra_payload = _labeled(card, "Extra Payload", _entry(placeholder='{"app": "Blitztext"}'), tooltip="Extra JSON payload to merge into the TTS request.")
 
@@ -1455,7 +1471,6 @@ class SettingsDialog:
         e = self.cfg.talk_engines[idx]
         self.talk_name.set_text(e.name)
         self.talk_url.set_text(e.url)
-        self.talk_api_key_env.set_text(e.api_key_env)
         self.talk_extra_payload.set_text(e.extra_payload)
         _fill_combo(self.talk_model, [], e.model)
         _fill_combo(self.talk_voice, [], self.cfg.talk_voice)
@@ -1466,17 +1481,17 @@ class SettingsDialog:
 
         # optionally prepopulate combos in background
         if e.url:
-            self._talk_populate_combos(e.url, e.api_key_env, e.model, self.cfg.talk_voice)
+            self._talk_populate_combos(e.url, e.api_key_env, e.model, self.cfg.talk_voice,
+                                       show_errors=False)
 
-    def _talk_commit(self) -> None:
+    def _talk_commit(self, *, show_errors: bool = True) -> bool:
         idx = self._talk_idx
         if not (0 <= idx < len(self.cfg.talk_engines)):
-            return
+            return True
         e = self.cfg.talk_engines[idx]
         old_name = e.name
         e.name = self.talk_name.get_text().strip() or e.name
         e.url = self.talk_url.get_text().strip()
-        e.api_key_env = self.talk_api_key_env.get_text().strip()
         e.extra_payload = self.talk_extra_payload.get_text().strip()
         e.model = _combo_text(self.talk_model)
         self.cfg.talk_voice = _combo_text(self.talk_voice)
@@ -1486,20 +1501,30 @@ class SettingsDialog:
         self.talk_combo.remove(idx)
         self.talk_combo.insert_text(idx, e.name)
         self.talk_combo.set_active(idx)
+        return True
 
     def _talk_reload(self) -> None:
         url = self.talk_url.get_text().strip().rstrip("/")
-        key = self.talk_api_key_env.get_text().strip()
+        key = self.cfg.talk_engines[self._talk_idx].api_key_env if 0 <= self._talk_idx < len(self.cfg.talk_engines) else ""
         if not url:
             self._error("Enter a URL first.")
             return
         self._talk_populate_combos(url, key, _combo_text(self.talk_model), _combo_text(self.talk_voice))
 
-    def _talk_populate_combos(self, url: str, key_env: str, current_model: str, current_voice: str) -> None:
+    def _talk_populate_combos(self, url: str, key_env: str, current_model: str, current_voice: str,
+                              *, show_errors: bool = True) -> None:
+        from . import tts
+        try:
+            url = tts.base_url(url)
+            tts.auth_headers(key_env, url)
+        except RuntimeError as exc:
+            if show_errors:
+                self._error(f"TTS Engines (talk), engine #{self._talk_idx + 1}: {exc}")
+            return
         def work():
             try:
                 from . import stt, wakeword_bench
-                models = stt.list_models(url, key_env)
+                models = tts.list_models(url, key_env)
                 voices = wakeword_bench.list_voices(url, api_key_env=key_env)
                 voices_set = set(voices)
                 real_models = [m for m in models if m not in voices_set]
@@ -1519,11 +1544,14 @@ class SettingsDialog:
         new = combo.get_active()
         if new < 0 or new == self._talk_idx:
             return
-        self._talk_commit()
+        if not self._talk_commit():
+            self.talk_combo.set_active(self._talk_idx)
+            return
         self._talk_load(new)
 
     def _talk_add(self, _b) -> None:
-        self._talk_commit()
+        if not self._talk_commit():
+            return
         from .config import TTSEngine
         e = TTSEngine(name="New TTS")
         self.cfg.talk_engines.append(e)
@@ -1697,15 +1725,17 @@ class SettingsDialog:
                                          "Cloud service: a remote paid API like OpenAI or Groq.")
         self.llm_url  = _url_field_lb(cfg_card, "Base URL",
                                       "http://localhost:28080/v1  ·  https://api.openai.com/v1",
-                                      lambda: self._populate_models(self.llm_model, self.llm_url.get_text().strip(), self.llm_key.get_text().strip()))
+                                      self._llm_populate)
         self.llm_model = _labeled(cfg_card, "Model", _model_combo("pick after entering URL"),
                                   tooltip="Which language model to use for rewriting. Press ⟳ on the URL field to fetch available models.")
-        self.llm_key  = _labeled(cfg_card, "API key env", _entry(placeholder="e.g. OPENAI_API_KEY   (blank for local)"),
-                                 tooltip="Name of the environment variable holding your API key. Leave blank for local servers.")
+        self.llm_secret = _tts_session_key_field(
+            cfg_card, self.llm_url,
+            tooltip="Used immediately for this LLM URL. Kept only in memory; re-enter after quitting or "
+                    "Save & Restart.")
         self.llm_temp = _labeled(cfg_card, "Temperature", _entry(placeholder="0.3"),
                                  tooltip="How creative the rewrite is, 0.0–1.0. 0.3 is a good default.")
         self.llm_url.connect("changed", lambda _e: self._schedule_models("llm"))
-        self.llm_key.connect("changed", lambda _e: self._schedule_models("llm"))
+        self.llm_secret.connect("changed", lambda _e: self._schedule_models("llm"))
         self._llm_load(self.llm_combo.get_active())
         return box
 
@@ -1861,10 +1891,19 @@ class SettingsDialog:
         self.llm_name.set_text(e.name)
         self.llm_type.set_active(next((i for i, (k, _) in enumerate(_LLM_TYPES) if k == e.type), 0))
         self.llm_url.set_text(e.url)
-        self.llm_key.set_text(e.api_key_env); self.llm_temp.set_text(str(e.temperature))
-        _fill_combo(self.llm_model, [], e.model)
-        self._populate_models(self.llm_model, e.url, e.api_key_env)
+        self.llm_temp.set_text(str(e.temperature))
         self._llm_idx = idx
+        _fill_combo(self.llm_model, [], e.model)
+        self._llm_populate()
+
+    def _llm_env(self) -> str:
+        i = self._llm_idx
+        return self.cfg.llm_engines[i].api_key_env if 0 <= i < len(self.cfg.llm_engines) else ""
+
+    def _llm_populate(self) -> None:
+        from . import tts
+        url = self.llm_url.get_text().strip()
+        self._populate_models(self.llm_model, url, self._llm_env(), tts.session_key(url))
 
     def _llm_commit(self) -> None:
         idx = self._llm_idx
@@ -1876,7 +1915,6 @@ class SettingsDialog:
         e.type = _type_key(self.llm_type, _LLM_TYPES, "cloud")
         e.url = self.llm_url.get_text().strip().rstrip("/")
         e.model = _combo_text(self.llm_model)
-        e.api_key_env = self.llm_key.get_text().strip()
         if self.llm_combo.get_active_text() != new_name:
             self.llm_combo.remove(idx); self.llm_combo.insert_text(idx, new_name); self.llm_combo.set_active(idx)
         if _isfloat(self.llm_temp.get_text().strip()):
@@ -1936,7 +1974,8 @@ class SettingsDialog:
         name, url, key, type_key, model = tpl
         self.llm_name.set_text(name)
         self.llm_url.set_text(url)
-        self.llm_key.set_text(key)
+        if 0 <= self._llm_idx < len(self.cfg.llm_engines):
+            self.cfg.llm_engines[self._llm_idx].api_key_env = key
         self.llm_type.set_active(next((i for i, (k, _) in enumerate(_LLM_TYPES) if k == type_key), 0))
         if model:
             _fill_combo(self.llm_model, [model], model)
@@ -1955,9 +1994,9 @@ class SettingsDialog:
             self.stt_dev_card.set_visible(typ == "local")
 
     # -- model dropdowns (fetched from {url}/models) ---
-    def _populate_models(self, combo, url: str, key_env: str) -> None:
+    def _populate_models(self, combo, url: str, key_env: str, api_key: str = "") -> None:
         def work():
-            models = stt.list_models(url, key_env) if url else []
+            models = stt.list_models(url, key_env, api_key=api_key) if url else []
 
             def apply():
                 cur = _combo_text(combo)
@@ -1980,8 +2019,7 @@ class SettingsDialog:
                 self._populate_models(self.stt_model, self.stt_url.get_text().strip(),
                                       self.stt_key.get_text().strip())
             elif which == "llm":
-                self._populate_models(self.llm_model, self.llm_url.get_text().strip(),
-                                      self.llm_key.get_text().strip())
+                self._llm_populate()
             return False
         setattr(self, attr, GLib.timeout_add(700, fire))
 
@@ -3781,10 +3819,7 @@ class SettingsDialog:
         self.wwb_url.set_text(self.cfg.tts_url)
         self.wwb_url.connect("focus-out-event", self._on_tts_url_leave)
         self._probe_dot(self.tts_dot, self.cfg.tts_url, 80)
-        self.wwb_key = _labeled(
-            ctrl, "API key env", _entry(self.cfg.tts_api_key_env, placeholder="(optional, e.g. OPENAI_API_KEY)"),
-            tooltip="Name of an environment variable holding a bearer token. Leave empty for "
-                    "no-auth local servers. The key itself is never stored in the config.")
+        self.wwb_api_key = _tts_session_key_field(ctrl, self.wwb_url)
         self.wwb_model = _model_combo("press ⟳ to load, or type a model id")
         self.wwb_model.set_text(self.cfg.tts_model)
         _labeled(ctrl, "TTS model", self.wwb_model,
@@ -4030,27 +4065,34 @@ class SettingsDialog:
 
     # ----- wakeword benchmark ----------------------------------------------
     def _read_tts_fields(self):
-        """(url, api_key_env, model, voices) from the Benchmark tab, persisted to cfg."""
+        """Read Benchmark fields; the environment name is validated when saving."""
         url = self.wwb_url.get_text().strip().rstrip("/")
-        key = self.wwb_key.get_text().strip()
+        key = self.cfg.tts_api_key_env
         model = self.wwb_model.get_text().strip()
         voices = [v.strip() for v in self.wwb_voices.get_text().split(",") if v.strip()]
-        self.cfg.tts_url, self.cfg.tts_api_key_env = url, key
+        self.cfg.tts_url = url
         self.cfg.tts_model, self.cfg.tts_voices = model, voices
         return url, key, model, voices
 
     def _tts_reload(self) -> None:
         """⟳ — load the model list ({url}/models) and voice list into the dropdowns."""
         url = self.wwb_url.get_text().strip().rstrip("/")
-        key = self.wwb_key.get_text().strip()
+        key = self.cfg.tts_api_key_env
         if not url:
             self._error("Enter the TTS server URL first (e.g. http://localhost:8880/v1).")
+            return
+        from . import tts
+        try:
+            url = tts.base_url(url)
+            tts.auth_headers(key, url)
+        except RuntimeError as exc:
+            self._error(f"Benchmark — Wakeword: {exc}")
             return
         self._probe_dot(self.tts_dot, url, 80)
         self.wwb_test_lbl.set_markup("<i>Loading models &amp; voices…</i>")
 
         def work():
-            models = stt.list_models(url, key)
+            models = tts.list_models(url, key)
             voices = wakeword_bench.list_voices(url, api_key_env=key)
             # Kokoro and similar servers expose each voice as a /models entry.
             # Skip populating the model combo when all "models" are also voices.
@@ -4301,6 +4343,22 @@ class SettingsDialog:
         copyright_label.set_selectable(True)
         page.pack_start(copyright_label, False, False, 2)
 
+        upd_row = Gtk.Box(spacing=10)
+        upd_row.set_margin_top(6)
+        self.upd_check_btn = Gtk.Button(label="Check for updates")
+        self.upd_status = Gtk.Label(label="", xalign=0.0)
+        self.upd_status.set_selectable(True)
+        self.upd_check_btn.connect("clicked", self._on_check_updates)
+        upd_row.pack_start(self.upd_check_btn, False, False, 0)
+        upd_row.pack_start(self.upd_status, False, False, 0)
+        page.pack_start(upd_row, False, False, 2)
+        self.upd_auto = Gtk.CheckButton(label="Check for updates automatically")
+        self.upd_auto.set_active(self.cfg.update_check)
+        self.upd_auto.set_tooltip_text(
+            "Contacts GitHub once a day (api.github.com) to look for a newer release. "
+            "No personal data is sent; GitHub sees your IP address.")
+        page.pack_start(self.upd_auto, False, False, 2)
+
         nb = Gtk.Notebook()
         nb.set_margin_top(8)
         page.pack_start(nb, True, True, 0)
@@ -4313,6 +4371,26 @@ class SettingsDialog:
         license_box.pack_start(_md_panel(license_text, height=300), True, True, 0)
         nb.append_page(license_box, Gtk.Label(label="License"))
 
+
+    def _on_check_updates(self, btn: Gtk.Button) -> None:
+        btn.set_sensitive(False)
+        self.upd_status.set_text("Checking…")
+
+        def done(info):
+            btn.set_sensitive(True)
+            if info is None:
+                self.upd_status.set_text("Could not reach GitHub.")
+            elif not info:
+                self.upd_status.set_text("No update found.")
+            elif updater.is_newer(info[0], __version__):
+                self.upd_status.set_text(f"Version {info[0]} is available.")
+                show_update_dialog(self.dlg, self.cfg, info)
+            else:
+                self.upd_status.set_text(f"You are up to date ({__version__}).")
+            return False
+
+        threading.Thread(target=lambda: GLib.idle_add(done, updater.check_latest()),
+                         daemon=True).start()
 
     # ===== Log ==============================================================
     def _build_log(self, page: Gtk.Box) -> None:
@@ -4399,7 +4477,16 @@ class SettingsDialog:
             self._log_timer = 0
 
     # ===== save / collect ====================================================
+    def _clear_invalid_env_names(self) -> None:
+        """Pasted keys never stay on disk: keep api_key_env only if it is a valid env var name."""
+        from . import tts
+        c = self.cfg
+        c.tts_api_key_env = tts.clean_env_name(c.tts_api_key_env)
+        for e in [*c.talk_engines, *c.llm_engines]:
+            e.api_key_env = tts.clean_env_name(e.api_key_env)
+
     def _collect(self) -> bool:
+        self._clear_invalid_env_names()
         try:
             self._wf_commit(); self._stt_commit(); self._llm_commit()
             c = self.cfg
@@ -4443,7 +4530,6 @@ class SettingsDialog:
             c.stop_keywords = [k.strip() for k in self.stop_keywords.get_text().split(",") if k.strip()]
             # Cancel/Send keyboard shortcuts are owned by the Keyboard page now.
             c.tts_url = self.wwb_url.get_text().strip().rstrip("/")
-            c.tts_api_key_env = self.wwb_key.get_text().strip()
             c.tts_model = self.wwb_model.get_text().strip()
             c.tts_voices = [v.strip() for v in self.wwb_voices.get_text().split(",") if v.strip()]
             c.mic = self._selected_mic_name()
@@ -4455,6 +4541,8 @@ class SettingsDialog:
             c.device = _type_key(self.stt_device, _DEVICE_OPTIONS, "auto")
             c.compute_type = _type_key(self.stt_compute, _COMPUTE_OPTIONS, "auto")
             autostart.set_enabled(self.gen_boot.get_active())
+            if hasattr(self, "upd_auto"):
+                c.update_check = self.upd_auto.get_active()
             
             if c.wakeword_enabled:
                 # Check reachability in background — don't block the GTK thread
@@ -4522,10 +4610,13 @@ class SettingsDialog:
         return False  # don't repeat the timeout
 
     def _on_response(self, dlg, resp):
-        if resp in (RESP_SAVE, RESP_SAVE_RESTART):
+        saving = resp in (RESP_SAVE, RESP_SAVE_RESTART)
+        if saving:
             self._force_build_tabs()
         if getattr(self, "_talk_idx", -1) >= 0:
-            self._talk_commit()
+            committed = self._talk_commit(show_errors=saving)
+            if saving and not committed:
+                return
         if resp == RESP_SAVE:
             import copy
             snap_before = self._cfg_snapshot(self.cfg)
@@ -4545,7 +4636,7 @@ class SettingsDialog:
             if self._collect():
                 save(self.cfg)
                 self._cleanup()
-                os.execv(sys.executable, [sys.executable, "-m", "blitztext", "tray"])
+                restart_app()
             return
         # X button / window close
         self._cleanup()
@@ -4568,3 +4659,85 @@ def _isfloat(s: str) -> bool:
         return True
     except (TypeError, ValueError):
         return False
+
+
+# ===== in-app updater ===========================================================
+RESP_UPD_SKIP, RESP_UPD_LATER, RESP_UPD_NOW = 11, 12, 13
+
+
+def restart_app() -> None:
+    """Re-exec the tray the same way autostart / Save & Restart launch it."""
+    os.execv(sys.executable, [sys.executable, "-m", "blitztext", "tray"])
+
+
+def build_update_dialog(parent, info) -> Gtk.MessageDialog:
+    ver, notes = info[0], info[1]
+    d = Gtk.MessageDialog(transient_for=parent, modal=True, message_type=Gtk.MessageType.INFO,
+                          buttons=Gtk.ButtonsType.NONE, text=f"Blitztext {ver} is available")
+    d.format_secondary_text(f"You have version {__version__}. Release notes:")
+    if len(notes) >= updater.MAX_NOTES:
+        notes = notes.rstrip() + " …"
+    tv = Gtk.TextView(editable=False, cursor_visible=False, wrap_mode=Gtk.WrapMode.WORD_CHAR)
+    tv.get_buffer().set_text(notes or "(no release notes)")  # plain text: no markup parsing
+    sw = Gtk.ScrolledWindow(); sw.set_size_request(460, 200); sw.add(tv)
+    d.get_message_area().pack_start(sw, True, True, 0)
+    d.add_buttons("Skip this version", RESP_UPD_SKIP, "Remind me later", RESP_UPD_LATER,
+                  "Update now", RESP_UPD_NOW)
+    d.set_default_response(RESP_UPD_NOW)
+    d.show_all()
+    return d
+
+
+def show_update_dialog(parent, cfg: Config, info) -> None:
+    d = build_update_dialog(parent, info)
+    resp = d.run()
+    d.destroy()
+    if resp == RESP_UPD_SKIP:
+        cfg.update_skipped_version = info[0]
+        save(cfg)
+    elif resp == RESP_UPD_NOW:
+        run_update(parent, info)
+
+
+def run_update(parent, info) -> None:
+    """Progress dialog; download + verify + pkexec install off the main thread, then restart."""
+    _ver, _notes, deb_url, sha_url = info
+    dlg = Gtk.Dialog(title="Updating Blitztext", transient_for=parent, modal=True)
+    dlg.set_deletable(False)
+    box = dlg.get_content_area()
+    box.set_spacing(8); box.set_border_width(12)
+    lbl = Gtk.Label(label="Downloading…", xalign=0.0)
+    bar = Gtk.ProgressBar(show_text=True)
+    box.pack_start(lbl, False, False, 0); box.pack_start(bar, False, False, 0)
+    dlg.set_default_size(380, -1)
+    dlg.show_all()
+
+    def fail(msg: str) -> bool:
+        dlg.destroy()
+        e = Gtk.MessageDialog(transient_for=parent, modal=True, message_type=Gtk.MessageType.ERROR,
+                              buttons=Gtk.ButtonsType.OK, text="Update failed")
+        e.format_secondary_text(msg)  # plain text
+        e.run(); e.destroy()
+        return False
+
+    def stage(text: str) -> bool:
+        lbl.set_text(text); bar.set_fraction(1.0)
+        return False
+
+    def work() -> None:
+        try:
+            path = updater.download(deb_url, sha_url,
+                                    progress=lambda f: GLib.idle_add(bar.set_fraction, f))
+            GLib.idle_add(stage, "Installing… (authorize in the password prompt)")
+            updater.install(path)
+        except updater.UpdateError as exc:
+            GLib.idle_add(fail, str(exc))
+            return
+        except Exception as exc:  # noqa: BLE001
+            logbuffer.log(f"[update] unexpected error ({type(exc).__name__})", level="ERROR")
+            GLib.idle_add(fail, "Unexpected error. See Settings > Log for details.")
+            return
+        logbuffer.log("[update] installed, restarting", level="INFO")
+        GLib.idle_add(restart_app)
+
+    threading.Thread(target=work, daemon=True).start()

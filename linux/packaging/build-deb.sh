@@ -11,7 +11,13 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 LINUX_DIR="$(dirname "$HERE")"            # .../linux
 PKG="blitztext"
 ARCH="$(dpkg --print-architecture)"
-VER="2.03.71"
+VER="$(python3 -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["project"]["version"])' "$LINUX_DIR/pyproject.toml")"
+# If HEAD is tagged (or GIT_TAG is set), the tag must match the version.
+TAG="${GIT_TAG:-$(git -C "$LINUX_DIR" describe --exact-match --tags 2>/dev/null || true)}"
+if [ -n "$TAG" ] && [ "${TAG#v}" != "$VER" ]; then
+    echo "ERROR: git tag '$TAG' does not match pyproject.toml version '$VER'" >&2
+    exit 1
+fi
 PYBIN="${PYBIN:-/usr/bin/python3}"
 
 BUILD="$(mktemp -d)"
@@ -31,6 +37,8 @@ mkdir -p "$APPDIR"
 
 # Drop the app package into the venv so `python -m blitztext` works.
 cp -r "$LINUX_DIR/blitztext" "$VENV/lib/python"*/site-packages/
+# Installed copy has no pyproject.toml next to it: bake the version in (staging only).
+printf 'VERSION = "%s"\n' "$VER" > "$(echo "$VENV/lib/python"*/site-packages)/blitztext/_version.py"
 
 # Let the venv also see the system PyGObject (apt python3-gi) for tray mode,
 # while still preferring its own bundled deps.
@@ -108,6 +116,8 @@ mkdir -p "$OUT_DIR"
 DEB="$OUT_DIR/${PKG}_${VER}_${ARCH}.deb"
 fakeroot dpkg-deb --build --root-owner-group "$ROOT" "$DEB" >/dev/null
 chmod 644 "$DEB"
+# Checksum for the in-app updater; attach BOTH files to the GitHub release.
+(cd "$OUT_DIR" && sha256sum "$(basename "$DEB")" > "$(basename "$DEB").sha256")
 # Also copy to ~ so `sudo apt install ~/blitztext_*.deb` works without a separate cp
 DEST="$HOME/$(basename "$DEB")"
 install -m644 "$DEB" "$DEST"

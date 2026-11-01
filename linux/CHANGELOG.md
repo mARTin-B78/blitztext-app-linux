@@ -5,9 +5,42 @@ All notable changes to **Blitztext for Linux** (the native dictation tool in
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-The version is defined in [`blitztext/__init__.py`](blitztext/__init__.py).
+The version is defined in [`pyproject.toml`](pyproject.toml).
+
+## [2.03.73] - 2026-11-01
+
+### Changed
+- Version bump to test the in-app updater; no functional change.
+- Update check now tells "No update found" / "up to date" apart from "Could not reach GitHub".
 
 ## [Unreleased]
+
+### Added
+- **Single version source:** `linux/pyproject.toml` is now the only place the version is set; `__version__` and `build-deb.sh` read it, and the build aborts if a git tag at HEAD differs.
+- **In-app updater:** on tray start (at most once a day, can be turned off in
+  Settings > About, "Check for updates automatically") Blitztext asks the GitHub
+  releases API for the latest release. If it is newer, a dialog offers
+  "Update now" / "Remind me later" / "Skip this version". "Update now" downloads
+  `blitztext_<ver>_<arch>.deb`, verifies it against the release's `.sha256`, installs
+  it with `pkexec apt install`, then restarts the tray. Settings > About also has a
+  "Check for updates" button. `build-deb.sh` now writes
+  `dist/blitztext_<ver>_<arch>.deb.sha256` next to the .deb. **Releases must be
+  tagged `v<ver>` (e.g. `v2.03.73`) and attach both the .deb and its .sha256**,
+  otherwise the updater ignores the release.
+- **LLM session API key:** Settings > LLM Engines has the same masked
+  "API key (session only)" field as TTS Engines. The key is kept in memory per
+  base URL (never written to `config.toml` or disk) and must be re-entered after
+  quitting or Save & Restart. It is now the only key field on the LLM and TTS
+  Engines pages (the "API key env (fallback)" field was removed there).
+
+## [2.03.72] - 2026-11-01
+
+### Fixed
+- Removed the "API key env (fallback)" field from the LLM and TTS Engines pages
+  (and the benchmark TTS field); only the masked, session-only API key field remains.
+  Saving never fails on it: an `api_key_env` in an old config that is not a valid
+  environment variable name (e.g. a pasted key) is cleared on save, valid names are
+  kept. LLM/TTS requests ignore an invalid name instead of raising.
 
 ## [2.03.71] - 2026-10-03
 

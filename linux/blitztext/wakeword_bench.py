@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import io
 import json
-import os
 import random
 import socket
 import time
@@ -28,6 +27,9 @@ import urllib.request
 import wave
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
+
+from . import tts
+from .tts import auth_headers as _auth_headers, base_url
 
 # Bilingual filler so the synthesized speech is sentence-like (the detector sees
 # realistic context around the wakeword, not just the bare phrase). Unknown
@@ -173,11 +175,6 @@ def build_utterances(phrase: str, count: int, language: str, *,
 
 
 # --- TTS via an OpenAI-compatible /audio/speech endpoint ---------------------
-def _auth_headers(api_key_env: str) -> dict:
-    key = os.environ.get(api_key_env or "", "")
-    return {"Authorization": f"Bearer {key}"} if key else {}
-
-
 def synthesize(tts_url: str, text: str, *, model: str, voice: str,
                api_key_env: str = "", timeout: float = 30.0) -> bytes:
     """Return 16 kHz mono s16le PCM for `text` from an OpenAI-compatible TTS.
@@ -185,22 +182,19 @@ def synthesize(tts_url: str, text: str, *, model: str, voice: str,
     `tts_url` is the base incl. /v1 (e.g. http://localhost:8880/v1). Asks for WAV
     and resamples whatever rate/-channels come back down to 16 kHz mono.
     """
-    base = (tts_url or "").rstrip("/")
-    if not base:
-        raise RuntimeError("No TTS URL configured (Settings → Benchmark → TTS URL).")
+    base = base_url(tts_url)
     payload = json.dumps({
         "model": model, "input": text, "voice": voice, "response_format": "wav",
     }).encode("utf-8")
-    headers = {"Content-Type": "application/json", **_auth_headers(api_key_env)}
+    headers = {"Content-Type": "application/json", **_auth_headers(api_key_env, base)}
     req = urllib.request.Request(base + "/audio/speech", data=payload, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with tts.urlopen(req, timeout=timeout) as resp:
             raw = resp.read()
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", "replace")[:200]
-        raise RuntimeError(f"TTS HTTP {exc.code}: {detail}") from exc
+        raise RuntimeError(f"TTS HTTP {exc.code}. Check the endpoint and API key.") from None
     except (urllib.error.URLError, OSError) as exc:
-        raise RuntimeError(f"TTS request failed: {exc}") from exc
+        raise RuntimeError("TTS request failed. Check the endpoint and connection.") from None
     return _wav_to_pcm16k(raw)
 
 
@@ -210,13 +204,14 @@ def list_voices(tts_url: str, *, api_key_env: str = "", timeout: float = 8.0) ->
     Returns [] if the server has no such endpoint — voices are then entered by
     hand. Accepts the common shapes: ["a", …], {"voices": …}, {"data": [{id}…]}.
     """
-    base = (tts_url or "").rstrip("/")
-    if not base:
+    if not tts_url:
         return []
+    base = base_url(tts_url)
+    headers = _auth_headers(api_key_env, base)
     for path in ("/audio/voices", "/voices"):
         try:
-            req = urllib.request.Request(base + path, headers=_auth_headers(api_key_env))
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            req = urllib.request.Request(base + path, headers=headers)
+            with tts.urlopen(req, timeout=timeout) as resp:
                 data = json.loads(resp.read())
         except Exception:  # noqa: BLE001 - endpoint optional/non-standard
             continue

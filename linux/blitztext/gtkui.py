@@ -423,7 +423,30 @@ class App:
             # stay in the tray; panel opens on demand
         else:
             self.win.show_all()
+        self._maybe_check_updates()
         Gtk.main()
+
+    # -- updates ----------------------------------------------------------------
+    def _maybe_check_updates(self) -> None:
+        import time
+
+        from . import updater
+
+        if not updater.should_check(self.cfg.update_check, self.cfg.update_last_check, time.time()):
+            return
+        self.cfg.update_last_check = time.time()
+        save(self.cfg)
+        threading.Thread(target=lambda: GLib.idle_add(self._on_update_info, updater.check_latest()),
+                         daemon=True).start()
+
+    def _on_update_info(self, info) -> bool:
+        from . import updater
+
+        if info and updater.should_offer(info[0], __version__, self.cfg.update_skipped_version):
+            from .gtksettings import show_update_dialog
+
+            show_update_dialog(None if self.tray_mode else self.win, self.cfg, info)
+        return False
 
 
 def run_gui(tray_mode: bool = False) -> int:
