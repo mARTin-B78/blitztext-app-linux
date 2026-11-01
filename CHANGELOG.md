@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - Version bump to test the in-app updater; no functional change.
 - Update check now tells "No update found" / "up to date" apart from "Could not reach GitHub".
+- Update popup now shows the changelog of all versions since the installed one (fetched from the tagged release) instead of only the one-line release body.
 
 ## [2.03.72] - 2026-11-01
 

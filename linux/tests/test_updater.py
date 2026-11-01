@@ -201,3 +201,71 @@ def test_parse_sha256():
     assert updater.parse_sha256(f"{d.upper()}  blitztext_1_arm64.deb\n") == d
     with pytest.raises(updater.UpdateError):
         updater.parse_sha256("nothex")
+
+
+# ---- changelog ------------------------------------------------------------------
+CL = """# Changelog
+## [Unreleased]
+### Added
+- unreleased thing
+## [2.03.73] - 2026-11-01
+### Changed
+- **Bump** `x`
+## [2.03.72] - 2026-11-01
+### Fixed
+- fix <b>y</b>
+## [2.03.71] - 2026-10-03
+### Added
+- old
+"""
+
+
+def test_changelog_between_range():
+    out = updater.changelog_between(CL, "2.03.71", "2.03.73")
+    assert out.index("2.03.73") < out.index("2.03.72")
+    assert "Bump x" in out and "fix <b>y</b>" in out      # markup chars stay literal text
+    assert "old" not in out and "unreleased" not in out
+
+
+def test_changelog_between_none_newer_and_malformed():
+    assert updater.changelog_between(CL, "2.03.73", "2.03.73") == ""
+    assert updater.changelog_between("garbage ## [x] \n\x00", "2.03.1", "2.03.9") == ""
+    assert updater.changelog_between(CL, "bad", "2.03.73") == ""
+
+
+def test_changelog_capped():
+    big = "## [2.0.1]\n" + "- a\n" * 5000
+    assert len(updater.changelog_between(big, "2.0.0", "2.0.1")) <= updater.MAX_CHANGELOG_CHARS + 2
+
+
+def test_fetch_changelog_ok_and_errors():
+    class R(io.BytesIO):
+        __enter__ = lambda s: s
+        __exit__ = lambda s, *a: None
+    with patch.object(updater, "_open", return_value=R(b"hello")) as o:
+        assert updater.fetch_changelog("v2.03.73") == "hello"
+        assert o.call_args[0][0].endswith("/v2.03.73/linux/CHANGELOG.md")
+    with patch.object(updater, "_open", side_effect=urllib.error.URLError("x")):
+        assert updater.fetch_changelog("v2.03.73") is None
+    with patch.object(updater, "_open", return_value=R(b"x" * (updater.MAX_CHANGELOG_BYTES + 5))):
+        assert updater.fetch_changelog("v2.03.73") is None
+
+
+@pytest.mark.parametrize("tag", ["../x", "v1/../../a", "main", "", "v1.2.3?x=1", None])
+def test_fetch_changelog_rejects_bad_tag(tag):
+    with patch.object(updater, "_open") as o:
+        assert updater.fetch_changelog(tag) is None
+        o.assert_not_called()
+
+
+def test_with_changelog_and_fallback():
+    info = ("2.03.73", "release body", "d", "s")
+    with patch.object(updater, "check_latest", return_value=info), \
+         patch.object(updater, "fetch_changelog", return_value=CL):
+        got = updater.check_latest_with_changelog("2.03.71")
+        assert "2.03.72" in got[1] and got[2:] == ("d", "s")
+    with patch.object(updater, "check_latest", return_value=info), \
+         patch.object(updater, "fetch_changelog", return_value=None):
+        assert updater.check_latest_with_changelog("2.03.71") == info
+    with patch.object(updater, "check_latest", return_value=()):
+        assert updater.check_latest_with_changelog("2.03.71") == ()

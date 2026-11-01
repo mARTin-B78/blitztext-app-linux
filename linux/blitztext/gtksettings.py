@@ -4389,7 +4389,7 @@ class SettingsDialog:
                 self.upd_status.set_text(f"You are up to date ({__version__}).")
             return False
 
-        threading.Thread(target=lambda: GLib.idle_add(done, updater.check_latest()),
+        threading.Thread(target=lambda: GLib.idle_add(done, updater.check_latest_with_changelog(__version__)),
                          daemon=True).start()
 
     # ===== Log ==============================================================
@@ -4675,11 +4675,11 @@ def build_update_dialog(parent, info) -> Gtk.MessageDialog:
     d = Gtk.MessageDialog(transient_for=parent, modal=True, message_type=Gtk.MessageType.INFO,
                           buttons=Gtk.ButtonsType.NONE, text=f"Blitztext {ver} is available")
     d.format_secondary_text(f"You have version {__version__}. Release notes:")
-    if len(notes) >= updater.MAX_NOTES:
+    if len(notes) >= updater.MAX_NOTES and not notes.endswith("…"):
         notes = notes.rstrip() + " …"
     tv = Gtk.TextView(editable=False, cursor_visible=False, wrap_mode=Gtk.WrapMode.WORD_CHAR)
     tv.get_buffer().set_text(notes or "(no release notes)")  # plain text: no markup parsing
-    sw = Gtk.ScrolledWindow(); sw.set_size_request(460, 200); sw.add(tv)
+    sw = Gtk.ScrolledWindow(); sw.set_size_request(520, 280); sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC); sw.add(tv)
     d.get_message_area().pack_start(sw, True, True, 0)
     d.add_buttons("Skip this version", RESP_UPD_SKIP, "Remind me later", RESP_UPD_LATER,
                   "Update now", RESP_UPD_NOW)

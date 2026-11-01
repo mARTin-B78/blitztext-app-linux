@@ -436,7 +436,7 @@ class App:
             return
         self.cfg.update_last_check = time.time()
         save(self.cfg)
-        threading.Thread(target=lambda: GLib.idle_add(self._on_update_info, updater.check_latest()),
+        threading.Thread(target=lambda: GLib.idle_add(self._on_update_info, updater.check_latest_with_changelog(__version__)),
                          daemon=True).start()
 
     def _on_update_info(self, info) -> bool:

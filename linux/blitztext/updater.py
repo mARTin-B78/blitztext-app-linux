@@ -27,10 +27,15 @@ MAX_API_BYTES = 1 << 20          # release JSON
 MAX_SHA_BYTES = 4096
 MAX_DEB_BYTES = 2 << 30          # 2 GiB; the bundled venv is large but not that large
 MAX_NOTES = 2000
+MAX_CHANGELOG_BYTES = 1 << 20
+MAX_CHANGELOG_CHARS = 6000
+CHANGELOG_URL = "https://raw.githubusercontent.com/mARTin-B78/blitztext-app-linux/{tag}/linux/CHANGELOG.md"
 CHECK_INTERVAL = 24 * 3600
 _TMP_PREFIX = "blitztext-update-"
 
 _VER_RE = re.compile(r"^\d+(?:\.\d+){0,3}$")
+_TAG_RE = re.compile(r"^v?\d+(?:\.\d+){0,3}$")
+_SECTION_RE = re.compile(r"^##\s+\[([^\]]+)\]", re.M)
 _ARCH_RE = re.compile(r"^[a-z0-9]+$")
 _DEB_RE = re.compile(r"^blitztext_\d+(?:\.\d+){0,3}_[a-z0-9]+\.deb$")
 _SHA_RE = re.compile(r"^([0-9a-fA-F]{64})(?:\s+\*?\S+)?\s*$")
@@ -90,6 +95,31 @@ def pick_assets(release: dict, arch: str) -> tuple[str, str, str, str] | None:
         return None
     notes = str(release.get("body") or "")[:MAX_NOTES]
     return ver, notes, deb, sha
+
+
+def changelog_between(text: str, current: str, new: str) -> str:
+    """Plain-text Keep-a-Changelog sections with current < version <= new, newest first."""
+    tc, tn = _vt(current), _vt(new)
+    if tc is None or tn is None:
+        return ""
+    marks = list(_SECTION_RE.finditer(text or ""))
+    found = []
+    for i, m in enumerate(marks):
+        t = _vt(m.group(1))
+        if t is None or not (tc < t <= tn):  # also skips [Unreleased]
+            continue
+        end = marks[i + 1].start() if i + 1 < len(marks) else len(text)
+        body = text[m.end():end].strip()
+        # keep "- Added" style structure as plain text; drop heading hashes and bold/code marks
+        lines = [re.sub(r"^#{3,}\s*", "", ln).replace("**", "").replace("`", "")
+                 for ln in body.splitlines()]
+        head = text[m.start():text.index("\n", m.start()) if "\n" in text[m.start():] else len(text)]
+        head = head.lstrip("# ").replace("[", "").replace("]", "")
+        found.append((t, head + "\n" + re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()))
+    out = "\n\n".join(b for _t, b in sorted(found, key=lambda x: x[0], reverse=True))
+    if len(out) > MAX_CHANGELOG_CHARS:
+        out = out[:MAX_CHANGELOG_CHARS].rstrip() + " …"
+    return out
 
 
 def parse_sha256(text: str) -> str:
@@ -156,6 +186,30 @@ def check_latest(arch: str | None = None) -> tuple[str, str, str, str] | tuple[(
     except Exception as exc:  # noqa: BLE001 - update check must never break the app
         logbuffer.log(f"[update] check failed ({type(exc).__name__})", level="WARNING")
         return None
+
+
+def fetch_changelog(tag: str) -> str | None:
+    """CHANGELOG.md of the Linux app at *tag* (None on any error)."""
+    tag = str(tag or "").strip()
+    if not _TAG_RE.match(tag):
+        return None
+    try:
+        with _open(CHANGELOG_URL.format(tag=tag)) as resp:
+            return _read_capped(resp, MAX_CHANGELOG_BYTES).decode("utf-8", "replace")
+    except Exception as exc:  # noqa: BLE001 - changelog is optional
+        logbuffer.log(f"[update] changelog fetch failed ({type(exc).__name__})", level="DEBUG")
+        return None
+
+
+def check_latest_with_changelog(current: str):
+    """check_latest(), with notes replaced by the real changelog when it can be fetched."""
+    info = check_latest()
+    if info and is_newer(info[0], current):
+        text = fetch_changelog("v" + info[0])
+        notes = changelog_between(text, current, info[0]) if text else ""
+        if notes:
+            info = (info[0], notes, *info[2:])
+    return info
 
 
 def download(deb_url: str, sha_url: str, progress=None) -> str:
