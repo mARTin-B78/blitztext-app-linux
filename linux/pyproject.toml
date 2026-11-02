@@ -3,4 +3,11 @@
 # to 2.3.72) to match existing tags and changelogs.
 [project]
 name = "blitztext"
-version = "2.03.73"
+version = "2.03.74"
+
+[tool.coverage.run]
+source = ["blitztext"]
+relative_files = true
+
+[tool.coverage.report]
+skip_empty = true
