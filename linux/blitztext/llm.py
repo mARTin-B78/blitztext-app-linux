@@ -116,6 +116,23 @@ def chat(
     return content
 
 
+def _sse_data(raw: bytes) -> str | None:
+    """Payload of an SSE ``data:`` line; None for blanks/other fields."""
+    line = raw.decode("utf-8", "replace").strip()
+    if not line or not line.startswith("data:"):
+        return None
+    return line[len("data:"):].strip()
+
+
+def _sse_delta(data: str):
+    """Content delta of one stream chunk; None when absent or malformed."""
+    try:
+        obj = json.loads(data)
+        return obj["choices"][0]["delta"].get("content")
+    except (ValueError, KeyError, IndexError, TypeError):
+        return None
+
+
 def _read_stream(resp, on_token: Callable[[str], None], abort_event=None) -> str:
     """Parse an OpenAI-style SSE stream, returning the accumulated content and
     feeding each delta to ``on_token``. Tolerant of keep-alive blanks and the
@@ -124,17 +141,12 @@ def _read_stream(resp, on_token: Callable[[str], None], abort_event=None) -> str
     for raw in resp:
         if abort_event and abort_event.is_set():
             break
-        line = raw.decode("utf-8", "replace").strip()
-        if not line or not line.startswith("data:"):
+        data = _sse_data(raw)
+        if data is None:
             continue
-        data = line[len("data:"):].strip()
         if data == "[DONE]":
             break
-        try:
-            obj = json.loads(data)
-            delta = obj["choices"][0]["delta"].get("content")
-        except (ValueError, KeyError, IndexError, TypeError):
-            continue
+        delta = _sse_delta(data)
         if delta:
             parts.append(delta)
             try:

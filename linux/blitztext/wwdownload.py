@@ -44,7 +44,9 @@ KNOWN_LANGUAGES = ["en", "dk", "fi", "ru", "zh"]
 
 # Model file kinds openWakeWord can load, preferred first (tflite is the server
 # default inference framework).
-MODEL_EXTS = (".tflite", ".onnx")
+_TFLITE = ".tflite"
+_ONNX = ".onnx"
+MODEL_EXTS = (_TFLITE, _ONNX)
 
 
 def _api(repo: str) -> str:
@@ -108,7 +110,7 @@ def list_variants(lang: str, name: str, repo: str = REPO) -> list[dict]:
 
 
 def has_tflite(variants: list[dict]) -> bool:
-    return any(v["ext"] == ".tflite" for v in variants)
+    return any(v["ext"] == _TFLITE for v in variants)
 
 
 def readme_url(lang: str, name: str, repo: str = REPO) -> str:
@@ -161,11 +163,11 @@ def _download(url: str, dest: Path, *, ext: str) -> int:
     req = urllib.request.Request(url, headers=_UA)
     with urllib.request.urlopen(req, timeout=60) as r:
         data = r.read()
-    if ext == ".tflite" and b"TFL3" not in data[:32]:
+    if ext == _TFLITE and b"TFL3" not in data[:32]:
         # .tflite carries the "TFL3" flatbuffer id near the start; guard against
         # an HTML error page being saved as a model.
         raise ValueError(f"Downloaded file is not a .tflite model ({len(data)} bytes)")
-    if ext == ".onnx" and not data[:8].startswith(b"\x08"):
+    if ext == _ONNX and not data[:8].startswith(b"\x08"):
         # ONNX is a protobuf; first field (ir_version) is tag 0x08. Loose guard.
         if b"onnx" not in data[:64].lower():
             raise ValueError(f"Downloaded file is not an .onnx model ({len(data)} bytes)")
@@ -210,7 +212,7 @@ def install(lang: str, name: str, model_dir: str | Path,
     return {
         "model_id": model_id,
         "files": files,
-        "tflite": any(f.endswith(".tflite") for f in files),
+        "tflite": any(f.endswith(_TFLITE) for f in files),
     }
 
 
@@ -222,6 +224,73 @@ def _port_of(uri: str) -> str:
     return m.group(1) if m else ""
 
 
+_INSPECT_FMT = ("{{range .Mounts}}{{.Source}}\t{{.Destination}}\n{{end}}"
+                "===\t{{join .Args \" \"}}")
+
+
+def _docker_ps() -> str | None:
+    """``name<TAB>image`` lines of running containers; None if docker failed."""
+    try:
+        return subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}\t{{.Image}}"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout
+    except Exception:
+        return None
+
+
+def _containers(out: str):
+    """Yield ``(name, haystack)`` per container; haystack = name+image, normalised."""
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 2:
+            continue
+        nm, img = parts
+        yield nm, (nm + " " + img).lower().replace("-", "").replace("_", "")
+
+
+def _docker_inspect(name: str) -> str | None:
+    try:
+        return subprocess.run(
+            ["docker", "inspect", "--format", _INSPECT_FMT, name],
+            capture_output=True, text=True, timeout=10,
+        ).stdout
+    except Exception:
+        return None
+
+
+def _mount_source(mounts: str, dest: str) -> str:
+    """Host source of the mount whose destination is ``dest`` ("" if none)."""
+    for ml in mounts.splitlines():
+        src, _, d = ml.partition("\t")
+        if d.strip() == dest and src.strip():
+            return src.strip()
+    return ""
+
+
+def _framework_of(hay: str) -> str:
+    if "micro" in hay and "wakeword" in hay:
+        return "micro"
+    if "openwakeword" in hay:
+        return "openwakeword"
+    return ""
+
+
+def _server_info(nm: str, framework: str, info: str) -> dict:
+    mounts, _, argline = info.partition("===")
+    port_m = re.search(r"--uri[=\s]++\S*?:(\d+)", argline)
+    dir_m = re.search(r"--custom-model-dir[=\s]+(\S+)", argline)
+    model_dir = ""
+    if dir_m:
+        model_dir = _mount_source(mounts, dir_m.group(1).strip("[]'\" "))
+    return {
+        "name": nm,
+        "port": port_m.group(1) if port_m else "",
+        "framework": framework,
+        "model_dir": model_dir,
+    }
+
+
 def _inspect_servers() -> list[dict]:
     """All running wakeword containers with their uri-port, framework & dir.
 
@@ -229,53 +298,19 @@ def _inspect_servers() -> list[dict]:
     ``"openwakeword"``, ``"micro"`` or ``""``; ``model_dir`` is the host source
     of the container's ``--custom-model-dir`` mount (empty if none).
     """
-    try:
-        out = subprocess.run(
-            ["docker", "ps", "--format", "{{.Names}}\t{{.Image}}"],
-            capture_output=True, text=True, timeout=10,
-        ).stdout
-    except Exception:
+    out = _docker_ps()
+    if out is None:
         return []
 
-    fmt = ("{{range .Mounts}}{{.Source}}\t{{.Destination}}\n{{end}}"
-           "===\t{{join .Args \" \"}}")
     servers = []
-    for line in out.splitlines():
-        parts = line.split("\t")
-        if len(parts) != 2:
+    for nm, hay in _containers(out):
+        framework = _framework_of(hay)
+        if not framework:
             continue
-        nm, img = parts
-        hay = (nm + " " + img).lower().replace("-", "").replace("_", "")
-        if "micro" in hay and "wakeword" in hay:
-            framework = "micro"
-        elif "openwakeword" in hay:
-            framework = "openwakeword"
-        else:
+        info = _docker_inspect(nm)
+        if info is None:
             continue
-        try:
-            info = subprocess.run(
-                ["docker", "inspect", "--format", fmt, nm],
-                capture_output=True, text=True, timeout=10,
-            ).stdout
-        except Exception:
-            continue
-        mounts, _, argline = info.partition("===")
-        port_m = re.search(r"--uri[=\s]+\S*?:(\d+)", argline)
-        dir_m = re.search(r"--custom-model-dir[=\s]+(\S+)", argline)
-        model_dir = ""
-        if dir_m:
-            dest = dir_m.group(1).strip("[]'\" ")
-            for ml in mounts.splitlines():
-                src, _, d = ml.partition("\t")
-                if d.strip() == dest and src.strip():
-                    model_dir = src.strip()
-                    break
-        servers.append({
-            "name": nm,
-            "port": port_m.group(1) if port_m else "",
-            "framework": framework,
-            "model_dir": model_dir,
-        })
+        servers.append(_server_info(nm, framework, info))
     return servers
 
 
@@ -318,46 +353,26 @@ def autodetect() -> tuple[str, list[str]]:
     folder (detection + a preload server); all of them need a restart to pick up
     a new model, so they are returned together.
     """
-    try:
-        out = subprocess.run(
-            ["docker", "ps", "--format", "{{.Names}}\t{{.Image}}"],
-            capture_output=True, text=True, timeout=10,
-        ).stdout
-    except Exception:
+    out = _docker_ps()
+    if out is None:
         return "", []
 
-    candidates = []
-    for line in out.splitlines():
-        parts = line.split("\t")
-        if len(parts) != 2:
-            continue
-        nm, img = parts
-        hay = (nm + " " + img).lower().replace("-", "").replace("_", "")
-        # openWakeWord, but NOT microwakeword (different, incompatible format).
-        if "openwakeword" in hay and "micro" not in hay:
-            candidates.append(nm)
+    # openWakeWord, but NOT microwakeword (different, incompatible format).
+    candidates = [nm for nm, hay in _containers(out)
+                  if "openwakeword" in hay and "micro" not in hay]
 
-    fmt = ("{{range .Mounts}}{{.Source}}\t{{.Destination}}\n{{end}}"
-           "===\t{{join .Args \" \"}}")
     dirs: dict[str, list[str]] = {}
     for container in candidates:
-        try:
-            info = subprocess.run(
-                ["docker", "inspect", "--format", fmt, container],
-                capture_output=True, text=True, timeout=10,
-            ).stdout
-        except Exception:
+        info = _docker_inspect(container)
+        if info is None:
             continue
         mounts, _, argline = info.partition("===")
         m = re.search(r"--custom-model-dir[=\s]+(\S+)", argline)
         if not m:
             continue
-        dest = m.group(1).strip("[]'\" ")
-        for line in mounts.splitlines():
-            src, _, d = line.partition("\t")
-            if d.strip() == dest and src.strip():
-                dirs.setdefault(src.strip(), []).append(container)
-                break
+        src = _mount_source(mounts, m.group(1).strip("[]'\" "))
+        if src:
+            dirs.setdefault(src, []).append(container)
     if not dirs:
         return "", []
     # Most-shared dir wins (the one the real detection servers point at).

@@ -58,7 +58,7 @@ class Tray:
             gi.require_version("AppIndicator3", "0.1")
             from gi.repository import AppIndicator3
 
-        self._Gtk = Gtk
+        self._gtk = Gtk
         self.app = app
 
         self.indicator = AppIndicator3.Indicator.new(
@@ -73,23 +73,23 @@ class Tray:
     def _build_menu(self) -> None:
         from .gtkui import pretty_hotkey
 
-        Gtk = self._Gtk
-        menu = Gtk.Menu()
+        gtk = self._gtk
+        menu = gtk.Menu()
 
-        self.status_item = Gtk.MenuItem(label="● Ready")
+        self.status_item = gtk.MenuItem(label="● Ready")
         self.status_item.set_sensitive(False)
         menu.append(self.status_item)
-        menu.append(Gtk.SeparatorMenuItem())
+        menu.append(gtk.SeparatorMenuItem())
 
         for wf in self.app.cfg.workflows:
-            item = Gtk.MenuItem(label=f"{wf.name} ({pretty_hotkey(wf.hotkey)})")
+            item = gtk.MenuItem(label=f"{wf.name} ({pretty_hotkey(wf.hotkey)})")
             item.connect("activate", lambda _i, w=wf: self.app.trigger_workflow(w))
             menu.append(item)
 
         if getattr(self.app.cfg, "talk_engines", None):
             hk = getattr(self.app.cfg, "talk_hotkey", "")
             lbl = f"🔊 Speak selected text ({pretty_hotkey(hk)})" if hk else "🔊 Speak selected text"
-            talk_item = Gtk.MenuItem(label=lbl)
+            talk_item = gtk.MenuItem(label=lbl)
             
             def _play_talk():
                 from . import talk
@@ -99,39 +99,39 @@ class Tray:
             talk_item.connect("activate", lambda _i: _play_talk())
             menu.append(talk_item)
 
-        menu.append(Gtk.SeparatorMenuItem())
+        menu.append(gtk.SeparatorMenuItem())
 
         # Cancel recording — always visible, only sensitive while recording.
         # Primary escape hatch when wakeword fires on audiobook/TV audio.
-        self.cancel_item = Gtk.MenuItem(label="✕  Cancel recording")
+        self.cancel_item = gtk.MenuItem(label="✕  Cancel recording")
         self.cancel_item.set_sensitive(False)
         self.cancel_item.connect(
             "activate", lambda _i: self.app.daemon.cancel_dictation())
         menu.append(self.cancel_item)
-        menu.append(Gtk.SeparatorMenuItem())
+        menu.append(gtk.SeparatorMenuItem())
 
         # Hands-free wakeword: a reversible pause toggle. Without this, a stale
-        # /tmp/wake_muted flag would silently disable detection with no way back.
+        # wake-mute flag file would silently disable detection with no way back.
         if getattr(self.app.cfg, "wakeword_enabled", False):
             from . import wakeword
 
-            self.mute_item = Gtk.CheckMenuItem(label="Pause wakeword")
+            self.mute_item = gtk.CheckMenuItem(label="Pause wakeword")
             self.mute_item.set_active(wakeword.is_muted())
             self.mute_item.connect(
                 "toggled", lambda i: wakeword.set_muted(i.get_active())
             )
             menu.append(self.mute_item)
-            menu.append(Gtk.SeparatorMenuItem())
+            menu.append(gtk.SeparatorMenuItem())
 
         for label, cb in (
             ("Show panel", self.app.show_panel),
             ("Settings…", self.app.open_settings),
         ):
-            it = Gtk.MenuItem(label=label)
+            it = gtk.MenuItem(label=label)
             it.connect("activate", lambda _i, c=cb: c())
             menu.append(it)
-        menu.append(Gtk.SeparatorMenuItem())
-        quit_item = Gtk.MenuItem(label="Quit Blitztext")
+        menu.append(gtk.SeparatorMenuItem())
+        quit_item = gtk.MenuItem(label="Quit Blitztext")
         quit_item.connect("activate", lambda _i: self.app.quit_all())
         menu.append(quit_item)
 
@@ -147,6 +147,6 @@ class Tray:
 
     def pump(self) -> None:
         """Service pending GLib/GTK events; called from tkinter's loop."""
-        Gtk = self._Gtk
-        while Gtk.events_pending():
-            Gtk.main_iteration_do(False)
+        gtk = self._gtk
+        while gtk.events_pending():
+            gtk.main_iteration_do(False)

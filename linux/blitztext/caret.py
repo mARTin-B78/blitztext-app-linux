@@ -70,7 +70,7 @@ class _CaretTracker:
         self._listener = None
         self._focused = None          # last focused accessible (read lazily)
         self._stamp = 0.0
-        self._Atspi = None
+        self._atspi = None
 
     def start(self) -> bool:
         """Register the AT-SPI focus listener on the running GLib main loop.
@@ -88,7 +88,7 @@ class _CaretTracker:
         try:
             # init() is idempotent; returns 0/1. Connects to the a11y registry.
             Atspi.init()
-            self._Atspi = Atspi
+            self._atspi = Atspi
             self._listener = Atspi.EventListener.new(self._on_focus)
             # Focus changes only. Deliberately NOT "object:text-caret-moved": that
             # firehose (one event per typed character, including our own output)
@@ -126,7 +126,7 @@ class _CaretTracker:
             pass
 
     def _caret_rect(self, acc) -> tuple[int, int, int, int] | None:
-        Atspi = self._Atspi
+        atspi = self._atspi
         text = None
         try:
             text = acc.get_text_iface()
@@ -137,7 +137,7 @@ class _CaretTracker:
         try:
             offset = text.get_caret_offset()
             # Extents of the character at the caret, in absolute screen coords.
-            ext = text.get_character_extents(offset, Atspi.CoordType.SCREEN)
+            ext = text.get_character_extents(offset, atspi.CoordType.SCREEN)
             x, y, w, h = ext.x, ext.y, ext.width, ext.height
             if w == 0 and h == 0:
                 # End-of-line / empty field: fall back to the component box so we
@@ -145,7 +145,7 @@ class _CaretTracker:
                 comp = acc.get_component_iface()
                 if comp is None:
                     return None
-                cext = comp.get_extents(Atspi.CoordType.SCREEN)
+                cext = comp.get_extents(atspi.CoordType.SCREEN)
                 return int(cext.x), int(cext.y), 2, int(cext.height) or 18
             if x < 0 or y < 0:
                 return None

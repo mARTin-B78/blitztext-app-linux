@@ -56,9 +56,9 @@ class Transcriber:
 
     def transcribe(self, audio_path: Path, language: str = "", hotwords: str = "",
                    beam_size: int | None = None) -> str:
-        kwargs = dict(language=language or None,
-                      beam_size=beam_size if beam_size is not None else self.beam_size,
-                      vad_filter=True)
+        kwargs = {"language": language or None,
+                  "beam_size": beam_size if beam_size is not None else self.beam_size,
+                  "vad_filter": True}
         if hotwords:
             # Bias recognition toward the routing keywords so they transcribe
             # reliably. Older faster-whisper builds lack `hotwords`; fall back.

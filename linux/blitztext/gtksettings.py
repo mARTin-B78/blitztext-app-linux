@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import sys
 import threading
 import time
@@ -38,6 +39,13 @@ from .config import Workflow  # noqa: E402
 RESP_SAVE = 1
 RESP_SAVE_RESTART = 2
 GREEN, RED, GREY = "#34c759", "#ff3b30", "#b8b8be"
+
+_LOCAL_WW_URI = "tcp://127.0.0.1:10400"
+_ADD_LABEL = "+ Add"
+_ACTIVE_ENGINE = "(active engine)"
+_QUICKSTART_LABEL = "Quickstart ▾"
+_NO_WW_WORD = "none — use text keywords"
+_TIME_S = "Time (s)"
 
 # (stored_value, display_label) pairs used by _type_combo / _type_key
 _STT_TYPES: list[tuple[str, str]] = [
@@ -93,12 +101,12 @@ _STT_TEMPLATES: list[tuple[str, str, str, str, str, int]] = [
 
 _WW_TEMPLATES: list[tuple[str, str, str]] = [
     # (name, uri, model)
-    ("Local :10400 — okay_computer",   "tcp://127.0.0.1:10400", "okay_computer"),
+    ("Local :10400 — okay_computer",   _LOCAL_WW_URI, "okay_computer"),
     ("Local :10401 — okay_computer",   "tcp://127.0.0.1:10401", "okay_computer"),
     ("Local :10402 — okay_computer",   "tcp://127.0.0.1:10402", "okay_computer"),
     ("Local :10403 — okay_computer",   "tcp://127.0.0.1:10403", "okay_computer"),
-    ("Local :10400 — hey_jarvis",      "tcp://127.0.0.1:10400", "hey_jarvis"),
-    ("Local :10400 — alexa",           "tcp://127.0.0.1:10400", "alexa"),
+    ("Local :10400 — hey_jarvis",      _LOCAL_WW_URI, "hey_jarvis"),
+    ("Local :10400 — alexa",           _LOCAL_WW_URI, "alexa"),
     ("Home Assistant wyoming",         "tcp://homeassistant.local:10400", "okay_nabu"),
 ]
 
@@ -644,6 +652,244 @@ def _url_field_lb(lb: Gtk.ListBox, label: str, placeholder: str, on_reload,
 
 
 
+def _item_at(items: list, idx: int):
+    """items[idx], or None when idx is out of range (no negative indexing)."""
+    return items[idx] if 0 <= idx < len(items) else None
+
+
+def _status_color(engine, probe) -> str:
+    """GREY when no engine, else GREEN/RED by probe(engine)."""
+    if not engine:
+        return GREY
+    return GREEN if probe(engine) else RED
+
+
+def _grade_color(good: bool, fair: bool) -> str:
+    """Traffic-light colour: green if good, orange if fair, else red."""
+    if good:
+        return "#34c759"
+    return "#ff9f0a" if fair else "#ff3b30"
+
+
+def _emoji_keywords(e: str) -> str:
+    try:
+        return unicodedata.name(e[0], "").lower()
+    except Exception:
+        return ""
+
+
+def _emoji_matches(emojis: list[str], query: str) -> list[str]:
+    return [e for e in emojis if query in _emoji_keywords(e) or query in e]
+
+
+def _emoji_flow() -> Gtk.FlowBox:
+    flow = Gtk.FlowBox()
+    flow.set_max_children_per_line(10)
+    flow.set_selection_mode(Gtk.SelectionMode.NONE)
+    flow.set_margin_top(4); flow.set_margin_bottom(4)
+    flow.set_margin_start(4); flow.set_margin_end(4)
+    return flow
+
+
+def _emoji_button(emoji: str, entry: Gtk.Entry, pop: Gtk.Popover) -> Gtk.Button:
+    """Flat emoji button that sets entry to the emoji and closes the popover."""
+    btn = Gtk.Button(label=emoji)
+    btn.set_relief(Gtk.ReliefStyle.NONE)
+    btn.get_style_context().add_class("bt-emoji-btn")
+    btn.connect("clicked", lambda _b, e=emoji: (entry.set_text(e), pop.popdown()))
+    return btn
+
+
+def _emoji_category_pages(stack: Gtk.Stack, cat_bar: Gtk.Box, entry: Gtk.Entry,
+                          pop: Gtk.Popover) -> str | None:
+    """One stack page + category button per emoji category; returns the first name."""
+    first_name: str | None = None
+    active_btn: list[Gtk.Button] = [None]
+
+    def _select(name: str, btn: Gtk.Button) -> None:
+        stack.set_visible_child_name(name)
+        if active_btn[0]:
+            active_btn[0].get_style_context().remove_class("suggested-action")
+        btn.get_style_context().add_class("suggested-action")
+        active_btn[0] = btn
+
+    for cat_emoji, cat_name, emojis in _EMOJI_CATEGORIES:
+        flow = _emoji_flow()
+        for emoji in emojis:
+            flow.add(_emoji_button(emoji, entry, pop))
+        sw = Gtk.ScrolledWindow()
+        sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        sw.add(flow)
+        stack.add_named(sw, cat_name)
+
+        cb = Gtk.Button(label=cat_emoji)
+        cb.set_relief(Gtk.ReliefStyle.NONE)
+        cb.get_style_context().add_class("bt-emoji-cat-btn")
+        cb.set_tooltip_text(cat_name)
+        cb.connect("clicked", lambda _b, n=cat_name, b=cb: _select(n, b))
+        cat_bar.pack_start(cb, True, True, 0)
+
+        if first_name is None:
+            first_name = cat_name
+            active_btn[0] = cb
+            cb.get_style_context().add_class("suggested-action")
+    return first_name
+
+
+def _wyoming_describe(host: str, port: int) -> dict:
+    """Send a wyoming 'describe' event and return the decoded info payload."""
+    import socket, json
+    with socket.create_connection((host, port), timeout=3.0) as s:
+        s.sendall(json.dumps({"type": "describe"}).encode() + b"\n")
+        line = b""
+        while not line.endswith(b"\n"):
+            chunk = s.recv(1)
+            if not chunk: break
+            line += chunk
+        info = json.loads(line.decode("utf-8"))
+        payload_len = info.get("data_length", info.get("payload_length", 0))
+        payload = b""
+        while len(payload) < payload_len:
+            chunk = s.recv(payload_len - len(payload))
+            if not chunk: break
+            payload += chunk
+        return json.loads(payload.decode("utf-8"))
+
+
+def _live_draw_indicator(indicator: Gtk.Widget, cr, flash_until: float) -> None:
+    """Live wakeword test: round indicator, green while a detection flashes."""
+    w, h = indicator.get_allocated_width(), indicator.get_allocated_height()
+    cx, cy, r = w / 2, h / 2, min(w, h) / 2 - 4
+    if time.monotonic() < flash_until:
+        cr.set_source_rgb(0.13, 0.75, 0.4)
+    else:
+        cr.set_source_rgba(0.85, 0.25, 0.25, 0.9)
+    cr.arc(cx, cy, r, 0, 2 * 3.14159265)
+    cr.fill()
+
+
+def _live_draw_chart(chart: Gtk.Widget, cr, threshold: float, samples, detections,
+                     window: float) -> None:
+    """Live wakeword test: confidence line, threshold and detection dots."""
+    w, h = chart.get_allocated_width(), chart.get_allocated_height()
+    cr.set_source_rgb(0.06, 0.08, 0.14)
+    cr.paint()
+    cr.set_source_rgba(1, 1, 1, 0.08)
+    for frac in (0.0, 0.25, 0.5, 0.75, 1.0):
+        y = h - frac * h
+        cr.move_to(0, y)
+        cr.line_to(w, y)
+        cr.stroke()
+    th_y = h - threshold * h
+    cr.set_source_rgb(0.95, 0.65, 0.1)
+    cr.set_dash([4, 3])
+    cr.move_to(0, th_y)
+    cr.line_to(w, th_y)
+    cr.stroke()
+    cr.set_dash([])
+    now = time.monotonic()
+    pts = [(t, s) for t, s in samples if now - t <= window]
+    if len(pts) >= 2:
+        _live_chart_line(cr, w, h, now, pts, window)
+    cr.set_source_rgb(0.2, 0.85, 0.45)
+    for t in detections:
+        if now - t > window:
+            continue
+        x = w * (1 - (now - t) / window)
+        cr.arc(x, th_y, 4, 0, 2 * 3.14159265)
+        cr.fill()
+
+
+def _live_chart_line(cr, w: int, h: int, now: float, pts: list, window: float) -> None:
+    cr.set_source_rgb(0.25, 0.7, 0.95)
+    cr.set_line_width(1.6)
+    for i, (t, s) in enumerate(pts):
+        x = w * (1 - (now - t) / window)
+        y = h - min(1.0, s) * h
+        if i:
+            cr.line_to(x, y)
+        else:
+            cr.move_to(x, y)
+    cr.stroke()
+
+
+def _live_record_score(state: dict, samples, detections, banner_lbl: Gtk.Label,
+                       score: float, window: float) -> bool:
+    """Live wakeword test (GTK thread): store a score, count/flash a detection."""
+    if not state["alive"]:
+        return False
+    t = time.monotonic()
+    samples.append((t, score))
+    while samples and t - samples[0][0] > window + 1:
+        samples.popleft()
+    if score >= state["threshold"] and (not detections or t - detections[-1] > 1.0):
+        detections.append(t)
+        state["count"] += 1
+        state["flash_until"] = t + 0.6
+        n = state["count"]
+        banner_lbl.set_markup(
+            f"<span foreground='#1a7f37'><b>Detected {n} time"
+            f"{'s' if n != 1 else ''}!</b></span>")
+    return False
+
+
+def _bench_engine_langs(e, meta_cache: dict) -> list[str]:
+    """Languages for a remote STT engine's model (cached per URL; worker thread)."""
+    if e.url not in meta_cache:
+        meta_cache[e.url] = stt.list_models_meta(e.url, e.api_key_env, timeout=4.0)
+    langs: list[str] = []
+    for m in meta_cache[e.url]:
+        if not e.model or m.id == e.model or m.id.endswith("/" + e.model):
+            langs = m.languages
+            break
+    if not langs and meta_cache[e.url]:
+        langs = meta_cache[e.url][0].languages
+    return langs
+
+
+def _bench_num_cmp(model, a, b, col):
+    """Numeric sort: strip %, "server", "—" then compare as float (non-numeric → inf)."""
+    def _f(v):
+        try:
+            return float(v.rstrip("%"))
+        except (ValueError, AttributeError):
+            return float("inf")
+    va, vb = _f(model.get_value(a, col)), _f(model.get_value(b, col))
+    return (va > vb) - (va < vb)
+
+
+def _bench_add_columns(tree: Gtk.TreeView, bench_sort: Gtk.TreeModelSort) -> None:
+    for title, i, expand, max_w in [
+            ("Engine",   0, False, 0),
+            ("URL",      1, False, 180),
+            ("Model",    2, False, 0),
+            ("Device",   3, False, 0),
+            ("Best for", 4, False, 0),
+            ("Lang",     5, False, 160),
+            (_TIME_S, 6, False, 0),
+            ("Accuracy", 7, False, 0),
+            ("RAM (MB)", 8, False, 0),
+            ("Output",   9, True,  0)]:
+        r = Gtk.CellRendererText()
+        r.set_property("ellipsize", Pango.EllipsizeMode.END)
+        col = Gtk.TreeViewColumn(title, r, text=i); col.set_resizable(True)
+        col.set_sort_column_id(i)
+        col.set_expand(expand)
+        if max_w:
+            col.set_max_width(max_w)
+        if i == 8:
+            col.set_widget(Gtk.Label(label="RAM (MB)", tooltip_text=
+                "RAM used by the engine during the benchmark.\n"
+                "Local engines: RSS delta measured on this machine.\n"
+                "Remote engines: current RSS read from the server's Prometheus /metrics endpoint.\n"
+                "'server' = server does not expose /metrics — RAM not measurable.\n"
+                "'—' = local model was already loaded, no delta to measure."))
+            col.get_widget().show()
+        tree.append_column(col)
+        if i in (6, 7, 8):  # Time, Accuracy, RAM — sort numerically
+            bench_sort.set_sort_func(i, _bench_num_cmp, i)
+
+
 def _read_first(paths: list[Path], fallback: str = "Not available in this install.") -> str:
     for path in paths:
         try:
@@ -665,14 +911,133 @@ def _app_paths() -> dict[str, list[Path]]:
     }
 
 
+_MD_INLINE_RE = re.compile(r'(\*\*.*?\*\*|\*.*?\*|`.*?`)')
+_MD_TBL_SEP_RE = re.compile(r'^\|[-| :]+\|$')
+
+
+def _md_create_tags(buf: Gtk.TextBuffer) -> dict:
+    return {
+        "h1":    buf.create_tag("h1",    weight=Pango.Weight.BOLD, size_points=17.0,
+                                pixels_above_lines=14, pixels_below_lines=4),
+        "h2":    buf.create_tag("h2",    weight=Pango.Weight.BOLD, size_points=13.0,
+                                pixels_above_lines=10, pixels_below_lines=3),
+        "h3":    buf.create_tag("h3",    weight=Pango.Weight.BOLD, size_points=11.0,
+                                pixels_above_lines=8,  pixels_below_lines=2),
+        "bold":  buf.create_tag("bold",  weight=Pango.Weight.BOLD),
+        "ital":  buf.create_tag("ital",  style=Pango.Style.ITALIC),
+        "code":  buf.create_tag("code",  family="Monospace", size_points=10.0,
+                                background="#f0f0f4", foreground="#c7254e"),
+        "quote": buf.create_tag("quote", left_margin=20, foreground="#666",
+                                style=Pango.Style.ITALIC,
+                                pixels_above_lines=2, pixels_below_lines=2),
+        "hr":    buf.create_tag("hr",    foreground="#aaa",
+                                pixels_above_lines=6, pixels_below_lines=6),
+        "tbl":   buf.create_tag("tbl",   family="Monospace", size_points=10.0,
+                                pixels_above_lines=1, pixels_below_lines=1),
+        "thdr":  buf.create_tag("thdr",  family="Monospace", size_points=10.0,
+                                weight=Pango.Weight.BOLD,
+                                pixels_above_lines=2, pixels_below_lines=1),
+    }
+
+
+def _md_insert_inline(buf, tags: dict, line: str, end_iter, *extra_tags) -> None:
+    for part in _MD_INLINE_RE.split(line):
+        if part.startswith("**") and part.endswith("**") and len(part) > 4:
+            buf.insert_with_tags(end_iter, part[2:-2], tags["bold"], *extra_tags)
+        elif part.startswith("*") and part.endswith("*") and len(part) > 2:
+            buf.insert_with_tags(end_iter, part[1:-1], tags["ital"], *extra_tags)
+        elif part.startswith("`") and part.endswith("`") and len(part) > 2:
+            buf.insert_with_tags(end_iter, part[1:-1], tags["code"], *extra_tags)
+        elif extra_tags:
+            buf.insert_with_tags(end_iter, part, *extra_tags)
+        else:
+            buf.insert(end_iter, part)
+
+
+def _md_is_table_row(s: str) -> bool:
+    return s.strip().startswith("|") and s.strip().endswith("|")
+
+
+def _md_gather_table(lines: list[str], i: int) -> tuple[list[list[str]], int]:
+    """Collect consecutive table rows (skipping separators) from lines[i]."""
+    tbl_rows: list[list[str]] = []
+    while i < len(lines) and (_md_is_table_row(lines[i].rstrip()) or _MD_TBL_SEP_RE.match(lines[i].rstrip())):
+        row_line = lines[i].rstrip()
+        if not _MD_TBL_SEP_RE.match(row_line):
+            cells = [c.strip() for c in row_line.strip("|").split("|")]
+            tbl_rows.append(cells)
+        i += 1
+    return tbl_rows, i
+
+
+def _md_col_widths(tbl_rows: list[list[str]], n_cols: int) -> list[int]:
+    """Column widths: max of each column (plain text length, stripped of markup)."""
+    widths = [0] * n_cols
+    for row in tbl_rows:
+        for ci, cell in enumerate(row):
+            plain = re.sub(r'\*\*|`|\*', '', cell)
+            widths[ci] = max(widths[ci], len(plain))
+    return widths
+
+
+def _md_table_line(row: list[str], widths: list[int], n_cols: int) -> str:
+    line_text = ""
+    for ci in range(n_cols):
+        cell = row[ci] if ci < len(row) else ""
+        plain = re.sub(r'\*\*|`|\*', '', cell)
+        line_text += plain.ljust(widths[ci] + 2)
+    return line_text
+
+
+def _md_insert_table(buf, tags: dict, lines: list[str], i: int) -> int:
+    """Render the table block starting at lines[i]; return the index after it."""
+    tbl_rows, i = _md_gather_table(lines, i)
+    if not tbl_rows:
+        return i
+    n_cols = max(len(r) for r in tbl_rows)
+    widths = _md_col_widths(tbl_rows, n_cols)
+    for ri, row in enumerate(tbl_rows):
+        end = buf.get_end_iter()
+        tag = tags["thdr"] if ri == 0 else tags["tbl"]
+        buf.insert_with_tags(end, _md_table_line(row, widths, n_cols).rstrip(), tag)
+        if ri < len(tbl_rows) - 1:
+            end = buf.get_end_iter()
+            buf.insert(end, "\n")
+    return i
+
+
+def _md_insert_line(buf, tags: dict, raw: str, end) -> None:
+    """Render one non-table Markdown line at end."""
+    if raw.startswith("### "):
+        buf.insert_with_tags(end, raw[4:], tags["h3"])
+    elif raw.startswith("## "):
+        buf.insert_with_tags(end, raw[3:], tags["h2"])
+    elif raw.startswith("# "):
+        buf.insert_with_tags(end, raw[2:], tags["h1"])
+    elif raw.startswith("> "):
+        _md_insert_inline(buf, tags, raw[2:], end, tags["quote"])
+    elif re.match(r'^-{3,}$', raw):
+        buf.insert_with_tags(end, "─" * 64, tags["hr"])
+    elif raw.startswith("- ") or raw.startswith("* "):
+        buf.insert(end, "  • ")
+        end = buf.get_end_iter()
+        _md_insert_inline(buf, tags, raw[2:], end)
+    elif re.match(r'^\d+\. ', raw):
+        m = re.match(r'^(\d+\. )(.*)', raw)
+        if m:
+            buf.insert(end, "  " + m.group(1))
+            end = buf.get_end_iter()
+            _md_insert_inline(buf, tags, m.group(2), end)
+    else:
+        _md_insert_inline(buf, tags, raw, end)
+
+
 def _md_panel(text: str, height: int = 420) -> Gtk.ScrolledWindow:
     """Render a Markdown string into a read-only styled Gtk.TextView.
 
     Handles: # h1/h2/h3, **bold**, *italic*, `inline code`,
     > blockquotes, --- rules, bullet/numbered lists, and | tables |.
     """
-    import re
-
     sw = Gtk.ScrolledWindow()
     sw.set_min_content_height(height)
     sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
@@ -686,51 +1051,9 @@ def _md_panel(text: str, height: int = 420) -> Gtk.ScrolledWindow:
     view.set_bottom_margin(10)
 
     buf = view.get_buffer()
+    tags = _md_create_tags(buf)
 
-    t_h1    = buf.create_tag("h1",    weight=Pango.Weight.BOLD, size_points=17.0,
-                             pixels_above_lines=14, pixels_below_lines=4)
-    t_h2    = buf.create_tag("h2",    weight=Pango.Weight.BOLD, size_points=13.0,
-                             pixels_above_lines=10, pixels_below_lines=3)
-    t_h3    = buf.create_tag("h3",    weight=Pango.Weight.BOLD, size_points=11.0,
-                             pixels_above_lines=8,  pixels_below_lines=2)
-    t_bold  = buf.create_tag("bold",  weight=Pango.Weight.BOLD)
-    t_ital  = buf.create_tag("ital",  style=Pango.Style.ITALIC)
-    t_code  = buf.create_tag("code",  family="Monospace", size_points=10.0,
-                             background="#f0f0f4", foreground="#c7254e")
-    t_quote = buf.create_tag("quote", left_margin=20, foreground="#666",
-                             style=Pango.Style.ITALIC,
-                             pixels_above_lines=2, pixels_below_lines=2)
-    t_hr    = buf.create_tag("hr",    foreground="#aaa",
-                             pixels_above_lines=6, pixels_below_lines=6)
-    t_tbl   = buf.create_tag("tbl",   family="Monospace", size_points=10.0,
-                             pixels_above_lines=1, pixels_below_lines=1)
-    t_thdr  = buf.create_tag("thdr",  family="Monospace", size_points=10.0,
-                             weight=Pango.Weight.BOLD,
-                             pixels_above_lines=2, pixels_below_lines=1)
-
-    _inline_re = re.compile(r'(\*\*.*?\*\*|\*.*?\*|`.*?`)')
-
-    def _insert_inline(line: str, end_iter, *extra_tags) -> None:
-        for part in _inline_re.split(line):
-            if part.startswith("**") and part.endswith("**") and len(part) > 4:
-                buf.insert_with_tags(end_iter, part[2:-2], t_bold, *extra_tags)
-            elif part.startswith("*") and part.endswith("*") and len(part) > 2:
-                buf.insert_with_tags(end_iter, part[1:-1], t_ital, *extra_tags)
-            elif part.startswith("`") and part.endswith("`") and len(part) > 2:
-                buf.insert_with_tags(end_iter, part[1:-1], t_code, *extra_tags)
-            elif extra_tags:
-                buf.insert_with_tags(end_iter, part, *extra_tags)
-            else:
-                buf.insert(end_iter, part)
-
-    # Collect lines, detect table blocks so we can measure column widths
     lines = text.splitlines()
-    # Pre-scan: mark which lines are table rows vs separators
-    _tbl_sep = re.compile(r'^\|[-| :]+\|$')
-
-    def _is_table_row(s: str) -> bool:
-        return s.strip().startswith("|") and s.strip().endswith("|")
-
     first_line = True
     i = 0
     while i < len(lines):
@@ -743,62 +1066,11 @@ def _md_panel(text: str, height: int = 420) -> Gtk.ScrolledWindow:
         first_line = False
 
         # --- Table block: gather all consecutive table rows ---
-        if _is_table_row(raw):
-            tbl_rows: list[list[str]] = []
-            while i < len(lines) and (_is_table_row(lines[i].rstrip()) or _tbl_sep.match(lines[i].rstrip())):
-                row_line = lines[i].rstrip()
-                if not _tbl_sep.match(row_line):
-                    cells = [c.strip() for c in row_line.strip("|").split("|")]
-                    tbl_rows.append(cells)
-                i += 1
-
-            if tbl_rows:
-                # Column widths: max of each column (plain text length, stripped of markup)
-                n_cols = max(len(r) for r in tbl_rows)
-                widths = [0] * n_cols
-                for row in tbl_rows:
-                    for ci, cell in enumerate(row):
-                        plain = re.sub(r'\*\*|`|\*', '', cell)
-                        widths[ci] = max(widths[ci], len(plain))
-
-                for ri, row in enumerate(tbl_rows):
-                    end = buf.get_end_iter()
-                    tag = t_thdr if ri == 0 else t_tbl
-                    line_text = ""
-                    for ci in range(n_cols):
-                        cell = row[ci] if ci < len(row) else ""
-                        plain = re.sub(r'\*\*|`|\*', '', cell)
-                        line_text += plain.ljust(widths[ci] + 2)
-                    buf.insert_with_tags(end, line_text.rstrip(), tag)
-                    if ri < len(tbl_rows) - 1:
-                        end = buf.get_end_iter()
-                        buf.insert(end, "\n")
+        if _md_is_table_row(raw):
+            i = _md_insert_table(buf, tags, lines, i)
             continue  # i already advanced
 
-        # --- Normal lines ---
-        if raw.startswith("### "):
-            buf.insert_with_tags(end, raw[4:], t_h3)
-        elif raw.startswith("## "):
-            buf.insert_with_tags(end, raw[3:], t_h2)
-        elif raw.startswith("# "):
-            buf.insert_with_tags(end, raw[2:], t_h1)
-        elif raw.startswith("> "):
-            _insert_inline(raw[2:], end, t_quote)
-        elif re.match(r'^-{3,}$', raw):
-            buf.insert_with_tags(end, "─" * 64, t_hr)
-        elif raw.startswith("- ") or raw.startswith("* "):
-            buf.insert(end, "  • ")
-            end = buf.get_end_iter()
-            _insert_inline(raw[2:], end)
-        elif re.match(r'^\d+\. ', raw):
-            m = re.match(r'^(\d+\. )(.*)', raw)
-            if m:
-                buf.insert(end, "  " + m.group(1))
-                end = buf.get_end_iter()
-                _insert_inline(m.group(2), end)
-        else:
-            _insert_inline(raw, end)
-
+        _md_insert_line(buf, tags, raw, end)
         i += 1
 
     sw.add(view)
@@ -821,6 +1093,513 @@ def _text_panel(text: str, *, monospace: bool = True, height: int = 180) -> Gtk.
     view.get_buffer().set_text(text)
     sw.add(view)
     return sw
+
+
+def _oww_result_row(m: dict, src) -> list:
+    """ListStore row (display, kind, source, payload) for one openwakeword.com result."""
+    word = m.get("wake_word") or "?"
+    langs = ", ".join(
+        f"{l.get('code')} {l.get('percentage', 0):.0f}%"
+        for l in (m.get("languages") or []))
+    recall = m.get("recall_pct")
+    bits = [f"\"{word}\""]
+    if langs:
+        bits.append(langs)
+    if recall is not None:
+        bits.append(f"recall {recall:.0f}%")
+    bits.append(src.name)
+    payload = dict(m)
+    payload["base_url"] = src.url
+    payload["wake_word"] = word
+    return ["  —  ".join(bits), "oww", src.name, payload]
+
+
+class _WWDownloader:
+    """Wakeword-model download dialog — method object behind
+    SettingsDialog._show_ww_downloader (one instance per opened dialog)."""
+
+    def __init__(self, owner) -> None:
+        from . import wwdownload as WD
+        from . import owwlibrary as OL
+        self.owner = owner
+        self.WD = WD
+        self.OL = OL
+        self.gh_sources = [s for s in owner.cfg.wakeword_sources
+                           if s.enabled and s.kind == "github_collection"]
+        self.oww_sources = [s for s in owner.cfg.wakeword_sources
+                            if s.enabled and s.kind == "openwakeword_api"]
+
+    def show(self) -> None:
+        dlg = self.dlg = Gtk.Dialog(title="Download wakeword models",
+                                    transient_for=self.owner.dlg, modal=True)
+        dlg.set_default_size(640, 560)
+        box = self.box = dlg.get_content_area()
+        box.set_spacing(8)
+        box.set_border_width(12)
+
+        self._build_intro()
+        if not self.gh_sources and not self.oww_sources:
+            self._show_no_sources()
+            return
+
+        # Resolve the target folder from the *currently selected engine's*
+        # server so the download lands where that engine actually reads from.
+        det = self.WD.autodetect_for_uri(self.owner.ww_uri.get_text())
+        self.det_containers = det["containers"]
+        self._build_warning(det)
+        self._build_folder_row(det["model_dir"])
+        self._build_filter_row()
+        self._build_model_list()
+        self._build_footer()
+
+        self.state = {"sel": [], "oww_stage": 0, "search_seq": 0}
+        self.view.get_selection().connect("changed", self._on_sel)
+
+        # ── GitHub collections: languages, then models per language ───────
+        self.lang_combo.connect("changed", self._on_lang)
+        if self.gh_sources:
+            threading.Thread(target=self._load_langs, daemon=True).start()
+        else:
+            self.lang_combo.set_sensitive(False)
+            self.status.set_text("0 local, 0 online result(s) — type to search.")
+
+        # ── openwakeword.com-style libraries: free-text search, debounced ──
+        self.search.connect("search-changed", self._on_search_changed)
+
+        dlg.connect("response", self._on_response)
+        dlg.show_all()
+
+    # ── Layout ──────────────────────────────────────────────────────────
+    def _build_intro(self) -> None:
+        intro_row = Gtk.Box(spacing=8)
+        intro = Gtk.Label(xalign=0.0)
+        intro.set_line_wrap(True)
+        intro.set_markup(
+            "Searches every enabled catalog below. GitHub collections install "
+            "instantly and for free; openwakeword.com-style libraries need a "
+            "quick browser step — sign in there for free, download the model, "
+            "then pick the file here.")
+        intro_row.pack_start(intro, True, True, 0)
+        manage_src_btn = Gtk.Button(label="Manage sources…")
+        manage_src_btn.set_valign(Gtk.Align.START)
+        intro_row.pack_start(manage_src_btn, False, False, 0)
+        self.box.pack_start(intro_row, False, False, 0)
+
+        manage_src_btn.connect("clicked", lambda _b: (
+            self.owner._show_ww_sources_dialog(transient_for=self.dlg),
+            self._reopen_downloader()))
+
+    def _reopen_downloader(self) -> None:
+        self.dlg.destroy()
+        self.owner._show_ww_downloader()
+
+    def _show_no_sources(self) -> None:
+        dlg = self.dlg
+        status0 = Gtk.Label(xalign=0.0)
+        status0.set_line_wrap(True)
+        status0.set_markup(
+            "<span foreground='#b35900'>No wakeword sources enabled — "
+            "click <b>Manage sources…</b> above to add or enable one.</span>")
+        self.box.pack_start(status0, False, False, 0)
+        dlg.add_button("Close", Gtk.ResponseType.CLOSE)
+        dlg.connect("response", lambda _d, _r: dlg.destroy())
+        dlg.show_all()
+
+    def _build_warning(self, det: dict) -> None:
+        warn_lbl = Gtk.Label(xalign=0.0)
+        warn_lbl.set_line_wrap(True)
+        if not det["compatible"]:
+            fw = det["framework"] or "this"
+            warn_lbl.set_markup(
+                f"<span foreground='#b35900'>⚠ The selected engine is a "
+                f"<b>{GLib.markup_escape_text(fw)}</b> server — these openWakeWord "
+                f"models won't load there. They'll be saved to your openWakeWord "
+                f"folder below; switch the active engine to an openWakeWord server "
+                f"to use them.</span>")
+            self.box.pack_start(warn_lbl, False, False, 0)
+
+    def _build_folder_row(self, det_dir) -> None:
+        dir_row = Gtk.Box(spacing=6)
+        dir_row.pack_start(Gtk.Label(label="Model folder:", xalign=0.0), False, False, 0)
+        self.dir_entry = Gtk.Entry()
+        self.dir_entry.set_hexpand(True)
+        self.dir_entry.set_text(det_dir or "")
+        dir_row.pack_start(self.dir_entry, True, True, 0)
+        browse = Gtk.Button(label="Browse…")
+        dir_row.pack_start(browse, False, False, 0)
+        self.box.pack_start(dir_row, False, False, 0)
+        browse.connect("clicked", self._browse)
+
+    def _browse(self, _b) -> None:
+        dir_entry = self.dir_entry
+        fc = Gtk.FileChooserDialog(
+            title="Select openWakeWord model folder", transient_for=self.dlg,
+            action=Gtk.FileChooserAction.SELECT_FOLDER)
+        fc.add_buttons("Cancel", Gtk.ResponseType.CANCEL,
+                       "Select", Gtk.ResponseType.OK)
+        if dir_entry.get_text():
+            fc.set_current_folder(dir_entry.get_text())
+        if fc.run() == Gtk.ResponseType.OK:
+            dir_entry.set_text(fc.get_filename())
+        fc.destroy()
+
+    def _build_filter_row(self) -> None:
+        filt_row = Gtk.Box(spacing=6)
+        filt_row.pack_start(Gtk.Label(label="Language:", xalign=0.0), False, False, 0)
+        self.lang_combo = _block_scroll(Gtk.ComboBoxText())
+        filt_row.pack_start(self.lang_combo, False, False, 0)
+        self.search = Gtk.SearchEntry()
+        self.search.set_placeholder_text("Search all sources…")
+        self.search.set_hexpand(True)
+        filt_row.pack_start(self.search, True, True, 0)
+        self.box.pack_start(filt_row, False, False, 0)
+
+        hint = Gtk.Label(xalign=0.0)
+        hint.set_markup("<small>Ctrl+Click or Shift+Click to select several models at once</small>")
+        hint.get_style_context().add_class("dim-label")
+        self.box.pack_start(hint, False, False, 0)
+
+    def _build_model_list(self) -> None:
+        # Model list: display, kind ('gh'/'oww'), source name, payload.
+        self.store = Gtk.ListStore(str, str, str, object)
+        view = self.view = Gtk.TreeView(model=Gtk.TreeModelFilter(child_model=self.store))
+        view.set_headers_visible(False)
+        view.get_selection().set_mode(Gtk.SelectionMode.MULTIPLE)
+        view.append_column(Gtk.TreeViewColumn("", Gtk.CellRendererText(), text=0))
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+        scroll.add(view)
+        self.box.pack_start(scroll, True, True, 0)
+
+        self.tmodel = view.get_model()
+        self.filter_text = {"q": ""}
+        self.tmodel.set_visible_func(self._visible)
+
+    def _visible(self, m, it, _d) -> bool:
+        # GitHub rows are filtered locally; openwakeword.com-style rows
+        # are already server-filtered by the search query that fetched them.
+        if m[it][1] == "gh":
+            return self.filter_text["q"] in (m[it][0] or "").lower()
+        return True
+
+    def _build_footer(self) -> None:
+        box, dlg = self.box, self.dlg
+        self.status = Gtk.Label(xalign=0.0)
+        self.status.set_line_wrap(True)
+        self.status.get_style_context().add_class("dim-label")
+        box.pack_start(self.status, False, False, 0)
+
+        opts = Gtk.Box(spacing=6)
+        self.both_chk = Gtk.CheckButton(label="Also download .onnx copy (GitHub sources)")
+        self.both_chk.set_active(True)
+        self.both_chk.set_tooltip_text("Keep both formats so the model works whether "
+                                       "the server uses the tflite or onnx framework")
+        opts.pack_start(self.both_chk, False, False, 0)
+        box.pack_start(opts, False, False, 0)
+
+        self.aux_btn = dlg.add_button("View README", 1)
+        self.act_btn = dlg.add_button("Download", Gtk.ResponseType.APPLY)
+        dlg.add_button("Close", Gtk.ResponseType.CLOSE)
+        self.aux_btn.set_sensitive(False)
+        self.act_btn.set_sensitive(False)
+
+    # ── Selection ───────────────────────────────────────────────────────
+    def _selected_list(self) -> list[dict]:
+        m, paths = self.view.get_selection().get_selected_rows()
+        out = []
+        for p in paths:
+            it = m.get_iter(p)
+            out.append({"kind": m[it][1], "source": m[it][2], "payload": m[it][3]})
+        return out
+
+    def _on_sel(self, _s) -> None:
+        act_btn, aux_btn = self.act_btn, self.aux_btn
+        sels = self._selected_list()
+        self.state["sel"] = sels
+        self.state["oww_stage"] = 0
+        if not sels:
+            act_btn.set_sensitive(False)
+            aux_btn.set_sensitive(False)
+            return
+        n = len(sels)
+        kinds = {s["kind"] for s in sels}
+        if len(kinds) > 1:
+            act_btn.set_sensitive(False)
+            aux_btn.set_sensitive(False)
+            self.status.set_markup("<span foreground='#b35900'>Select only GitHub or "
+                                   "only online results at once.</span>")
+            return
+        kind = next(iter(kinds))
+        if kind == "gh":
+            act_btn.set_label(f"Download & Install ({n})" if n > 1 else "Download & Install")
+            act_btn.set_sensitive(True)
+            aux_btn.set_label("View README")
+            aux_btn.set_sensitive(n == 1)
+        else:
+            act_btn.set_label(f"Download in Browser ({n})…" if n > 1 else "Download in Browser…")
+            act_btn.set_sensitive(True)
+            aux_btn.set_label("Test live (mic)")
+            aux_btn.set_sensitive(n == 1 and bool(sels[0]["payload"].get("human_test_url")))
+
+    def _status_counts(self) -> None:
+        gh_n = sum(1 for r in self.store if r[1] == "gh")
+        oww_n = sum(1 for r in self.store if r[1] == "oww")
+        self.status.set_text(f"{gh_n} local, {oww_n} online result(s) — select one.")
+
+    # ── GitHub collections ──────────────────────────────────────────────
+    def _load_gh_models(self, lang) -> None:
+        store = self.store
+        for it in [row.iter for row in store if row[1] == "gh"]:
+            store.remove(it)
+        for src in self.gh_sources:
+            threading.Thread(target=self._fetch_gh_models, args=(src, lang), daemon=True).start()
+
+    def _fetch_gh_models(self, src, lang) -> None:
+        """Worker thread: list one GitHub source's models for lang."""
+        try:
+            names = self.WD.list_models(lang, repo=src.url)
+            err = None
+        except Exception as e:
+            names, err = [], str(e)
+        GLib.idle_add(self._add_gh_models, src, lang, names, err)
+
+    def _add_gh_models(self, src, lang, names, err) -> bool:
+        if err:
+            return False
+        for n in names:
+            label = self.WD.phrase_from_name(n)
+            disp = f"{label} — {src.name}" if len(self.gh_sources) > 1 else label
+            self.store.append([disp, "gh", src.name,
+                               {"repo": src.url, "lang": lang, "name": n}])
+        self._status_counts()
+        return False
+
+    def _on_lang(self, c) -> None:
+        lang = c.get_active_text()
+        if lang:
+            self._load_gh_models(lang)
+
+    def _load_langs(self) -> None:
+        """Worker thread: union of every GitHub source's languages."""
+        seen = []
+        for src in self.gh_sources:
+            try:
+                for lg in self.WD.list_languages(repo=src.url):
+                    if lg not in seen:
+                        seen.append(lg)
+            except Exception:
+                pass
+        langs = sorted(seen) or self.WD.KNOWN_LANGUAGES
+        GLib.idle_add(self._apply_langs, langs)
+
+    def _apply_langs(self, langs) -> bool:
+        for lg in langs:
+            self.lang_combo.append_text(lg)
+        if langs:
+            idx = langs.index("en") if "en" in langs else 0
+            self.lang_combo.set_active(idx)  # triggers _on_lang
+        return False
+
+    # ── openwakeword.com-style libraries ────────────────────────────────
+    def _run_oww_search(self, query, seq) -> None:
+        if not self.oww_sources:
+            return
+        if not query.strip():
+            GLib.idle_add(self._clear_oww, seq)
+            return
+        for src in self.oww_sources:
+            threading.Thread(target=self._fetch_oww, args=(src, query, seq), daemon=True).start()
+
+    def _clear_oww(self, seq) -> bool:
+        if self.state["search_seq"] != seq:
+            return False
+        for it in [row.iter for row in self.store if row[1] == "oww"]:
+            self.store.remove(it)
+        self._status_counts()
+        return False
+
+    def _fetch_oww(self, src, query, seq) -> None:
+        """Worker thread: search one openwakeword.com-style source."""
+        try:
+            results = self.OL.search(src.url, query)
+            err = None
+        except Exception as e:
+            results, err = [], str(e)
+        GLib.idle_add(self._add_oww_results, src, seq, results, err)
+
+    def _add_oww_results(self, src, seq, results, err) -> bool:
+        if self.state["search_seq"] != seq:
+            return False  # superseded by a newer keystroke
+        if err:
+            self.status.set_markup(
+                f"<span foreground='#cc0000'>{GLib.markup_escape_text(src.name)}: "
+                f"{GLib.markup_escape_text(err)}</span>")
+            return False
+        for it in [row.iter for row in self.store
+                   if row[1] == "oww" and row[2] == src.name]:
+            self.store.remove(it)
+        for m in results:
+            self.store.append(_oww_result_row(m, src))
+        self._status_counts()
+        return False
+
+    def _on_search_changed(self, e) -> None:
+        text = e.get_text()
+        self.filter_text["q"] = text.lower()
+        self.tmodel.refilter()
+        self.state["search_seq"] += 1
+        seq = self.state["search_seq"]
+        GLib.timeout_add(450, lambda: (self._run_oww_search(text, seq), False)[1])
+
+    # ── Actions ─────────────────────────────────────────────────────────
+    def _valid_model_dir(self) -> str | None:
+        model_dir = self.dir_entry.get_text().strip()
+        if not model_dir or not Path(model_dir).is_dir():
+            self.status.set_markup("<span foreground='#cc0000'>Set a valid model "
+                                   "folder first.</span>")
+            return None
+        return model_dir
+
+    def _report_install(self, installed: list, errors: list, model_dir: str) -> None:
+        parts = []
+        if installed:
+            parts.append(
+                f"<span foreground='#1a7f37'>Installed "
+                f"{GLib.markup_escape_text(', '.join(installed))}.</span>")
+        if errors:
+            parts.append(
+                f"<span foreground='#cc0000'>{GLib.markup_escape_text('; '.join(errors))}</span>")
+        self.status.set_markup(" ".join(parts) or "Nothing installed.")
+        if installed:
+            self.owner.cfg.wakeword_model_dir = model_dir
+            if self.det_containers:
+                self.owner.cfg.wakeword_model_container = ",".join(self.det_containers)
+            self.owner._ww_offer_restart(self.det_containers, self.dlg)
+
+    def _do_gh_download(self, payloads) -> None:
+        model_dir = self._valid_model_dir()
+        if model_dir is None:
+            return
+        self.status.set_text(f"Downloading {len(payloads)} model(s)…")
+        self.act_btn.set_sensitive(False)
+        all_fmt = self.both_chk.get_active()
+        threading.Thread(target=self._gh_download_worker, args=(payloads, model_dir, all_fmt),
+                         daemon=True).start()
+
+    def _gh_download_worker(self, payloads, model_dir, all_fmt) -> None:
+        installed, errors = [], []
+        for payload in payloads:
+            name, lang, repo = payload["name"], payload["lang"], payload["repo"]
+            try:
+                variants = self.WD.list_variants(lang, name, repo=repo)
+                res = self.WD.install(lang, name, model_dir, repo=repo,
+                                      variants=variants, all_formats=all_fmt)
+                installed.append(res["model_id"])
+            except Exception as e:
+                errors.append(f"{name}: {e}")
+        GLib.idle_add(self._gh_download_done, installed, errors, model_dir)
+
+    def _gh_download_done(self, installed, errors, model_dir) -> bool:
+        self.act_btn.set_sensitive(True)
+        self._report_install(installed, errors, model_dir)
+        return False
+
+    def _pick_model_files(self) -> list[str]:
+        fc = Gtk.FileChooserDialog(
+            title="Select downloaded model file(s)", transient_for=self.dlg,
+            action=Gtk.FileChooserAction.OPEN)
+        fc.add_buttons("Cancel", Gtk.ResponseType.CANCEL,
+                       "Select", Gtk.ResponseType.OK)
+        fc.set_select_multiple(True)
+        filt = Gtk.FileFilter()
+        filt.set_name("openWakeWord models (.onnx, .tflite)")
+        filt.add_pattern("*.onnx")
+        filt.add_pattern("*.tflite")
+        fc.add_filter(filt)
+        downloads = str(Path.home() / "Downloads")
+        if Path(downloads).is_dir():
+            fc.set_current_folder(downloads)
+        files = []
+        if fc.run() == Gtk.ResponseType.OK:
+            files = fc.get_filenames()
+        fc.destroy()
+        return files
+
+    def _install_local_files(self, files, payloads, model_dir) -> tuple[list, list]:
+        written, errors = [], []
+        if len(payloads) == 1:
+            # One model: group same-word files (onnx+tflite pair) under its name.
+            try:
+                written = self.WD.install_local(files, model_dir, word=payloads[0].get("wake_word"))
+            except Exception as e:
+                errors.append(str(e))
+        else:
+            # Several different models picked at once: each file keeps its own name.
+            for f in files:
+                try:
+                    written += self.WD.install_local([f], model_dir, word=None)
+                except Exception as e:
+                    errors.append(f"{Path(f).name}: {e}")
+        return written, errors
+
+    def _pick_and_install_oww(self, payloads) -> None:
+        model_dir = self._valid_model_dir()
+        if model_dir is None:
+            return
+        files = self._pick_model_files()
+        if not files:
+            return
+        written, errors = self._install_local_files(files, payloads, model_dir)
+        self._report_install(written, errors, model_dir)
+        self.state["oww_stage"] = 0
+        self._on_sel(None)  # restore the normal per-selection button label
+
+    def _open_oww_pages(self, sels) -> None:
+        for s in sels:
+            url = self.OL.library_page_url(s["payload"]["base_url"],
+                                           s["payload"]["model_id"])
+            Gtk.show_uri_on_window(self.dlg, url, Gdk.CURRENT_TIME)
+        self.state["oww_stage"] = 1
+        n = len(sels)
+        self.act_btn.set_label("Pick Downloaded File(s) & Install"
+                               + (f" ({n})" if n > 1 else ""))
+        self.status.set_text(f"Opened {n} page(s) in your browser — sign in "
+                             "and download the model(s), then click again "
+                             "to pick the file(s).")
+
+    def _on_aux(self, sels) -> None:
+        """README / test-live (only offered for a single selection)."""
+        if len(sels) == 1 and sels[0]["kind"] == "gh":
+            p = sels[0]["payload"]
+            Gtk.show_uri_on_window(
+                self.dlg, self.WD.readme_url(p["lang"], p["name"], repo=p["repo"]),
+                Gdk.CURRENT_TIME)
+        elif len(sels) == 1 and sels[0]["kind"] == "oww":
+            url = sels[0]["payload"].get("human_test_url")
+            if url:
+                Gtk.show_uri_on_window(self.dlg, url, Gdk.CURRENT_TIME)
+
+    def _on_apply(self, sels) -> None:
+        if not sels:
+            return
+        kind = sels[0]["kind"]
+        if kind == "gh":
+            self._do_gh_download([s["payload"] for s in sels])
+        elif self.state.get("oww_stage", 0) == 0:
+            self._open_oww_pages(sels)
+        else:
+            self._pick_and_install_oww([s["payload"] for s in sels])
+
+    def _on_response(self, _d, resp) -> None:
+        sels = self.state.get("sel") or []
+        if resp == 1:  # README / test-live (only offered for a single selection)
+            self._on_aux(sels)
+            return
+        if resp == Gtk.ResponseType.APPLY:
+            self._on_apply(sels)
+            return
+        self.dlg.destroy()
 
 
 class SettingsDialog:
@@ -1053,7 +1832,7 @@ class SettingsDialog:
 
     def _force_build_tabs(self) -> None:
         """Build any not-yet-visited pages so _collect() sees every field."""
-        for page in list(self._pending_pages):
+        for page in [*self._pending_pages]:  # copy: _build_page pops from the dict
             self._build_page(page)
 
     # ===== Presets ==========================================================
@@ -1073,7 +1852,7 @@ class SettingsDialog:
         self.wf_combo.set_active(0)
         self.wf_combo.connect("changed", self._wf_changed)
         bar.pack_start(self.wf_combo, True, True, 0)
-        add = Gtk.Button(label="+ Add"); add.connect("clicked", self._wf_add)
+        add = Gtk.Button(label=_ADD_LABEL); add.connect("clicked", self._wf_add)
         rm  = Gtk.Button(label="Delete"); rm.connect("clicked", self._wf_delete)
         bar.pack_start(add, False, False, 0); bar.pack_start(rm, False, False, 0)
         page.pack_start(bar, False, False, 0)
@@ -1102,14 +1881,14 @@ class SettingsDialog:
         stt_names = [e.name for e in self.cfg.stt_engines]
         self.wf_stt_engine = _labeled(
             beh_card, "STT engine",
-            _combo(["(active engine)"] + stt_names),
+            _combo([_ACTIVE_ENGINE] + stt_names),
             tooltip="Which speech-to-text engine this preset uses. ‘(active engine)’ follows the Engines tab. Use a realtime engine for ‘stream’ mode and a batch engine for ‘transcribe’/‘rewrite’.",
         )
         # Engine dropdown — "(active engine)" + one entry per configured LLM engine.
         llm_names = [e.name for e in self.cfg.llm_engines]
         self.wf_llm_engine = _labeled(
             beh_card, "LLM engine",
-            _combo(["(active engine)"] + llm_names),
+            _combo([_ACTIVE_ENGINE] + llm_names),
             tooltip="Which LLM engine to use for the rewrite step. ‘(active engine)’ follows whatever is selected in the Engines tab.",
         )
         self.wf_temp  = _labeled(beh_card, "Temperature (opt.)", _entry(placeholder="blank = engine default (e.g. 0.3)"),
@@ -1160,9 +1939,9 @@ class SettingsDialog:
         wf.hotkey = self.wf_hotkey.get_text().strip()
         wf.mode = self.wf_mode.get_active_text() or "transcribe"
         engine_text = self.wf_llm_engine.get_active_text() or ""
-        wf.llm_engine = "" if engine_text == "(active engine)" else engine_text
+        wf.llm_engine = "" if engine_text == _ACTIVE_ENGINE else engine_text
         stt_text = self.wf_stt_engine.get_active_text() or ""
-        wf.stt_engine = "" if stt_text == "(active engine)" else stt_text
+        wf.stt_engine = "" if stt_text == _ACTIVE_ENGINE else stt_text
         t = self.wf_temp.get_text().strip()
         wf.temperature = float(t) if _isfloat(t) else None
         b = self.wf_prompt.get_buffer()
@@ -1299,12 +2078,6 @@ class SettingsDialog:
         # Flat emoji list (all categories) used by search
         all_emojis: list[str] = [e for _, _, es in _EMOJI_CATEGORIES for e in es]
 
-        def _keywords(e: str) -> str:
-            try:
-                return unicodedata.name(e[0], "").lower()
-            except Exception:
-                return ""
-
         # -- Category view ----------------------------------------------------
         cat_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
@@ -1316,44 +2089,7 @@ class SettingsDialog:
         cat_bar.set_margin_top(4); cat_bar.set_margin_bottom(4)
         cat_bar.set_margin_start(4); cat_bar.set_margin_end(4)
 
-        first_name: str | None = None
-        active_btn: list[Gtk.Button] = [None]
-
-        def _select(name: str, btn: Gtk.Button) -> None:
-            stack.set_visible_child_name(name)
-            if active_btn[0]:
-                active_btn[0].get_style_context().remove_class("suggested-action")
-            btn.get_style_context().add_class("suggested-action")
-            active_btn[0] = btn
-
-        for cat_emoji, cat_name, emojis in _EMOJI_CATEGORIES:
-            flow = Gtk.FlowBox()
-            flow.set_max_children_per_line(10)
-            flow.set_selection_mode(Gtk.SelectionMode.NONE)
-            flow.set_margin_top(4); flow.set_margin_bottom(4)
-            flow.set_margin_start(4); flow.set_margin_end(4)
-            for emoji in emojis:
-                eb = Gtk.Button(label=emoji)
-                eb.set_relief(Gtk.ReliefStyle.NONE)
-                eb.get_style_context().add_class("bt-emoji-btn")
-                eb.connect("clicked", lambda _b, e=emoji: (entry.set_text(e), pop.popdown()))
-                flow.add(eb)
-            sw = Gtk.ScrolledWindow()
-            sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-            sw.add(flow)
-            stack.add_named(sw, cat_name)
-
-            cb = Gtk.Button(label=cat_emoji)
-            cb.set_relief(Gtk.ReliefStyle.NONE)
-            cb.get_style_context().add_class("bt-emoji-cat-btn")
-            cb.set_tooltip_text(cat_name)
-            cb.connect("clicked", lambda _b, n=cat_name, b=cb: _select(n, b))
-            cat_bar.pack_start(cb, True, True, 0)
-
-            if first_name is None:
-                first_name = cat_name
-                active_btn[0] = cb
-                cb.get_style_context().add_class("suggested-action")
+        first_name = _emoji_category_pages(stack, cat_bar, entry, pop)
 
         if first_name:
             stack.set_visible_child_name(first_name)
@@ -1370,11 +2106,7 @@ class SettingsDialog:
         search_sw = Gtk.ScrolledWindow()
         search_sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         search_sw.set_size_request(420, 274)
-        search_flow = Gtk.FlowBox()
-        search_flow.set_max_children_per_line(10)
-        search_flow.set_selection_mode(Gtk.SelectionMode.NONE)
-        search_flow.set_margin_top(4); search_flow.set_margin_bottom(4)
-        search_flow.set_margin_start(4); search_flow.set_margin_end(4)
+        search_flow = _emoji_flow()
         search_sw.add(search_flow)
 
         def _on_search(_e: Gtk.SearchEntry) -> None:
@@ -1384,13 +2116,8 @@ class SettingsDialog:
             if query:
                 cat_container.set_visible(False)
                 search_sw.set_visible(True)
-                for emoji in all_emojis:
-                    if query in _keywords(emoji) or query in emoji:
-                        btn = Gtk.Button(label=emoji)
-                        btn.set_relief(Gtk.ReliefStyle.NONE)
-                        btn.get_style_context().add_class("bt-emoji-btn")
-                        btn.connect("clicked", lambda _b, e=emoji: (entry.set_text(e), pop.popdown()))
-                        search_flow.add(btn)
+                for emoji in _emoji_matches(all_emojis, query):
+                    search_flow.add(_emoji_button(emoji, entry, pop))
                 search_flow.show_all()
             else:
                 search_sw.set_visible(False)
@@ -1430,7 +2157,7 @@ class SettingsDialog:
         self.talk_combo.connect("changed", self._talk_changed)
         bar.pack_start(self.talk_combo, True, True, 0)
         
-        add = Gtk.Button(label="+ Add")
+        add = Gtk.Button(label=_ADD_LABEL)
         add.connect("clicked", self._talk_add)
         rm = Gtk.Button(label="Delete")
         rm.connect("clicked", self._talk_delete)
@@ -1484,10 +2211,10 @@ class SettingsDialog:
             self._talk_populate_combos(e.url, e.api_key_env, e.model, self.cfg.talk_voice,
                                        show_errors=False)
 
-    def _talk_commit(self, *, show_errors: bool = True) -> bool:
+    def _talk_commit(self) -> None:
         idx = self._talk_idx
         if not (0 <= idx < len(self.cfg.talk_engines)):
-            return True
+            return
         e = self.cfg.talk_engines[idx]
         old_name = e.name
         e.name = self.talk_name.get_text().strip() or e.name
@@ -1501,7 +2228,6 @@ class SettingsDialog:
         self.talk_combo.remove(idx)
         self.talk_combo.insert_text(idx, e.name)
         self.talk_combo.set_active(idx)
-        return True
 
     def _talk_reload(self) -> None:
         url = self.talk_url.get_text().strip().rstrip("/")
@@ -1535,7 +2261,7 @@ class SettingsDialog:
                     if voices:
                         _fill_combo(self.talk_voice, voices, current_voice)
                 GLib.idle_add(apply)
-            except Exception as e:
+            except Exception:
                 pass
         import threading
         threading.Thread(target=work, daemon=True).start()
@@ -1544,14 +2270,11 @@ class SettingsDialog:
         new = combo.get_active()
         if new < 0 or new == self._talk_idx:
             return
-        if not self._talk_commit():
-            self.talk_combo.set_active(self._talk_idx)
-            return
+        self._talk_commit()
         self._talk_load(new)
 
     def _talk_add(self, _b) -> None:
-        if not self._talk_commit():
-            return
+        self._talk_commit()
         from .config import TTSEngine
         e = TTSEngine(name="New TTS")
         self.cfg.talk_engines.append(e)
@@ -1606,10 +2329,10 @@ class SettingsDialog:
         bar.pack_start(self.stt_dot, False, False, 0)
         bar.pack_start(self.stt_combo, True, True, 0)
         # Left: creation
-        for label, cb in (("+ Add", self._stt_add), ("+ Stream", self._stt_add_stream)):
+        for label, cb in ((_ADD_LABEL, self._stt_add), ("+ Stream", self._stt_add_stream)):
             b = Gtk.Button(label=label); b.connect("clicked", cb)
             bar.pack_start(b, False, False, 0)
-        qs = Gtk.Button(label="Quickstart ▾")
+        qs = Gtk.Button(label=_QUICKSTART_LABEL)
         qs.set_tooltip_text("Fill the form from a common service template")
         qs.connect("clicked", self._show_stt_templates)
         bar.pack_start(qs, False, False, 0)
@@ -1702,9 +2425,9 @@ class SettingsDialog:
         self.llm_dot = Gtk.Label(); self.llm_dot.set_markup(_dot(GREY))
         bar.pack_start(self.llm_dot, False, False, 0)
         bar.pack_start(self.llm_combo, True, True, 0)
-        add = Gtk.Button(label="+ Add"); add.connect("clicked", self._llm_add)
+        add = Gtk.Button(label=_ADD_LABEL); add.connect("clicked", self._llm_add)
         bar.pack_start(add, False, False, 0)
-        qs = Gtk.Button(label="Quickstart ▾")
+        qs = Gtk.Button(label=_QUICKSTART_LABEL)
         qs.set_tooltip_text("Fill the form from a common service template")
         qs.connect("clicked", self._show_llm_templates)
         bar.pack_start(qs, False, False, 0)
@@ -2025,16 +2748,16 @@ class SettingsDialog:
 
     # -- status dots (threaded) ---
     def _refresh_status(self) -> None:
-        s = self.cfg.stt_engines[self._stt_idx] if 0 <= self._stt_idx < len(self.cfg.stt_engines) else None
+        s = _item_at(self.cfg.stt_engines, self._stt_idx)
         if hasattr(self, "stt_combo"):
             self._stt_commit()
-        l = self.cfg.llm_engines[self._llm_idx] if 0 <= self._llm_idx < len(self.cfg.llm_engines) else None
+        l = _item_at(self.cfg.llm_engines, self._llm_idx)
         if hasattr(self, "llm_combo"):
             self._llm_commit()
 
         def check():
-            sc = GREEN if (s and stt.status(s)) else RED if s else GREY
-            lc = GREEN if (l and llm.status(l)) else RED if l else GREY
+            sc = _status_color(s, stt.status)
+            lc = _status_color(l, llm.status)
             if hasattr(self, "stt_dot"):
                 GLib.idle_add(self.stt_dot.set_markup, _dot(sc))
             if hasattr(self, "llm_dot"):
@@ -2277,9 +3000,9 @@ class SettingsDialog:
                            if e.name == self.cfg.wakeword_active), 0)
         self.ww_combo.set_active(active_idx)
         ww_bar.pack_start(self.ww_combo, True, True, 0)
-        for label, cb in (("+ Add", self._ww_add),):
+        for label, cb in ((_ADD_LABEL, self._ww_add),):
             b = Gtk.Button(label=label); b.connect("clicked", cb); ww_bar.pack_start(b, False, False, 0)
-        qs = Gtk.Button(label="Quickstart ▾")
+        qs = Gtk.Button(label=_QUICKSTART_LABEL)
         qs.set_tooltip_text("Fill the form from a common wakeword server template")
         qs.connect("clicked", self._show_ww_templates); ww_bar.pack_start(qs, False, False, 0)
         dl = Gtk.Button(label="Download…")
@@ -2306,26 +3029,26 @@ class SettingsDialog:
                                 tooltip="A label for this wakeword server preset.", width=LW)
         self.ww_dot = Gtk.Label(); self.ww_dot.set_markup(_dot(GREY))
         self.ww_dot.set_tooltip_text("openWakeWord server: green = reachable, red = unreachable")
-        self.ww_uri = _url_field_lb(ww_cfg_card, "Wakeword server", "tcp://127.0.0.1:10400",
+        self.ww_uri = _url_field_lb(ww_cfg_card, "Wakeword server", _LOCAL_WW_URI,
                                     self._ww_reload, dot=self.ww_dot, width=LW)
         self.ww_uri.connect("focus-out-event", self._on_ww_uri_leave)
         self.ww_model, _ = self._model_test_row(
             ww_cfg_card, "Wakeword", "Search models…", width=LW,
             tooltip="Which wake model(s) to listen for (e.g. okay_computer, hey_jarvis). Pick several to accept multiple wakewords. Press ⟳ on the URI field to load models from the server.")
         self.ww_cancel_model, _ = self._model_test_row(
-            ww_cfg_card, "Cancel word", "none — use text keywords", width=LW,
+            ww_cfg_card, "Cancel word", _NO_WW_WORD, width=LW,
             tooltip="Optional: one or more wakeword models that immediately cancel the recording when heard (e.g. a ‘stop’ model). Faster than the Whisper-based text cancel.")
         self.cancel_keywords, self._ww_cancel_kw_row = self._kw_text_row(
             ww_cfg_card, "Custom cancel words", ", ".join(self.cfg.cancel_keywords), "abbrechen, cancel", width=LW,
             tooltip_kw="Say one of these at the start or end of a clip to DISCARD it — nothing is typed. Empty = off.")
         self.ww_send_model, _ = self._model_test_row(
-            ww_cfg_card, "Send word", "none — use text keywords", width=LW,
+            ww_cfg_card, "Send word", _NO_WW_WORD, width=LW,
             tooltip="Optional: one or more wakeword models that finish recording and press Enter (e.g. a ‘send it’ model).")
         self.send_keywords, self._ww_send_kw_row = self._kw_text_row(
             ww_cfg_card, "Custom send words", ", ".join(self.cfg.send_keywords), "computer send, computer abschicken", width=LW,
             tooltip_kw="Say one of these to type AND press Enter (spoken ‘submit’). Use a distinctive multi-word phrase. Empty = off.")
         self.ww_stop_model, _ = self._model_test_row(
-            ww_cfg_card, "Stop word", "none — use text keywords", width=LW,
+            ww_cfg_card, "Stop word", _NO_WW_WORD, width=LW,
             tooltip="Optional: one or more wakeword models that finish recording and paste WITHOUT pressing Enter (stop + paste).")
         self.stop_keywords, self._ww_stop_kw_row = self._kw_text_row(
             ww_cfg_card, "Custom stop words", ", ".join(self.cfg.stop_keywords), "computer stopp, stopp", width=LW,
@@ -2393,7 +3116,7 @@ class SettingsDialog:
 
         # Return a thin wrapper so callers use .get_filename() as before.
         class _Picker:
-            def get_filename(self_):
+            def get_filename(self):
                 t = path_entry.get_text().strip()
                 return t if t else None
         return _Picker()
@@ -2606,7 +3329,7 @@ class SettingsDialog:
 
         btn_row = Gtk.Box(spacing=6)
         btn_row.set_margin_top(4)
-        add_btn = Gtk.Button(label="+ Add")
+        add_btn = Gtk.Button(label=_ADD_LABEL)
         rm_btn = Gtk.Button(label="Remove selected")
         reset_btn = Gtk.Button(label="Reset to defaults")
         btn_row.pack_start(add_btn, False, False, 0)
@@ -2684,7 +3407,7 @@ class SettingsDialog:
     def _ww_add(self, _b=None) -> None:
         self._ww_commit()
         from .config import WakewordEngine
-        e = WakewordEngine(name="New wakeword server", uri="tcp://127.0.0.1:10400", model="okay_computer")
+        e = WakewordEngine(name="New wakeword server", uri=_LOCAL_WW_URI, model="okay_computer")
         self.cfg.wakeword_engines.append(e)
         self.ww_combo.append_text(e.name)
         new_idx = len(self.cfg.wakeword_engines) - 1
@@ -2728,454 +3451,7 @@ class SettingsDialog:
         picking a result there opens its page in the browser first, then lets
         the user point the dialog at the file they downloaded.
         """
-        from . import wwdownload as WD
-        from . import owwlibrary as OL
-
-        gh_sources = [s for s in self.cfg.wakeword_sources
-                     if s.enabled and s.kind == "github_collection"]
-        oww_sources = [s for s in self.cfg.wakeword_sources
-                       if s.enabled and s.kind == "openwakeword_api"]
-        dlg = Gtk.Dialog(title="Download wakeword models",
-                         transient_for=self.dlg, modal=True)
-        dlg.set_default_size(640, 560)
-        box = dlg.get_content_area()
-        box.set_spacing(8)
-        box.set_border_width(12)
-
-        intro_row = Gtk.Box(spacing=8)
-        intro = Gtk.Label(xalign=0.0)
-        intro.set_line_wrap(True)
-        intro.set_markup(
-            "Searches every enabled catalog below. GitHub collections install "
-            "instantly and for free; openwakeword.com-style libraries need a "
-            "quick browser step — sign in there for free, download the model, "
-            "then pick the file here.")
-        intro_row.pack_start(intro, True, True, 0)
-        manage_src_btn = Gtk.Button(label="Manage sources…")
-        manage_src_btn.set_valign(Gtk.Align.START)
-        intro_row.pack_start(manage_src_btn, False, False, 0)
-        box.pack_start(intro_row, False, False, 0)
-
-        def _reopen_downloader(_d=None, _r=None):
-            dlg.destroy()
-            self._show_ww_downloader()
-        manage_src_btn.connect("clicked", lambda _b: (
-            self._show_ww_sources_dialog(transient_for=dlg),
-            _reopen_downloader()))
-
-        if not gh_sources and not oww_sources:
-            status0 = Gtk.Label(xalign=0.0)
-            status0.set_line_wrap(True)
-            status0.set_markup(
-                "<span foreground='#b35900'>No wakeword sources enabled — "
-                "click <b>Manage sources…</b> above to add or enable one.</span>")
-            box.pack_start(status0, False, False, 0)
-            dlg.add_button("Close", Gtk.ResponseType.CLOSE)
-            dlg.connect("response", lambda _d, _r: dlg.destroy())
-            dlg.show_all()
-            return
-
-        # Resolve the target folder from the *currently selected engine's*
-        # server so the download lands where that engine actually reads from.
-        det = WD.autodetect_for_uri(self.ww_uri.get_text())
-        det_dir = det["model_dir"]
-        det_containers = det["containers"]
-
-        warn_lbl = Gtk.Label(xalign=0.0)
-        warn_lbl.set_line_wrap(True)
-        if not det["compatible"]:
-            fw = det["framework"] or "this"
-            warn_lbl.set_markup(
-                f"<span foreground='#b35900'>⚠ The selected engine is a "
-                f"<b>{GLib.markup_escape_text(fw)}</b> server — these openWakeWord "
-                f"models won't load there. They'll be saved to your openWakeWord "
-                f"folder below; switch the active engine to an openWakeWord server "
-                f"to use them.</span>")
-            box.pack_start(warn_lbl, False, False, 0)
-
-        dir_row = Gtk.Box(spacing=6)
-        dir_row.pack_start(Gtk.Label(label="Model folder:", xalign=0.0), False, False, 0)
-        dir_entry = Gtk.Entry()
-        dir_entry.set_hexpand(True)
-        dir_entry.set_text(det_dir or "")
-        dir_row.pack_start(dir_entry, True, True, 0)
-        browse = Gtk.Button(label="Browse…")
-        dir_row.pack_start(browse, False, False, 0)
-        box.pack_start(dir_row, False, False, 0)
-
-        def _browse(_b):
-            fc = Gtk.FileChooserDialog(
-                title="Select openWakeWord model folder", transient_for=dlg,
-                action=Gtk.FileChooserAction.SELECT_FOLDER)
-            fc.add_buttons("Cancel", Gtk.ResponseType.CANCEL,
-                           "Select", Gtk.ResponseType.OK)
-            if dir_entry.get_text():
-                fc.set_current_folder(dir_entry.get_text())
-            if fc.run() == Gtk.ResponseType.OK:
-                dir_entry.set_text(fc.get_filename())
-            fc.destroy()
-        browse.connect("clicked", _browse)
-
-        filt_row = Gtk.Box(spacing=6)
-        filt_row.pack_start(Gtk.Label(label="Language:", xalign=0.0), False, False, 0)
-        lang_combo = _block_scroll(Gtk.ComboBoxText())
-        filt_row.pack_start(lang_combo, False, False, 0)
-        search = Gtk.SearchEntry()
-        search.set_placeholder_text("Search all sources…")
-        search.set_hexpand(True)
-        filt_row.pack_start(search, True, True, 0)
-        box.pack_start(filt_row, False, False, 0)
-
-        hint = Gtk.Label(xalign=0.0)
-        hint.set_markup("<small>Ctrl+Click or Shift+Click to select several models at once</small>")
-        hint.get_style_context().add_class("dim-label")
-        box.pack_start(hint, False, False, 0)
-
-        # Model list: display, kind ('gh'/'oww'), source name, payload.
-        store = Gtk.ListStore(str, str, str, object)
-        view = Gtk.TreeView(model=Gtk.TreeModelFilter(child_model=store))
-        view.set_headers_visible(False)
-        view.get_selection().set_mode(Gtk.SelectionMode.MULTIPLE)
-        view.append_column(Gtk.TreeViewColumn("", Gtk.CellRendererText(), text=0))
-        scroll = Gtk.ScrolledWindow()
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroll.set_vexpand(True)
-        scroll.add(view)
-        box.pack_start(scroll, True, True, 0)
-
-        tmodel = view.get_model()
-        filter_text = {"q": ""}
-
-        def _visible(m, it, _d):
-            # GitHub rows are filtered locally; openwakeword.com-style rows
-            # are already server-filtered by the search query that fetched them.
-            if m[it][1] == "gh":
-                return filter_text["q"] in (m[it][0] or "").lower()
-            return True
-        tmodel.set_visible_func(_visible)
-
-        status = Gtk.Label(xalign=0.0)
-        status.set_line_wrap(True)
-        status.get_style_context().add_class("dim-label")
-        box.pack_start(status, False, False, 0)
-
-        opts = Gtk.Box(spacing=6)
-        both_chk = Gtk.CheckButton(label="Also download .onnx copy (GitHub sources)")
-        both_chk.set_active(True)
-        both_chk.set_tooltip_text("Keep both formats so the model works whether "
-                                  "the server uses the tflite or onnx framework")
-        opts.pack_start(both_chk, False, False, 0)
-        box.pack_start(opts, False, False, 0)
-
-        aux_btn = dlg.add_button("View README", 1)
-        act_btn = dlg.add_button("Download", Gtk.ResponseType.APPLY)
-        dlg.add_button("Close", Gtk.ResponseType.CLOSE)
-        aux_btn.set_sensitive(False)
-        act_btn.set_sensitive(False)
-
-        state = {"sel": [], "oww_stage": 0, "search_seq": 0}
-
-        def _selected_list():
-            m, paths = view.get_selection().get_selected_rows()
-            out = []
-            for p in paths:
-                it = m.get_iter(p)
-                out.append({"kind": m[it][1], "source": m[it][2], "payload": m[it][3]})
-            return out
-
-        def _on_sel(_s):
-            sels = _selected_list()
-            state["sel"] = sels
-            state["oww_stage"] = 0
-            if not sels:
-                act_btn.set_sensitive(False)
-                aux_btn.set_sensitive(False)
-                return
-            n = len(sels)
-            kinds = {s["kind"] for s in sels}
-            if len(kinds) > 1:
-                act_btn.set_sensitive(False)
-                aux_btn.set_sensitive(False)
-                status.set_markup("<span foreground='#b35900'>Select only GitHub or "
-                                  "only online results at once.</span>")
-                return
-            kind = next(iter(kinds))
-            if kind == "gh":
-                act_btn.set_label(f"Download & Install ({n})" if n > 1 else "Download & Install")
-                act_btn.set_sensitive(True)
-                aux_btn.set_label("View README")
-                aux_btn.set_sensitive(n == 1)
-            else:
-                act_btn.set_label(f"Download in Browser ({n})…" if n > 1 else "Download in Browser…")
-                act_btn.set_sensitive(True)
-                aux_btn.set_label("Test live (mic)")
-                aux_btn.set_sensitive(n == 1 and bool(sels[0]["payload"].get("human_test_url")))
-        view.get_selection().connect("changed", _on_sel)
-
-        def _status_counts():
-            gh_n = sum(1 for r in store if r[1] == "gh")
-            oww_n = sum(1 for r in store if r[1] == "oww")
-            status.set_text(f"{gh_n} local, {oww_n} online result(s) — select one.")
-
-        # ── GitHub collections: languages, then models per language ───────
-        def _load_gh_models(lang):
-            for it in [row.iter for row in store if row[1] == "gh"]:
-                store.remove(it)
-            for src in gh_sources:
-                def work(src=src):
-                    try:
-                        names = WD.list_models(lang, repo=src.url)
-                        err = None
-                    except Exception as e:
-                        names, err = [], str(e)
-
-                    def apply():
-                        if err:
-                            return False
-                        for n in names:
-                            label = WD.phrase_from_name(n)
-                            disp = f"{label} — {src.name}" if len(gh_sources) > 1 else label
-                            store.append([disp, "gh", src.name,
-                                         {"repo": src.url, "lang": lang, "name": n}])
-                        _status_counts()
-                        return False
-                    GLib.idle_add(apply)
-                threading.Thread(target=work, daemon=True).start()
-
-        def _on_lang(c):
-            lang = c.get_active_text()
-            if lang:
-                _load_gh_models(lang)
-        lang_combo.connect("changed", _on_lang)
-
-        def _load_langs():
-            seen = []
-            for src in gh_sources:
-                try:
-                    for lg in WD.list_languages(repo=src.url):
-                        if lg not in seen:
-                            seen.append(lg)
-                except Exception:
-                    pass
-            langs = sorted(seen) or WD.KNOWN_LANGUAGES
-
-            def apply():
-                for lg in langs:
-                    lang_combo.append_text(lg)
-                if langs:
-                    idx = langs.index("en") if "en" in langs else 0
-                    lang_combo.set_active(idx)  # triggers _on_lang
-                return False
-            GLib.idle_add(apply)
-
-        if gh_sources:
-            threading.Thread(target=_load_langs, daemon=True).start()
-        else:
-            lang_combo.set_sensitive(False)
-            status.set_text("0 local, 0 online result(s) — type to search.")
-
-        # ── openwakeword.com-style libraries: free-text search, debounced ──
-        def _run_oww_search(query, seq):
-            if not oww_sources:
-                return
-            if not query.strip():
-                def clear():
-                    if state["search_seq"] != seq:
-                        return False
-                    for it in [row.iter for row in store if row[1] == "oww"]:
-                        store.remove(it)
-                    _status_counts()
-                    return False
-                GLib.idle_add(clear)
-                return
-            for src in oww_sources:
-                def work(src=src):
-                    try:
-                        results = OL.search(src.url, query)
-                        err = None
-                    except Exception as e:
-                        results, err = [], str(e)
-
-                    def apply():
-                        if state["search_seq"] != seq:
-                            return False  # superseded by a newer keystroke
-                        if err:
-                            status.set_markup(
-                                f"<span foreground='#cc0000'>{GLib.markup_escape_text(src.name)}: "
-                                f"{GLib.markup_escape_text(err)}</span>")
-                            return False
-                        for it in [row.iter for row in store
-                                  if row[1] == "oww" and row[2] == src.name]:
-                            store.remove(it)
-                        for m in results:
-                            word = m.get("wake_word") or "?"
-                            langs = ", ".join(
-                                f"{l.get('code')} {l.get('percentage', 0):.0f}%"
-                                for l in (m.get("languages") or []))
-                            recall = m.get("recall_pct")
-                            bits = [f"\"{word}\""]
-                            if langs:
-                                bits.append(langs)
-                            if recall is not None:
-                                bits.append(f"recall {recall:.0f}%")
-                            bits.append(src.name)
-                            payload = dict(m)
-                            payload["base_url"] = src.url
-                            payload["wake_word"] = word
-                            store.append(["  —  ".join(bits), "oww", src.name, payload])
-                        _status_counts()
-                        return False
-                    GLib.idle_add(apply)
-                threading.Thread(target=work, daemon=True).start()
-
-        def _on_search_changed(e):
-            text = e.get_text()
-            filter_text["q"] = text.lower()
-            tmodel.refilter()
-            state["search_seq"] += 1
-            seq = state["search_seq"]
-            GLib.timeout_add(450, lambda: (_run_oww_search(text, seq), False)[1])
-        search.connect("search-changed", _on_search_changed)
-
-        # ── Actions ─────────────────────────────────────────────────────
-        def _do_gh_download(payloads):
-            model_dir = dir_entry.get_text().strip()
-            if not model_dir or not Path(model_dir).is_dir():
-                status.set_markup("<span foreground='#cc0000'>Set a valid model "
-                                  "folder first.</span>")
-                return
-            status.set_text(f"Downloading {len(payloads)} model(s)…")
-            act_btn.set_sensitive(False)
-            all_fmt = both_chk.get_active()
-
-            def work():
-                installed, errors = [], []
-                for payload in payloads:
-                    name, lang, repo = payload["name"], payload["lang"], payload["repo"]
-                    try:
-                        variants = WD.list_variants(lang, name, repo=repo)
-                        res = WD.install(lang, name, model_dir, repo=repo,
-                                         variants=variants, all_formats=all_fmt)
-                        installed.append(res["model_id"])
-                    except Exception as e:
-                        errors.append(f"{name}: {e}")
-
-                def apply():
-                    act_btn.set_sensitive(True)
-                    parts = []
-                    if installed:
-                        parts.append(
-                            f"<span foreground='#1a7f37'>Installed "
-                            f"{GLib.markup_escape_text(', '.join(installed))}.</span>")
-                    if errors:
-                        parts.append(
-                            f"<span foreground='#cc0000'>{GLib.markup_escape_text('; '.join(errors))}</span>")
-                    status.set_markup(" ".join(parts) or "Nothing installed.")
-                    if installed:
-                        self.cfg.wakeword_model_dir = model_dir
-                        if det_containers:
-                            self.cfg.wakeword_model_container = ",".join(det_containers)
-                        self._ww_offer_restart(det_containers, dlg)
-                    return False
-                GLib.idle_add(apply)
-            threading.Thread(target=work, daemon=True).start()
-
-        def _pick_and_install_oww(payloads):
-            model_dir = dir_entry.get_text().strip()
-            if not model_dir or not Path(model_dir).is_dir():
-                status.set_markup("<span foreground='#cc0000'>Set a valid model "
-                                  "folder first.</span>")
-                return
-            fc = Gtk.FileChooserDialog(
-                title="Select downloaded model file(s)", transient_for=dlg,
-                action=Gtk.FileChooserAction.OPEN)
-            fc.add_buttons("Cancel", Gtk.ResponseType.CANCEL,
-                           "Select", Gtk.ResponseType.OK)
-            fc.set_select_multiple(True)
-            filt = Gtk.FileFilter()
-            filt.set_name("openWakeWord models (.onnx, .tflite)")
-            filt.add_pattern("*.onnx")
-            filt.add_pattern("*.tflite")
-            fc.add_filter(filt)
-            downloads = str(Path.home() / "Downloads")
-            if Path(downloads).is_dir():
-                fc.set_current_folder(downloads)
-            files = []
-            if fc.run() == Gtk.ResponseType.OK:
-                files = fc.get_filenames()
-            fc.destroy()
-            if not files:
-                return
-
-            written, errors = [], []
-            if len(payloads) == 1:
-                # One model: group same-word files (onnx+tflite pair) under its name.
-                try:
-                    written = WD.install_local(files, model_dir, word=payloads[0].get("wake_word"))
-                except Exception as e:
-                    errors.append(str(e))
-            else:
-                # Several different models picked at once: each file keeps its own name.
-                for f in files:
-                    try:
-                        written += WD.install_local([f], model_dir, word=None)
-                    except Exception as e:
-                        errors.append(f"{Path(f).name}: {e}")
-
-            parts = []
-            if written:
-                parts.append(f"<span foreground='#1a7f37'>Installed "
-                             f"{GLib.markup_escape_text(', '.join(written))}.</span>")
-            if errors:
-                parts.append(f"<span foreground='#cc0000'>{GLib.markup_escape_text('; '.join(errors))}</span>")
-            status.set_markup(" ".join(parts) or "Nothing installed.")
-            if written:
-                self.cfg.wakeword_model_dir = model_dir
-                if det_containers:
-                    self.cfg.wakeword_model_container = ",".join(det_containers)
-                self._ww_offer_restart(det_containers, dlg)
-            state["oww_stage"] = 0
-            _on_sel(None)  # restore the normal per-selection button label
-
-        def _on_response(_d, resp):
-            sels = state.get("sel") or []
-            if resp == 1:  # README / test-live (only offered for a single selection)
-                if len(sels) == 1 and sels[0]["kind"] == "gh":
-                    p = sels[0]["payload"]
-                    Gtk.show_uri_on_window(
-                        dlg, WD.readme_url(p["lang"], p["name"], repo=p["repo"]),
-                        Gdk.CURRENT_TIME)
-                elif len(sels) == 1 and sels[0]["kind"] == "oww":
-                    url = sels[0]["payload"].get("human_test_url")
-                    if url:
-                        Gtk.show_uri_on_window(dlg, url, Gdk.CURRENT_TIME)
-                return
-            if resp == Gtk.ResponseType.APPLY:
-                if not sels:
-                    return
-                kind = sels[0]["kind"]
-                if kind == "gh":
-                    _do_gh_download([s["payload"] for s in sels])
-                else:
-                    if state.get("oww_stage", 0) == 0:
-                        for s in sels:
-                            url = OL.library_page_url(s["payload"]["base_url"],
-                                                      s["payload"]["model_id"])
-                            Gtk.show_uri_on_window(dlg, url, Gdk.CURRENT_TIME)
-                        state["oww_stage"] = 1
-                        n = len(sels)
-                        act_btn.set_label(f"Pick Downloaded File(s) & Install"
-                                         + (f" ({n})" if n > 1 else ""))
-                        status.set_text(f"Opened {n} page(s) in your browser — sign in "
-                                        "and download the model(s), then click again "
-                                        "to pick the file(s).")
-                    else:
-                        _pick_and_install_oww([s["payload"] for s in sels])
-                return
-            dlg.destroy()
-
-        dlg.connect("response", _on_response)
-        dlg.show_all()
+        _WWDownloader(self).show()
 
     def _ww_offer_restart(self, containers: list[str], parent) -> None:
         """After install, offer to restart the openWakeWord container(s)."""
@@ -3240,73 +3516,55 @@ class SettingsDialog:
         """Background fetch of model list from wyoming server."""
         uri = self.ww_uri.get_text().strip()  # capture on GTK thread
         def work():
-            import socket, json
             from urllib.parse import urlparse
             parsed = urlparse(uri)
             host = parsed.hostname or "127.0.0.1"
             port = parsed.port or 10400
             try:
-                with socket.create_connection((host, port), timeout=3.0) as s:
-                    s.sendall(json.dumps({"type": "describe"}).encode() + b"\n")
-                    line = b""
-                    while not line.endswith(b"\n"):
-                        chunk = s.recv(1)
-                        if not chunk: break
-                        line += chunk
-                    info = json.loads(line.decode("utf-8"))
-                    payload_len = info.get("data_length", info.get("payload_length", 0))
-                    payload = b""
-                    while len(payload) < payload_len:
-                        chunk = s.recv(payload_len - len(payload))
-                        if not chunk: break
-                        payload += chunk
-                    data = json.loads(payload.decode("utf-8"))
-                    # Flatten every model from every wake engine the server
-                    # reports (a server can run several wake engines — e.g.
-                    # microWakeWord and openWakeWord side by side — and each
-                    # one lists its own set of wakewords under it).
-                    models_detail = [
-                        {"name": m.get("name"), "phrase": m.get("phrase"),
-                         "languages": m.get("languages")}
-                        for w in data.get("wake", [])
-                        for m in w.get("models", []) if m.get("name")
-                    ]
-                    models = [m["name"] for m in models_detail]
-                    def apply(models=models, models_detail=models_detail):
-                        if models:
-                            cur = _combo_text(self.ww_model)
-                            _fill_combo(self.ww_model, models_detail, cur or models[0])
-                            # Also populate cancel/send model pickers with the same list.
-                            # Preserve whatever the user already typed; empty stays empty.
-                            if hasattr(self, "ww_cancel_model"):
-                                cur_c = _combo_text(self.ww_cancel_model)
-                                _fill_combo(self.ww_cancel_model, models_detail, cur_c)
-                            if hasattr(self, "ww_send_model"):
-                                cur_s = _combo_text(self.ww_send_model)
-                                _fill_combo(self.ww_send_model, models_detail, cur_s)
-                            if hasattr(self, "ww_stop_model"):
-                                cur_st = _combo_text(self.ww_stop_model)
-                                _fill_combo(self.ww_stop_model, models_detail, cur_st)
-                            if hasattr(self, "ww_status"):
-                                self.ww_status.set_markup(
-                                    f'<span foreground="#4a8" size="small">'
-                                    f'{len(models)} model{"s" if len(models) != 1 else ""} loaded: '
-                                    f'{", ".join(models)}</span>')
-                            self._ww_set_kw_rows_visible(True)
-                        else:
-                            if hasattr(self, "ww_status"):
-                                self.ww_status.set_markup(
-                                    '<span foreground="#888" size="small">Connected — no models found</span>')
-                            self._ww_set_kw_rows_visible(False)
-                    GLib.idle_add(apply)
+                data = _wyoming_describe(host, port)
+                # Flatten every model from every wake engine the server
+                # reports (a server can run several wake engines — e.g.
+                # microWakeWord and openWakeWord side by side — and each
+                # one lists its own set of wakewords under it).
+                models_detail = [
+                    {"name": m.get("name"), "phrase": m.get("phrase"),
+                     "languages": m.get("languages")}
+                    for w in data.get("wake", [])
+                    for m in w.get("models", []) if m.get("name")
+                ]
+                models = [m["name"] for m in models_detail]
+                GLib.idle_add(self._ww_apply_models, models, models_detail)
             except Exception as exc:
-                def show_err(exc=exc):
-                    self._ww_set_kw_rows_visible(False)
-                    if hasattr(self, "ww_status"):
-                        self.ww_status.set_markup(
-                            f'<span foreground="#c44" size="small">Unreachable: {exc}</span>')
-                GLib.idle_add(show_err)
+                GLib.idle_add(self._ww_show_fetch_error, exc)
         threading.Thread(target=work, daemon=True).start()
+
+    def _ww_apply_models(self, models: list, models_detail: list) -> None:
+        if not models:
+            if hasattr(self, "ww_status"):
+                self.ww_status.set_markup(
+                    '<span foreground="#888" size="small">Connected — no models found</span>')
+            self._ww_set_kw_rows_visible(False)
+            return
+        cur = _combo_text(self.ww_model)
+        _fill_combo(self.ww_model, models_detail, cur or models[0])
+        # Also populate cancel/send model pickers with the same list.
+        # Preserve whatever the user already typed; empty stays empty.
+        for attr in ("ww_cancel_model", "ww_send_model", "ww_stop_model"):
+            if hasattr(self, attr):
+                picker = getattr(self, attr)
+                _fill_combo(picker, models_detail, _combo_text(picker))
+        if hasattr(self, "ww_status"):
+            self.ww_status.set_markup(
+                f'<span foreground="#4a8" size="small">'
+                f'{len(models)} model{"s" if len(models) != 1 else ""} loaded: '
+                f'{", ".join(models)}</span>')
+        self._ww_set_kw_rows_visible(True)
+
+    def _ww_show_fetch_error(self, exc: Exception) -> None:
+        self._ww_set_kw_rows_visible(False)
+        if hasattr(self, "ww_status"):
+            self.ww_status.set_markup(
+                f'<span foreground="#c44" size="small">Unreachable: {exc}</span>')
 
     def _ww_test_or_live(self, picker, status_lbl, btn) -> None:
         """Route Test: a single model gets the live confidence-chart dialog,
@@ -3331,7 +3589,6 @@ class SettingsDialog:
         """
         from . import wwdownload as WD
         from . import wwlivetest as LT
-        import time
         from collections import deque
 
         det = WD.autodetect_for_uri(self.ww_uri.get_text())
@@ -3376,14 +3633,7 @@ class SettingsDialog:
         indicator.set_size_request(96, 96)
 
         def _draw_indicator(_w, cr):
-            w, h = indicator.get_allocated_width(), indicator.get_allocated_height()
-            cx, cy, r = w / 2, h / 2, min(w, h) / 2 - 4
-            if time.monotonic() < state["flash_until"]:
-                cr.set_source_rgb(0.13, 0.75, 0.4)
-            else:
-                cr.set_source_rgba(0.85, 0.25, 0.25, 0.9)
-            cr.arc(cx, cy, r, 0, 2 * 3.14159265)
-            cr.fill()
+            _live_draw_indicator(indicator, cr, state["flash_until"])
         indicator.connect("draw", _draw_indicator)
         ind_box = Gtk.Box()
         ind_box.set_halign(Gtk.Align.CENTER)
@@ -3446,42 +3696,7 @@ class SettingsDialog:
         box.pack_start(hint, False, False, 0)
 
         def _draw_chart(_w, cr):
-            w, h = chart.get_allocated_width(), chart.get_allocated_height()
-            cr.set_source_rgb(0.06, 0.08, 0.14)
-            cr.paint()
-            cr.set_source_rgba(1, 1, 1, 0.08)
-            for frac in (0.0, 0.25, 0.5, 0.75, 1.0):
-                y = h - frac * h
-                cr.move_to(0, y)
-                cr.line_to(w, y)
-                cr.stroke()
-            th_y = h - state["threshold"] * h
-            cr.set_source_rgb(0.95, 0.65, 0.1)
-            cr.set_dash([4, 3])
-            cr.move_to(0, th_y)
-            cr.line_to(w, th_y)
-            cr.stroke()
-            cr.set_dash([])
-            now = time.monotonic()
-            pts = [(t, s) for t, s in samples if now - t <= WINDOW]
-            if len(pts) >= 2:
-                cr.set_source_rgb(0.25, 0.7, 0.95)
-                cr.set_line_width(1.6)
-                for i, (t, s) in enumerate(pts):
-                    x = w * (1 - (now - t) / WINDOW)
-                    y = h - min(1.0, s) * h
-                    if i:
-                        cr.line_to(x, y)
-                    else:
-                        cr.move_to(x, y)
-                cr.stroke()
-            cr.set_source_rgb(0.2, 0.85, 0.45)
-            for t in detections:
-                if now - t > WINDOW:
-                    continue
-                x = w * (1 - (now - t) / WINDOW)
-                cr.arc(x, th_y, 4, 0, 2 * 3.14159265)
-                cr.fill()
+            _live_draw_chart(chart, cr, state["threshold"], samples, detections, WINDOW)
         chart.connect("draw", _draw_chart)
 
         banner = Gtk.Box()
@@ -3496,23 +3711,7 @@ class SettingsDialog:
         tester = LT.LiveModelTester(str(path), device=self._selected_mic_name())
 
         def _on_score(score: float) -> None:
-            def apply():
-                if not state["alive"]:
-                    return False
-                t = time.monotonic()
-                samples.append((t, score))
-                while samples and t - samples[0][0] > WINDOW + 1:
-                    samples.popleft()
-                if score >= state["threshold"] and (not detections or t - detections[-1] > 1.0):
-                    detections.append(t)
-                    state["count"] += 1
-                    state["flash_until"] = t + 0.6
-                    n = state["count"]
-                    banner_lbl.set_markup(
-                        f"<span foreground='#1a7f37'><b>Detected {n} time"
-                        f"{'s' if n != 1 else ''}!</b></span>")
-                return False
-            GLib.idle_add(apply)
+            GLib.idle_add(_live_record_score, state, samples, detections, banner_lbl, score, WINDOW)
 
         def _on_level(level: float) -> None:
             def apply():
@@ -3592,7 +3791,14 @@ class SettingsDialog:
                        "benchmark. The table shows how fast each engine is and how accurate, "
                        "and names the fastest and most accurate. Add an engine preset for "
                        "each model you want in the comparison.")
+        self._bench_file_choosers(page)
+        sel_sw = self._bench_engine_selector(page)
+        # Background: reachability + language metadata
+        threading.Thread(target=self._bench_check_status, daemon=True).start()
+        self._bench_run_controls(page)
+        self._bench_results(page, sel_sw)
 
+    def _bench_file_choosers(self, page: Gtk.Box) -> None:
         wavf = Gtk.FileChooserButton(title="Audio file", action=Gtk.FileChooserAction.OPEN)
         fa = Gtk.FileFilter(); fa.set_name("Audio (WAV, MP3, OGG, FLAC, …)")
         for _p in ("*.wav", "*.mp3", "*.ogg", "*.oga", "*.flac", "*.m4a", "*.opus"):
@@ -3609,19 +3815,7 @@ class SettingsDialog:
         if self.cfg.bench_ref and Path(self.cfg.bench_ref).exists():
             reff.set_filename(self.cfg.bench_ref)
 
-        def _on_wav_set(_b):
-            fn = wavf.get_filename()
-            if not fn: return
-            self.cfg.bench_wav = fn
-            p = Path(fn)
-            for ext in (".reference.txt", ".txt"):
-                cand = p.with_name(p.stem + ext)
-                if cand.exists():
-                    reff.set_filename(str(cand))
-                    self.cfg.bench_ref = str(cand)
-                    break
-            save(self.cfg)
-        wavf.connect("file-set", _on_wav_set)
+        wavf.connect("file-set", lambda _b: self._bench_on_wav_set(wavf, reff))
 
         def _on_ref_set(_b):
             fn = reff.get_filename()
@@ -3630,6 +3824,20 @@ class SettingsDialog:
                 save(self.cfg)
         reff.connect("file-set", _on_ref_set)
 
+    def _bench_on_wav_set(self, wavf, reff) -> None:
+        fn = wavf.get_filename()
+        if not fn: return
+        self.cfg.bench_wav = fn
+        p = Path(fn)
+        for ext in (".reference.txt", ".txt"):
+            cand = p.with_name(p.stem + ext)
+            if cand.exists():
+                reff.set_filename(str(cand))
+                self.cfg.bench_ref = str(cand)
+                break
+        save(self.cfg)
+
+    def _bench_engine_selector(self, page: Gtk.Box) -> Gtk.ScrolledWindow:
         # ── Engine / model selector ───────────────────────────────────────────
         _section_title(page, "Engines to benchmark", margin_top=10, icon="utilities-system-monitor-symbolic")
 
@@ -3661,64 +3869,63 @@ class SettingsDialog:
         self._bench_sel_rows: list[tuple[Gtk.Box, str, list[str]]] = []  # (row, name, mutable_search)
 
         for e in self.cfg.stt_engines:
-            row = Gtk.Box(spacing=6)
-            dot = Gtk.Label(); dot.set_markup(_dot(GREY))
-            self._bench_dots[e.name] = dot
-            row.pack_start(dot, False, False, 0)
-            label = e.name
-            if e.model:
-                label += f"  [{e.model}]"
-            cb = Gtk.CheckButton(label=label)
-            cb.set_active(True)
-            self._bench_checks[e.name] = cb
-            row.pack_start(cb, True, True, 0)
-            lang_lbl = Gtk.Label(xalign=1.0)
-            lang_lbl.set_markup(f"<small><span foreground='{GREY}'>—</span></small>")
-            lang_lbl.set_margin_end(4)
-            self._bench_lang_labels[e.name] = lang_lbl
-            row.pack_end(lang_lbl, False, False, 0)
-            sel_list.pack_start(row, False, False, 2)
-            search_parts = [e.name, e.model, e.url]
-            self._bench_sel_rows.append((row, e.name, search_parts))
+            self._bench_engine_row(sel_list, e)
 
         def _filter_bench(_e=None):
             q = self._bench_filter.get_text().lower()
             for row, _name, parts in self._bench_sel_rows:
                 row.set_visible(not q or any(q in p.lower() for p in parts))
         self._bench_filter.connect("changed", _filter_bench)
+        return sel_sw
 
-        # Background: reachability + language metadata
-        def _check_bench_status():
-            meta_cache: dict[str, list] = {}
-            for e in self.cfg.stt_engines:
-                ok = stt.status(e, timeout=2.0)
-                color = GREEN if ok else RED
-                dot = self._bench_dots.get(e.name)
-                if dot:
-                    GLib.idle_add(dot.set_markup, _dot(color))
-                # Fetch language metadata for remote engines
-                if not e.is_local and e.url:
-                    if e.url not in meta_cache:
-                        meta_cache[e.url] = stt.list_models_meta(e.url, e.api_key_env, timeout=4.0)
-                    langs: list[str] = []
-                    for m in meta_cache[e.url]:
-                        if not e.model or m.id == e.model or m.id.endswith("/" + e.model):
-                            langs = m.languages
-                            break
-                    if not langs and meta_cache[e.url]:
-                        langs = meta_cache[e.url][0].languages
-                    if langs:
-                        # Update search parts so filter works on language codes
-                        for row, name, parts in self._bench_sel_rows:
-                            if name == e.name:
-                                parts.extend(langs)
-                        lang_str = stt.fmt_languages(langs)
-                        lbl = self._bench_lang_labels.get(e.name)
-                        if lbl:
-                            GLib.idle_add(lbl.set_markup,
-                                f"<small><span foreground='{GREY}'>{GLib.markup_escape_text(lang_str)}</span></small>")
-        threading.Thread(target=_check_bench_status, daemon=True).start()
+    def _bench_engine_row(self, sel_list: Gtk.Box, e) -> None:
+        row = Gtk.Box(spacing=6)
+        dot = Gtk.Label(); dot.set_markup(_dot(GREY))
+        self._bench_dots[e.name] = dot
+        row.pack_start(dot, False, False, 0)
+        label = e.name
+        if e.model:
+            label += f"  [{e.model}]"
+        cb = Gtk.CheckButton(label=label)
+        cb.set_active(True)
+        self._bench_checks[e.name] = cb
+        row.pack_start(cb, True, True, 0)
+        lang_lbl = Gtk.Label(xalign=1.0)
+        lang_lbl.set_markup(f"<small><span foreground='{GREY}'>—</span></small>")
+        lang_lbl.set_margin_end(4)
+        self._bench_lang_labels[e.name] = lang_lbl
+        row.pack_end(lang_lbl, False, False, 0)
+        sel_list.pack_start(row, False, False, 2)
+        search_parts = [e.name, e.model, e.url]
+        self._bench_sel_rows.append((row, e.name, search_parts))
 
+    def _bench_check_status(self) -> None:
+        """Worker thread: colour each engine's dot and show its languages."""
+        meta_cache: dict[str, list] = {}
+        for e in self.cfg.stt_engines:
+            ok = stt.status(e, timeout=2.0)
+            color = GREEN if ok else RED
+            dot = self._bench_dots.get(e.name)
+            if dot:
+                GLib.idle_add(dot.set_markup, _dot(color))
+            # Fetch language metadata for remote engines
+            if not e.is_local and e.url:
+                langs = _bench_engine_langs(e, meta_cache)
+                if langs:
+                    self._bench_show_langs(e, langs)
+
+    def _bench_show_langs(self, e, langs: list[str]) -> None:
+        # Update search parts so filter works on language codes
+        for row, name, parts in self._bench_sel_rows:
+            if name == e.name:
+                parts.extend(langs)
+        lang_str = stt.fmt_languages(langs)
+        lbl = self._bench_lang_labels.get(e.name)
+        if lbl:
+            GLib.idle_add(lbl.set_markup,
+                f"<small><span foreground='{GREY}'>{GLib.markup_escape_text(lang_str)}</span></small>")
+
+    def _bench_run_controls(self, page: Gtk.Box) -> None:
         # ── Run controls ──────────────────────────────────────────────────────
         run_row = Gtk.Box(spacing=16)
         run_row.set_margin_top(6); run_row.set_margin_bottom(4)
@@ -3735,6 +3942,7 @@ class SettingsDialog:
         run_row.pack_start(self.bench_expand, False, False, 0)
         page.pack_start(run_row, False, False, 0)
 
+    def _bench_results(self, page: Gtk.Box, sel_sw: Gtk.ScrolledWindow) -> None:
         # ── Resizable pane: engine list (top) ↕ results table (bottom) ───────
         # engine, url, model, device, best_for, lang, time, accuracy, ram, output, tooltip
         self.bench_store = Gtk.ListStore(str, str, str, str, str, str, str, str, str, str, str)
@@ -3742,46 +3950,7 @@ class SettingsDialog:
         tree = Gtk.TreeView(model=bench_sort)
         tree.set_has_tooltip(True)
         tree.set_tooltip_column(10)
-
-        # Numeric sort: strip %, "server", "—" then compare as float (non-numeric → inf)
-        def _num_cmp(model, a, b, col):
-            def _f(v):
-                try:
-                    return float(v.rstrip("%"))
-                except (ValueError, AttributeError):
-                    return float("inf")
-            va, vb = _f(model.get_value(a, col)), _f(model.get_value(b, col))
-            return (va > vb) - (va < vb)
-
-        for title, i, expand, max_w in [
-                ("Engine",   0, False, 0),
-                ("URL",      1, False, 180),
-                ("Model",    2, False, 0),
-                ("Device",   3, False, 0),
-                ("Best for", 4, False, 0),
-                ("Lang",     5, False, 160),
-                ("Time (s)", 6, False, 0),
-                ("Accuracy", 7, False, 0),
-                ("RAM (MB)", 8, False, 0),
-                ("Output",   9, True,  0)]:
-            r = Gtk.CellRendererText()
-            r.set_property("ellipsize", Pango.EllipsizeMode.END)
-            col = Gtk.TreeViewColumn(title, r, text=i); col.set_resizable(True)
-            col.set_sort_column_id(i)
-            col.set_expand(expand)
-            if max_w:
-                col.set_max_width(max_w)
-            if i == 8:
-                col.set_widget(Gtk.Label(label="RAM (MB)", tooltip_text=
-                    "RAM used by the engine during the benchmark.\n"
-                    "Local engines: RSS delta measured on this machine.\n"
-                    "Remote engines: current RSS read from the server's Prometheus /metrics endpoint.\n"
-                    "'server' = server does not expose /metrics — RAM not measurable.\n"
-                    "'—' = local model was already loaded, no delta to measure."))
-                col.get_widget().show()
-            tree.append_column(col)
-            if i in (6, 7, 8):  # Time, Accuracy, RAM — sort numerically
-                bench_sort.set_sort_func(i, _num_cmp, i)
+        _bench_add_columns(tree, bench_sort)
         tree_sw = Gtk.ScrolledWindow()
         tree_sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         tree_sw.add(tree)
@@ -3897,7 +4066,7 @@ class SettingsDialog:
                 ("Total",        4, False),
                 ("Recall %",     5, False),
                 ("False fires",  6, False),
-                ("Time (s)",     7, False)]:
+                (_TIME_S,     7, False)]:
             r = Gtk.CellRendererText()
             r.set_property("ellipsize", Pango.EllipsizeMode.END)
             col = Gtk.TreeViewColumn(title, r, text=i, foreground=8)
@@ -4098,22 +4267,22 @@ class SettingsDialog:
             # Skip populating the model combo when all "models" are also voices.
             voices_set = set(voices)
             real_models = [m for m in models if m not in voices_set]
-
-            def apply():
-                if real_models:
-                    _fill_combo(self.wwb_model, real_models, self.wwb_model.get_text())
-                self.wwb_voices.set_models(voices)
-                if voices and not self.wwb_voices.get_text().strip():
-                    self.wwb_voices.set_text(", ".join(voices))   # default: test them all
-                colour = "#34c759" if (real_models or voices) else "#ff9f0a"
-                model_hint = (f"{len(real_models)} models, " if real_models
-                              else "type model id manually, ")
-                self.wwb_test_lbl.set_markup(
-                    f"<span foreground='{colour}'>Loaded {model_hint}"
-                    f"{len(voices)} voices.</span>")
-                return False
-            GLib.idle_add(apply)
+            GLib.idle_add(self._tts_reload_apply, real_models, voices)
         threading.Thread(target=work, daemon=True).start()
+
+    def _tts_reload_apply(self, real_models: list, voices: list) -> bool:
+        if real_models:
+            _fill_combo(self.wwb_model, real_models, self.wwb_model.get_text())
+        self.wwb_voices.set_models(voices)
+        if voices and not self.wwb_voices.get_text().strip():
+            self.wwb_voices.set_text(", ".join(voices))   # default: test them all
+        colour = "#34c759" if (real_models or voices) else "#ff9f0a"
+        model_hint = (f"{len(real_models)} models, " if real_models
+                      else "type model id manually, ")
+        self.wwb_test_lbl.set_markup(
+            f"<span foreground='{colour}'>Loaded {model_hint}"
+            f"{len(voices)} voices.</span>")
+        return False
 
     def _connect_tts(self, _b) -> None:
         url, key, model, voices = self._read_tts_fields()
@@ -4184,7 +4353,12 @@ class SettingsDialog:
         threading.Thread(target=work, daemon=True).start()
 
     def _wwbench_progress(self, ei, n_eng, eng_name, ui, total, u) -> bool:
-        tag = "✓" if (u.ok and (u.detections > 0) == u.has_wakeword) else ("•" if u.ok else "⚠")
+        if not u.ok:
+            tag = "⚠"
+        elif (u.detections > 0) == u.has_wakeword:
+            tag = "✓"
+        else:
+            tag = "•"
         kind = "wake" if u.has_wakeword else "filler"
         eng_prefix = (f"[{ei}/{n_eng}] <b>{GLib.markup_escape_text(eng_name)}</b>  "
                       if n_eng > 1 else "")
@@ -4211,50 +4385,48 @@ class SettingsDialog:
                 f"<span foreground='#ff3b30'>No utterances synthesized — check the TTS model/endpoint.</span>{hint}")
             return False
 
-        GREEN, ORANGE, RED_C = "#34c759", "#ff9f0a", "#ff3b30"
-        summary_parts = []
-        for er in runs:
-            r = er.result
-            phrase = wakeword_bench.wakeword_phrase(er.model)
-            if r.expected == 0:
-                self.wwb_store.append([er.name, phrase, "—", "—", "—", "—", "—", "—", RED_C])
-                summary_parts.append(f"{er.name}: no samples")
-                continue
-            # Per-voice rows
-            by_voice = r.recall_by_voice()
-            filler_fires = {v: sum(u.detections for u in r.filler
-                                   if u.ok and u.voice == v)
-                            for v in by_voice}
-            for voice, (det, tot) in sorted(by_voice.items()):
-                recall_pct = det / tot * 100 if tot else 0.0
-                col = GREEN if recall_pct >= 90 else (ORANGE if recall_pct >= 60 else RED_C)
-                ff = filler_fires.get(voice, 0)
-                self.wwb_store.append([
-                    er.name, phrase, voice,
-                    str(det), str(tot),
-                    f"{recall_pct:.0f}%",
-                    str(ff),
-                    f"{r.seconds:.1f}",
-                    col])
-            # Engine summary row (bold aggregates via colour only)
-            overall_col = GREEN if r.recall >= 0.9 and r.false_fires == 0 else (
-                ORANGE if r.recall >= 0.6 else RED_C)
-            self.wwb_store.append([
-                er.name, phrase, f"ALL ({len(by_voice)} voices)",
-                str(r.detected), str(r.expected),
-                f"{r.recall * 100:.0f}%",
-                str(r.false_fires),
-                f"{r.seconds:.1f}",
-                overall_col])
-            summary_parts.append(
-                f"{er.name}: {r.recall*100:.0f}% recall, {r.false_fires} false fires")
+        summary_parts = [self._wwbench_engine_rows(er) for er in runs]
 
         self.wwb_summary.set_markup("  ·  ".join(
             GLib.markup_escape_text(p) for p in summary_parts))
         return False
 
+    def _wwbench_engine_rows(self, er) -> str:
+        """Append one engine's per-voice rows + summary row; return its summary text."""
+        r = er.result
+        phrase = wakeword_bench.wakeword_phrase(er.model)
+        if r.expected == 0:
+            self.wwb_store.append([er.name, phrase, "—", "—", "—", "—", "—", "—", "#ff3b30"])
+            return f"{er.name}: no samples"
+        # Per-voice rows
+        by_voice = r.recall_by_voice()
+        filler_fires = {v: sum(u.detections for u in r.filler
+                               if u.ok and u.voice == v)
+                        for v in by_voice}
+        for voice, (det, tot) in sorted(by_voice.items()):
+            recall_pct = det / tot * 100 if tot else 0.0
+            col = _grade_color(recall_pct >= 90, recall_pct >= 60)
+            ff = filler_fires.get(voice, 0)
+            self.wwb_store.append([
+                er.name, phrase, voice,
+                str(det), str(tot),
+                f"{recall_pct:.0f}%",
+                str(ff),
+                f"{r.seconds:.1f}",
+                col])
+        # Engine summary row (bold aggregates via colour only)
+        overall_col = _grade_color(r.recall >= 0.9 and r.false_fires == 0, r.recall >= 0.6)
+        self.wwb_store.append([
+            er.name, phrase, f"ALL ({len(by_voice)} voices)",
+            str(r.detected), str(r.expected),
+            f"{r.recall * 100:.0f}%",
+            str(r.false_fires),
+            f"{r.seconds:.1f}",
+            overall_col])
+        return f"{er.name}: {r.recall*100:.0f}% recall, {r.false_fires} false fires"
+
     _WWB_CSV_HEADERS = ["Engine", "Wakeword", "Voice", "Detected", "Total",
-                        "Recall %", "False fires", "Time (s)"]
+                        "Recall %", "False fires", _TIME_S]
 
     def _wwbench_csv_text(self) -> str:
         import csv, io
@@ -4490,79 +4662,90 @@ class SettingsDialog:
         try:
             self._wf_commit(); self._stt_commit(); self._llm_commit()
             c = self.cfg
-            c.stt_active = self.stt_combo.get_active_text() or c.stt_active
-            c.llm_active = self.llm_combo.get_active_text() or c.llm_active
-            c.input_mode = self.in_mode.get_active_text() or "modifiers"
-            c.push_to_talk = self.in_ptt.get_active()
-            c.key_start = self.in_start.get_text().strip()
-            c.key_stop = self.in_stop.get_text().strip()
-            c.key_send = self.in_send.get_text().strip()
-            c.key_cancel = self.in_cancel.get_text().strip()
-            c.min_speech_seconds = float(self.q_min.get_text())
-            c.silence_rms = float(self.q_rms.get_text())
-            c.reject_hallucinations = self.q_halluc.get_active()
-            c.strip_trailing_punctuation = self.q_strip.get_active()
-            c.sounds_enabled = self.snd_enabled.get_active()
-            c.sound_before = self.snd_before.get_filename() or ""
-            c.sound_after = self.snd_after.get_filename() or ""
-            c.wakeword_enabled = self.ww_enabled.get_active()
-            self._ww_commit()
-            idx = getattr(self, "_ww_idx", 0)
-            if 0 <= idx < len(self.cfg.wakeword_engines):
-                e = self.cfg.wakeword_engines[idx]
-                c.wakeword_active = e.name
-                c.wakeword_uri = e.uri
-                c.wakeword_model = e.model
-                c.wakeword_cancel_model = e.cancel_model
-                c.wakeword_send_model = e.send_model
-                c.wakeword_stop_model = e.stop_model
-            else:
-                c.wakeword_uri = self.ww_uri.get_text().strip()
-                c.wakeword_model = _combo_text(self.ww_model)
-            c.wakeword_sound_detected = self.ww_snd_detected.get_filename() or ""
-            c.wakeword_sound_done = self.ww_snd_done.get_filename() or ""
-            c.wakeword_silence_seconds = float(self.ww_silence.get_text())
-            c.wakeword_cancel_model = _combo_text(self.ww_cancel_model) if hasattr(self, "ww_cancel_model") else ""
-            c.wakeword_send_model = _combo_text(self.ww_send_model) if hasattr(self, "ww_send_model") else ""
-            c.wakeword_stop_model = _combo_text(self.ww_stop_model) if hasattr(self, "ww_stop_model") else ""
-            c.cancel_keywords = [k.strip() for k in self.cancel_keywords.get_text().split(",") if k.strip()]
-            c.send_keywords = [k.strip() for k in self.send_keywords.get_text().split(",") if k.strip()]
-            c.stop_keywords = [k.strip() for k in self.stop_keywords.get_text().split(",") if k.strip()]
+            self._collect_input(c)
+            self._collect_wakeword(c)
             # Cancel/Send keyboard shortcuts are owned by the Keyboard page now.
-            c.tts_url = self.wwb_url.get_text().strip().rstrip("/")
-            c.tts_model = self.wwb_model.get_text().strip()
-            c.tts_voices = [v.strip() for v in self.wwb_voices.get_text().split(",") if v.strip()]
-            c.mic = self._selected_mic_name()
-            c.output = self.gen_output.get_active_text() or "type"
-            c.language = self.gen_lang.get_text().strip()
-            c.notify = self.gen_notify.get_active()
-            c.notify_routing = self.gen_notify_routing.get_active()
-            c.overlay_enabled = self.gen_overlay.get_active()
-            c.device = _type_key(self.stt_device, _DEVICE_OPTIONS, "auto")
-            c.compute_type = _type_key(self.stt_compute, _COMPUTE_OPTIONS, "auto")
-            autostart.set_enabled(self.gen_boot.get_active())
-            if hasattr(self, "upd_auto"):
-                c.update_check = self.upd_auto.get_active()
-            
+            self._collect_general(c)
+
             if c.wakeword_enabled:
-                # Check reachability in background — don't block the GTK thread
-                uri = c.wakeword_uri
-                def _bg_ww_check(uri=uri):
-                    import socket
-                    from urllib.parse import urlparse
-                    parsed = urlparse(uri)
-                    host = parsed.hostname or "127.0.0.1"
-                    port = parsed.port or 10400
-                    try:
-                        with socket.create_connection((host, port), timeout=2.0):
-                            logbuffer.log(f"[wakeword] server reachable at {uri}", level="INFO")
-                    except OSError as e:
-                        logbuffer.log(f"[wakeword] cannot reach {uri}: {e}", level="WARNING")
-                threading.Thread(target=_bg_ww_check, daemon=True).start()
+                self._bg_ww_reachability_check(c.wakeword_uri)
         except ValueError as exc:
             self._error(f"Check numeric fields: {exc}")
             return False
         return True
+
+    def _collect_input(self, c) -> None:
+        c.stt_active = self.stt_combo.get_active_text() or c.stt_active
+        c.llm_active = self.llm_combo.get_active_text() or c.llm_active
+        c.input_mode = self.in_mode.get_active_text() or "modifiers"
+        c.push_to_talk = self.in_ptt.get_active()
+        c.key_start = self.in_start.get_text().strip()
+        c.key_stop = self.in_stop.get_text().strip()
+        c.key_send = self.in_send.get_text().strip()
+        c.key_cancel = self.in_cancel.get_text().strip()
+        c.min_speech_seconds = float(self.q_min.get_text())
+        c.silence_rms = float(self.q_rms.get_text())
+        c.reject_hallucinations = self.q_halluc.get_active()
+        c.strip_trailing_punctuation = self.q_strip.get_active()
+        c.sounds_enabled = self.snd_enabled.get_active()
+        c.sound_before = self.snd_before.get_filename() or ""
+        c.sound_after = self.snd_after.get_filename() or ""
+
+    def _collect_wakeword(self, c) -> None:
+        c.wakeword_enabled = self.ww_enabled.get_active()
+        self._ww_commit()
+        idx = getattr(self, "_ww_idx", 0)
+        if 0 <= idx < len(self.cfg.wakeword_engines):
+            e = self.cfg.wakeword_engines[idx]
+            c.wakeword_active = e.name
+            c.wakeword_uri = e.uri
+            c.wakeword_model = e.model
+            c.wakeword_cancel_model = e.cancel_model
+            c.wakeword_send_model = e.send_model
+            c.wakeword_stop_model = e.stop_model
+        else:
+            c.wakeword_uri = self.ww_uri.get_text().strip()
+            c.wakeword_model = _combo_text(self.ww_model)
+        c.wakeword_sound_detected = self.ww_snd_detected.get_filename() or ""
+        c.wakeword_sound_done = self.ww_snd_done.get_filename() or ""
+        c.wakeword_silence_seconds = float(self.ww_silence.get_text())
+        c.wakeword_cancel_model = _combo_text(self.ww_cancel_model) if hasattr(self, "ww_cancel_model") else ""
+        c.wakeword_send_model = _combo_text(self.ww_send_model) if hasattr(self, "ww_send_model") else ""
+        c.wakeword_stop_model = _combo_text(self.ww_stop_model) if hasattr(self, "ww_stop_model") else ""
+        c.cancel_keywords = [k.strip() for k in self.cancel_keywords.get_text().split(",") if k.strip()]
+        c.send_keywords = [k.strip() for k in self.send_keywords.get_text().split(",") if k.strip()]
+        c.stop_keywords = [k.strip() for k in self.stop_keywords.get_text().split(",") if k.strip()]
+
+    def _collect_general(self, c) -> None:
+        c.tts_url = self.wwb_url.get_text().strip().rstrip("/")
+        c.tts_model = self.wwb_model.get_text().strip()
+        c.tts_voices = [v.strip() for v in self.wwb_voices.get_text().split(",") if v.strip()]
+        c.mic = self._selected_mic_name()
+        c.output = self.gen_output.get_active_text() or "type"
+        c.language = self.gen_lang.get_text().strip()
+        c.notify = self.gen_notify.get_active()
+        c.notify_routing = self.gen_notify_routing.get_active()
+        c.overlay_enabled = self.gen_overlay.get_active()
+        c.device = _type_key(self.stt_device, _DEVICE_OPTIONS, "auto")
+        c.compute_type = _type_key(self.stt_compute, _COMPUTE_OPTIONS, "auto")
+        autostart.set_enabled(self.gen_boot.get_active())
+        if hasattr(self, "upd_auto"):
+            c.update_check = self.upd_auto.get_active()
+
+    def _bg_ww_reachability_check(self, uri: str) -> None:
+        # Check reachability in background — don't block the GTK thread
+        def _bg_ww_check(uri=uri):
+            import socket
+            from urllib.parse import urlparse
+            parsed = urlparse(uri)
+            host = parsed.hostname or "127.0.0.1"
+            port = parsed.port or 10400
+            try:
+                with socket.create_connection((host, port), timeout=2.0):
+                    logbuffer.log(f"[wakeword] server reachable at {uri}", level="INFO")
+            except OSError as e:
+                logbuffer.log(f"[wakeword] cannot reach {uri}: {e}", level="WARNING")
+        threading.Thread(target=_bg_ww_check, daemon=True).start()
 
     def _error(self, msg: str) -> None:
         d = Gtk.MessageDialog(transient_for=self.dlg, modal=True, message_type=Gtk.MessageType.ERROR,
@@ -4614,9 +4797,7 @@ class SettingsDialog:
         if saving:
             self._force_build_tabs()
         if getattr(self, "_talk_idx", -1) >= 0:
-            committed = self._talk_commit(show_errors=saving)
-            if saving and not committed:
-                return
+            self._talk_commit()
         if resp == RESP_SAVE:
             import copy
             snap_before = self._cfg_snapshot(self.cfg)

@@ -104,6 +104,50 @@ def _engine_best_for(engine) -> str:
     return "Short / medium"
 
 
+def _expand_engines(engines, expand_models: bool) -> list:
+    """Build the run list, optionally expanding remote engines by their models."""
+    run_list: list = []
+    for e in engines:
+        if expand_models and not e.is_local and not e.is_streaming:
+            models = stt.list_models(e.url, e.api_key_env)
+            if len(models) > 1:
+                run_list.extend(dataclasses.replace(e, model=m, name=f"{e.name} [{m}]")
+                                for m in models)
+                continue
+        run_list.append(e)
+    return run_list
+
+
+def _engine_languages(e, meta_cache: dict) -> list[str]:
+    if e.is_local:
+        return []
+    url = e.url
+    if url not in meta_cache:
+        meta_cache[url] = stt.list_models_meta(url, e.api_key_env)
+    for m in meta_cache[url]:
+        if not e.model or m.id == e.model or m.id.endswith("/" + e.model):
+            return m.languages
+    return meta_cache[url][0].languages if meta_cache[url] else []
+
+
+def _measure(e, wav_path: Path, language: str, tr):
+    """Run one benchmark; returns (result, local RSS delta MB, server RSS MB | None)."""
+    # Snapshot server RAM before (if Prometheus metrics available)
+    srv_before: float | None = None
+    if not e.is_local:
+        srv_before = stt.probe_server_ram_mb(e.url)
+    rss_before = _rss_mb()
+    res = stt.benchmark(e, wav_path, language=language, local_transcriber=tr)
+    rss_after = _rss_mb()
+    ram_delta = max(0.0, rss_after - rss_before)
+    srv_ram: float | None = None
+    if not e.is_local:
+        srv_after = stt.probe_server_ram_mb(e.url)
+        if srv_before is not None and srv_after is not None:
+            srv_ram = srv_after  # report current RSS, not delta (server may not unload)
+    return res, ram_delta, srv_ram
+
+
 def run(engines, wav_path: Path, reference: str, *, language: str = "",
         case_sensitive: bool = True, get_local_transcriber=None, progress=None,
         expand_models: bool = False) -> list[BenchRow]:
@@ -113,51 +157,14 @@ def run(engines, wav_path: Path, reference: str, *, language: str = "",
     runs one benchmark row per model instead of just the configured one.
     Accuracy is case-sensitive by default so wrong capitalisation counts.
     """
-    # Build the run list, optionally expanding remote engines by their models
-    run_list: list = []
-    for e in engines:
-        if expand_models and not e.is_local and not e.is_streaming:
-            models = stt.list_models(e.url, e.api_key_env)
-            if len(models) > 1:
-                for m in models:
-                    run_list.append(dataclasses.replace(e, model=m,
-                                                        name=f"{e.name} [{m}]"))
-                continue
-        run_list.append(e)
-
+    run_list = _expand_engines(engines, expand_models)
     device_cache: dict = {}
     meta_cache: dict = {}   # url → list[ModelMeta]
-    server_ram_cache: dict = {}   # url → float | None (MB from /metrics)
-
-    def _get_langs(e) -> list[str]:
-        if e.is_local:
-            return []
-        url = e.url
-        if url not in meta_cache:
-            meta_cache[url] = stt.list_models_meta(url, e.api_key_env)
-        for m in meta_cache[url]:
-            if not e.model or m.id == e.model or m.id.endswith("/" + e.model):
-                return m.languages
-        return meta_cache[url][0].languages if meta_cache[url] else []
 
     rows: list[BenchRow] = []
     for e in run_list:
         tr = get_local_transcriber(e) if (e.is_local and get_local_transcriber) else None
-        # Snapshot server RAM before (if Prometheus metrics available)
-        if not e.is_local and e.url not in server_ram_cache:
-            server_ram_cache[e.url] = None  # sentinel — probe once per URL
-        srv_before: float | None = None
-        if not e.is_local:
-            srv_before = stt.probe_server_ram_mb(e.url)
-        rss_before = _rss_mb()
-        res = stt.benchmark(e, wav_path, language=language, local_transcriber=tr)
-        rss_after = _rss_mb()
-        ram_delta = max(0.0, rss_after - rss_before)
-        srv_ram: float | None = None
-        if not e.is_local:
-            srv_after = stt.probe_server_ram_mb(e.url)
-            if srv_before is not None and srv_after is not None:
-                srv_ram = srv_after  # report current RSS, not delta (server may not unload)
+        res, ram_delta, srv_ram = _measure(e, wav_path, language, tr)
         w = wer(reference, res.text, case_sensitive=case_sensitive) if res.ok else 1.0
         row = BenchRow(
             engine=e.name,
@@ -165,7 +172,7 @@ def run(engines, wav_path: Path, reference: str, *, language: str = "",
             model=e.model or ("local" if e.is_local else "(default)"),
             device=_engine_device(e, tr, device_cache),
             best_for=_engine_best_for(e),
-            languages=_get_langs(e),
+            languages=_engine_languages(e, meta_cache),
             ok=res.ok,
             seconds=res.seconds,
             wer=w,

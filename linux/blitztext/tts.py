@@ -11,7 +11,9 @@ class _SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         def origin(url):
             parsed = urlsplit(url)
-            port = parsed.port if parsed.port is not None else (443 if parsed.scheme == "https" else 80)
+            port = parsed.port
+            if port is None:
+                port = 443 if parsed.scheme == "https" else 80
             return parsed.scheme.lower(), parsed.hostname, port
 
         if origin(req.full_url) != origin(newurl):
@@ -43,14 +45,14 @@ def session_key(url: str) -> str:
 
 
 def validate_env_name(name: str) -> str:
-    if name and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+    if name and not re.fullmatch(r"[A-Za-z_]\w*", name, re.ASCII):
         raise RuntimeError("API Key Env must contain an environment variable name, not the API key.")
     return name
 
 
 def clean_env_name(name: str) -> str:
     """Valid env var name unchanged, anything else (e.g. a pasted key) -> "" (never echoed)."""
-    return name if name and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) else ""
+    return name if name and re.fullmatch(r"[A-Za-z_]\w*", name, re.ASCII) else ""
 
 
 def base_url(url: str) -> str:

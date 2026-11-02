@@ -345,34 +345,43 @@ class App:
         if self.tray is not None:
             self.tray.update_status(state, labels.get(state, message))
 
-        def cls(name, add, *names):
-            ctx = self._rows[name]["btn"].get_style_context()
-            for n in names:
-                ctx.remove_class(n)
-            if add:
-                ctx.add_class(add)
+        self._style_rows(state, workflow)
+        return False  # one-shot idle
 
+    def _row_cls(self, name, add, *names) -> None:
+        ctx = self._rows[name]["btn"].get_style_context()
+        for n in names:
+            ctx.remove_class(n)
+        if add:
+            ctx.add_class(add)
+
+    def _style_rows(self, state: str, workflow: str | None) -> None:
         if state in ("recording", "streaming"):
             self._active = workflow
-            for nm, r in self._rows.items():
-                if nm == workflow:
-                    cls(nm, "recording", "dim")
-                    r["pill"].set_text("● Live" if state == "streaming" else "● Stop")
-                    r["pill"].get_style_context().add_class("rec")
-                else:
-                    cls(nm, "dim", "recording")
+            self._style_rows_live(state, workflow)
         elif state == "busy":
             for nm in self._rows:
                 if nm != workflow:
-                    cls(nm, "dim", "recording")
+                    self._row_cls(nm, "dim", "recording")
         elif state in ("idle", "done", "error"):
             self._active = None
-            for nm, r in self._rows.items():
-                cls(nm, None, "dim", "recording")
-                r["pill"].get_style_context().remove_class("rec")
-                wf_match = next((w for w in self.cfg.workflows if w.name == nm), None)
-                r["pill"].set_text(pretty_hotkey(wf_match.hotkey) if wf_match else "")
-        return False  # one-shot idle
+            self._style_rows_reset()
+
+    def _style_rows_live(self, state: str, workflow: str | None) -> None:
+        for nm, r in self._rows.items():
+            if nm == workflow:
+                self._row_cls(nm, "recording", "dim")
+                r["pill"].set_text("● Live" if state == "streaming" else "● Stop")
+                r["pill"].get_style_context().add_class("rec")
+            else:
+                self._row_cls(nm, "dim", "recording")
+
+    def _style_rows_reset(self) -> None:
+        for nm, r in self._rows.items():
+            self._row_cls(nm, None, "dim", "recording")
+            r["pill"].get_style_context().remove_class("rec")
+            wf_match = next((w for w in self.cfg.workflows if w.name == nm), None)
+            r["pill"].set_text(pretty_hotkey(wf_match.hotkey) if wf_match else "")
 
     # -- panel / settings / lifecycle -----------------------------------------
     def open_settings(self) -> None:

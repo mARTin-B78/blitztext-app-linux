@@ -187,11 +187,12 @@ class Daemon:
 
     def _init_wakeword(self):
         if self.cfg.wakeword_enabled:
+            from . import wakeword
             from .wakeword import WakewordListener, is_muted
             if is_muted():
                 # A stale flag silently disables detection — make it visible so
                 # "the wakeword does nothing" has an obvious explanation/fix.
-                log("[wakeword] Starting PAUSED — /tmp/wake_muted is present; "
+                log(f"[wakeword] Starting PAUSED — {wakeword.MUTE_FILE} is present; "
                     "resume via the tray 'Pause wakeword' toggle.")
             self._wakeword_listener = WakewordListener(
                 uri=self.cfg.wakeword_uri,
@@ -301,76 +302,15 @@ class Daemon:
         self._vad_last_speech = time.time()
         
         silence = max(0.5, self.cfg.wakeword_silence_seconds)
-        def on_level(level):
-            # Feed the overlay waveform (the VAD meter is already capturing, so
-            # we reuse its level rather than opening a second stream).
-            if self.level_cb:
-                self.level_cb(level)
-            now = time.time()
-            if level > 0.05:
-                self._vad_last_speech = now
-                if self.countdown_cb:
-                    self.countdown_cb(None, silence)   # speaking — no countdown
-                return
-            quiet = now - self._vad_last_speech
-            armed = now - self._vad_started_at > 2.0
-            if armed and quiet > _VAD_COUNTDOWN_GRACE:
-                # Mirror the auto-stop window into the overlay ring: full when
-                # you fall quiet, empty exactly as it fires.
-                if self.countdown_cb:
-                    self.countdown_cb(silence - quiet, silence - _VAD_COUNTDOWN_GRACE)
-                if quiet > silence and getattr(self, "is_recording", False):
-                    GLib.idle_add(lambda: self.finish_dictation(send_enter=False))
-                    self._vad_stop()
-            elif self.countdown_cb:
-                self.countdown_cb(None, silence)
 
-        # Wakeword-based action listener: if cancel/send wakeword models are
-        # configured, open a second Wyoming connection during recording so a
-        # dedicated wakeword ("stop", "send it") fires instantly — no Whisper pass.
-        self._action_listener = None
-        if self.cfg.wakeword_enabled and (
-                self.cfg.wakeword_cancel_model or self.cfg.wakeword_send_model
-                or self.cfg.wakeword_stop_model):
-            from .wakeword import WakewordActionListener
-            cbs: dict = {}
-            for m in self.cfg.wakeword_cancel_model.split(","):
-                m = m.strip()
-                if m:
-                    cbs[m] = lambda: GLib.idle_add(self.cancel_dictation)
-            for m in self.cfg.wakeword_send_model.split(","):
-                m = m.strip()
-                if m:
-                    cbs[m] = lambda: GLib.idle_add(
-                        lambda: self.finish_dictation(send_enter=True))
-            for m in self.cfg.wakeword_stop_model.split(","):
-                m = m.strip()
-                if m:
-                    cbs[m] = lambda: GLib.idle_add(
-                        lambda: self.finish_dictation(send_enter=False))
-            # external_audio: reuse the recorder's capture (fed below via
-            # on_chunk) instead of opening a second pw-record that competes for
-            # the mic — that contention made real-time detection flaky.
-            self._action_listener = WakewordActionListener(
-                uri=self.cfg.wakeword_uri, model_callbacks=cbs, mic=self.cfg.mic,
-                external_audio=True)
-            self._action_listener.start()
+        def on_level(level):
+            self._vad_on_level(level, silence)
+
+        self._action_listener = self._make_action_listener()
 
         # Whisper-based cancel watcher: fallback when no cancel wakeword model is
         # set, or as belt-and-suspenders for the spoken cancel keyword list.
-        use_whisper_watcher = (self.cfg.cancel_keywords
-                               and getattr(self, "transcriber", None) is not None
-                               and not self.cfg.wakeword_cancel_model)
-        if use_whisper_watcher:
-            self._cancel_watcher = _CancelWatcher(
-                self.transcriber,
-                self.cfg.cancel_keywords,
-                self.cfg.language,
-                self.cfg.routing_threshold,
-                on_cancel=lambda: GLib.idle_add(self.cancel_dictation),
-            )
-        else:
-            self._cancel_watcher = None
+        self._cancel_watcher = self._make_cancel_watcher()
 
         # Fan the single shared capture out to every consumer that needs raw PCM:
         # the cancel watcher and the action listener (which no longer opens its
@@ -399,6 +339,86 @@ class Daemon:
             # Even when the meter works, cap wakeword sessions at 60s.
             GLib.timeout_add(60_000,
                              lambda: self.is_recording and self.finish_dictation(send_enter=False) or False)
+
+    def _make_action_listener(self):
+        """Wakeword-based action listener, or None when no action models are set.
+
+        If cancel/send wakeword models are configured, open a second Wyoming
+        connection during recording so a dedicated wakeword ("stop", "send it")
+        fires instantly — no Whisper pass.
+        """
+        if not (self.cfg.wakeword_enabled and (
+                self.cfg.wakeword_cancel_model or self.cfg.wakeword_send_model
+                or self.cfg.wakeword_stop_model)):
+            return None
+        from .wakeword import WakewordActionListener
+        # external_audio: reuse the recorder's capture (fed via on_chunk)
+        # instead of opening a second pw-record that competes for the mic —
+        # that contention made real-time detection flaky.
+        listener = WakewordActionListener(
+            uri=self.cfg.wakeword_uri, model_callbacks=self._wakeword_action_callbacks(),
+            mic=self.cfg.mic, external_audio=True)
+        listener.start()
+        return listener
+
+    def _make_cancel_watcher(self):
+        from gi.repository import GLib  # type: ignore
+        use_whisper_watcher = (self.cfg.cancel_keywords
+                               and getattr(self, "transcriber", None) is not None
+                               and not self.cfg.wakeword_cancel_model)
+        if not use_whisper_watcher:
+            return None
+        return _CancelWatcher(
+            self.transcriber,
+            self.cfg.cancel_keywords,
+            self.cfg.language,
+            self.cfg.routing_threshold,
+            on_cancel=lambda: GLib.idle_add(self.cancel_dictation),
+        )
+
+    def _vad_on_level(self, level, silence: float) -> None:
+        import time
+        from gi.repository import GLib  # type: ignore
+        # Feed the overlay waveform (the VAD meter is already capturing, so
+        # we reuse its level rather than opening a second stream).
+        if self.level_cb:
+            self.level_cb(level)
+        now = time.time()
+        if level > 0.05:
+            self._vad_last_speech = now
+            if self.countdown_cb:
+                self.countdown_cb(None, silence)   # speaking — no countdown
+            return
+        quiet = now - self._vad_last_speech
+        armed = now - self._vad_started_at > 2.0
+        if armed and quiet > _VAD_COUNTDOWN_GRACE:
+            # Mirror the auto-stop window into the overlay ring: full when
+            # you fall quiet, empty exactly as it fires.
+            if self.countdown_cb:
+                self.countdown_cb(silence - quiet, silence - _VAD_COUNTDOWN_GRACE)
+            if quiet > silence and getattr(self, "is_recording", False):
+                GLib.idle_add(lambda: self.finish_dictation(send_enter=False))
+                self._vad_stop()
+        elif self.countdown_cb:
+            self.countdown_cb(None, silence)
+
+    def _wakeword_action_callbacks(self) -> dict:
+        """{model: callback} for the cancel/send/stop wakeword models (comma lists)."""
+        from gi.repository import GLib  # type: ignore
+        actions = (
+            (self.cfg.wakeword_cancel_model, lambda: GLib.idle_add(self.cancel_dictation)),
+            (self.cfg.wakeword_send_model, lambda: GLib.idle_add(
+                lambda: self.finish_dictation(send_enter=True))),
+            (self.cfg.wakeword_stop_model, lambda: GLib.idle_add(
+                lambda: self.finish_dictation(send_enter=False))),
+        )
+        cbs: dict = {}
+        for models, cb in actions:
+            for m in models.split(","):
+                m = m.strip()
+                if m:
+                    cbs[m] = cb
+        return cbs
 
     def _vad_stop(self) -> None:
         if getattr(self, '_vad_meter', None) is not None:
@@ -654,70 +674,17 @@ class Daemon:
         self._abort_event.clear()
         label = workflow.name
         try:
-            # Quality gate: drop silent / too-short clips before we even transcribe.
-            duration, rms = quality.analyze_wav(audio_path)
-            if quality.too_quiet(duration, rms,
-                                 min_seconds=self.cfg.min_speech_seconds,
-                                 silence_rms=self.cfg.silence_rms):
-                self._emit("idle", label, "Too quiet")
-                log("Nothing heard — clip too quiet/short.")
-                return
-
-            self._emit("busy", label, "Transcribing…")
-            self._dnotify(f"⌛ {label}", "Transcribing…")
-            hotwords = ", ".join(self.cfg.all_keywords) if workflow.mode == "route" else ""
-            # In 'transcribe' mode the output must be a verbatim 1:1 of whatever
-            # was spoken, in the spoken language — so ignore the configured
-            # language hint (which would force e.g. English speech to be decoded
-            # as German) and let the engine auto-detect. Other modes keep the
-            # hint for accuracy.
-            language = "" if workflow.mode == "transcribe" else self.cfg.language
-            text = stt.transcribe(
-                self.cfg.stt_engine_for(workflow),
-                audio_path,
-                language=language,
-                hotwords=hotwords,
-                local_transcriber=self.transcriber,
-                timeout=self.cfg.timeout,
-            )
-            if self._abort_event.is_set():
-                log(f"✗ {label}: cancelled during transcription.")
-                return
-
-            text = quality.clean(text, strip_trailing_punctuation=self.cfg.strip_trailing_punctuation)
-            text = quality.expand_spoken_punctuation(text)
-            if not text or (self.cfg.reject_hallucinations and quality.is_hallucination(text, duration)):
-                self._emit("idle", label, "No speech detected")
-                log("Nothing heard — no speech detected.")
+            text = self._transcribe_checked(audio_path, workflow, label)
+            if text is None:
                 return
 
             # Spoken abort: a configured cancel word heard at an edge discards the
             # whole clip — nothing is routed, rewritten, or typed. This is the
             # rescue for an accidentally triggered (e.g. wakeword) dictation.
-            cancel_kw = is_cancel(text, self.cfg.effective_cancel_keywords, threshold=self.cfg.routing_threshold)
-            if cancel_kw:
-                log(f"✗ Discarded by voice keyword “{cancel_kw}”.")
-                if self.text_cb:
-                    self.text_cb("✗ Abgebrochen")
-                self._emit("idle", label, "Cancelled")
-                self._dnotify("Abgebrochen", f"„{cancel_kw}“ gehört — verworfen.", "low")
+            if self._voice_cancelled(text, label):
                 return
 
-            # Spoken send: a configured word at an edge ("computer send") is
-            # stripped, and the rest is delivered AND submitted with Enter — the
-            # spoken equivalent of stop+paste+Enter. Mainly for hands-free use.
-            send_kw, text = match_send(text, self.cfg.effective_send_keywords, threshold=self.cfg.routing_threshold)
-            if send_kw:
-                send_enter = True
-                log(f"⏎ Send keyword “{send_kw}” — delivering and pressing Enter.")
-
-            # Spoken stop: like send but delivered *without* Enter — the word is
-            # stripped and the rest is pasted as-is (stop+paste). Only checked
-            # when no send word matched (send wins if both somehow appear).
-            if not send_kw:
-                stop_kw, text = match_send(text, self.cfg.effective_stop_keywords, threshold=self.cfg.routing_threshold)
-                if stop_kw:
-                    log(f"⏹ Stop keyword “{stop_kw}” — delivering without Enter.")
+            text, send_enter = self._strip_send_stop(text, send_enter)
 
             # Voice routing: pick the preset from a spoken keyword, strip it.
             if workflow.mode == "route":
@@ -725,138 +692,20 @@ class Daemon:
                 target = self.cfg.preset_by_name(res.preset_name) or self.cfg.default_preset
                 text = res.text
                 label = target.name if target else "Transcribe"
-                icon = (getattr(target, "icon", "") or "🎙") if target else "🎙"
-                via = f"“{res.keyword}”" if res.keyword else "no keyword → default"
-                self._emit("busy", label, f"→ {label} ({via})")
-                # Fuse the match onto the overlay (icon + preset + keyword); falls
-                # back to a desktop notification only when there's no overlay.
-                if self.routing_cb:
-                    try:
-                        self.routing_cb(icon, label, res.keyword)
-                    except Exception:  # noqa: BLE001 - UI must not break the engine
-                        pass
-                self._rnotify(f"{icon} {label}", f"matched: {via}")
-                log(f"→ routed to {label} (matched: {via})")
+                self._announce_route(target, label, res.keyword)
             else:
                 target = workflow
 
             if target and target.mode == "rewrite" and target.prompt:
-                if not text:
-                    self._emit("idle", label, "Only a keyword heard")
-                    log("Only the keyword was heard — nothing to type.")
-                    return
-                self._emit("busy", label, "Rewriting…")
-                self._dnotify(f"⌛ {label}", "Rewriting…")
-                # Show the transcribed text immediately so the user sees what was heard.
-                if self.text_cb:
-                    self.text_cb(f"📝 {text}")
-                # Stream the rewrite into the overlay so you watch the model write
-                # (the bubble updates token-by-token). The delivered text is still
-                # the complete result, typed once the rewrite finishes.
-                on_token = None
-                if self.text_cb:
-                    # Use a deque to stream the last ~400 chars to the overlay so
-                    # Pango never has to lay out a 15 000-char code block on each
-                    # token, and "".join() stays O(window) not O(total).
-                    from collections import deque
-                    _window: deque[str] = deque()
-                    _window_len: list[int] = [0]
-                    _OVERLAY_CHARS = 400
-
-                    _thinking_frames = ["⏳ Thinking.", "⏳ Thinking..", "⏳ Thinking...", "⏳ Thinking"]
-                    _thinking_state: list[int] = [0]
-                    _first_token: list[bool] = [False]
-
-                    def _pulse_thinking(_s=_thinking_state, _f=_first_token) -> bool:
-                        if _f[0]:
-                            return False
-                        self.text_cb(_thinking_frames[_s[0] % len(_thinking_frames)])
-                        _s[0] += 1
-                        return True
-
-                    try:
-                        from gi.repository import GLib  # type: ignore as _GLib
-                        # idle_add ensures timeout_add runs on the GTK main thread —
-                        # calling timeout_add from a background thread is not safe.
-                        _GLib.idle_add(lambda: _GLib.timeout_add(400, _pulse_thinking) and False)
-                    except Exception:  # noqa: BLE001
-                        pass
-
-                    def on_token(delta: str,
-                                 _w=_window, _wl=_window_len, _f=_first_token) -> None:
-                        _f[0] = True
-                        _w.append(delta)
-                        _wl[0] += len(delta)
-                        # Trim old tokens from the front to stay within the window.
-                        while _wl[0] > _OVERLAY_CHARS and len(_w) > 1:
-                            _wl[0] -= len(_w[0])
-                            _w.popleft()
-                        self.text_cb("".join(_w))
-
-                # Use the preset's pinned engine when set, else the active one.
-                engine_name = getattr(target, "llm_engine", "") or ""
-                llm_engine = (
-                    next((e for e in self.cfg.llm_engines if e.name == engine_name), None)
-                    or self.cfg.active_llm
-                )
-                try:
-                    text = llm.chat(
-                        llm_engine,
-                        target.prompt,
-                        text,
-                        model=target.model or None,
-                        temperature=target.temperature,
-                        timeout=self.cfg.timeout,
-                        on_token=on_token,
-                        abort_event=self._abort_event,
-                    )
-                except LLMError as exc:
-                    self._emit("error", label, str(exc))
-                    self._dnotify("Rewrite failed", str(exc), "critical")
-                    log(f"ERROR ({label} rewrite): {exc}")
-                    if self.text_cb:
-                        self.text_cb(f"✗ {exc}")
-                    return
-                except Exception as exc:  # noqa: BLE001 - guard against any uncaught error
-                    msg = f"LLM error: {exc}"
-                    self._emit("error", label, msg)
-                    log(f"ERROR ({label} rewrite unexpected): {exc}")
-                    if self.text_cb:
-                        self.text_cb(f"✗ {msg}")
-                    return
-
-                if self._abort_event.is_set():
-                    log(f"✗ {label}: cancelled during rewrite.")
-                    return
-
-                # Sanity-check: reject responses that are >80 % whitespace —
-                # a model that's cold-starting or misconfigured sometimes streams
-                # spaces or blank lines instead of real output.
-                non_ws = sum(1 for c in text if not c.isspace())
-                if non_ws < max(1, len(text) * 0.20):
-                    msg = "LLM returned mostly whitespace — discarded"
-                    self._emit("error", label, msg)
-                    log(f"ERROR ({label}): {msg} (len={len(text)})")
-                    if self.text_cb:
-                        self.text_cb(f"✗ {msg}")
+                text = self._rewrite(target, text, label)
+                if text is None:
                     return
 
             if not text:
                 self._emit("idle", label, "Nothing to type")
                 return
 
-            deliver(
-                text,
-                mode=self.cfg.output,
-                window_id=window_id,
-                type_delay_ms=self.cfg.type_delay_ms,
-            )
-            if send_enter:
-                from .paste import press_enter
-                press_enter(window_id)
-            self._emit("done", label, text)
-            log(f"✓ {label}: {text[:120]}")
-            self._dnotify(f"✓ {label}", text[:80] + ("…" if len(text) > 80 else ""))
+            self._deliver_result(text, label, window_id, send_enter)
         except Exception as exc:  # noqa: BLE001 - surface any failure
             self._emit("error", label, str(exc))
             self._dnotify("Error", str(exc), "critical")
@@ -866,6 +715,207 @@ class Daemon:
             with self._lock:
                 self._busy = False
             self._emit("idle", None, "Ready")
+
+    def _transcribe_checked(self, audio_path, workflow: Workflow, label: str) -> str | None:
+        """Quality gate + STT + cleanup; None when there is nothing to process."""
+        # Quality gate: drop silent / too-short clips before we even transcribe.
+        duration, rms = quality.analyze_wav(audio_path)
+        if quality.too_quiet(duration, rms,
+                             min_seconds=self.cfg.min_speech_seconds,
+                             silence_rms=self.cfg.silence_rms):
+            self._emit("idle", label, "Too quiet")
+            log("Nothing heard — clip too quiet/short.")
+            return None
+
+        self._emit("busy", label, "Transcribing…")
+        self._dnotify(f"⌛ {label}", "Transcribing…")
+        hotwords = ", ".join(self.cfg.all_keywords) if workflow.mode == "route" else ""
+        # In 'transcribe' mode the output must be a verbatim 1:1 of whatever
+        # was spoken, in the spoken language — so ignore the configured
+        # language hint (which would force e.g. English speech to be decoded
+        # as German) and let the engine auto-detect. Other modes keep the
+        # hint for accuracy.
+        language = "" if workflow.mode == "transcribe" else self.cfg.language
+        text = stt.transcribe(
+            self.cfg.stt_engine_for(workflow),
+            audio_path,
+            language=language,
+            hotwords=hotwords,
+            local_transcriber=self.transcriber,
+            timeout=self.cfg.timeout,
+        )
+        if self._abort_event.is_set():
+            log(f"✗ {label}: cancelled during transcription.")
+            return None
+
+        text = quality.clean(text, strip_trailing_punctuation=self.cfg.strip_trailing_punctuation)
+        text = quality.expand_spoken_punctuation(text)
+        if not text or (self.cfg.reject_hallucinations and quality.is_hallucination(text, duration)):
+            self._emit("idle", label, "No speech detected")
+            log("Nothing heard — no speech detected.")
+            return None
+        return text
+
+    def _voice_cancelled(self, text: str, label: str) -> bool:
+        cancel_kw = is_cancel(text, self.cfg.effective_cancel_keywords, threshold=self.cfg.routing_threshold)
+        if not cancel_kw:
+            return False
+        log(f"✗ Discarded by voice keyword “{cancel_kw}”.")
+        if self.text_cb:
+            self.text_cb("✗ Abgebrochen")
+        self._emit("idle", label, "Cancelled")
+        self._dnotify("Abgebrochen", f"„{cancel_kw}“ gehört — verworfen.", "low")
+        return True
+
+    def _strip_send_stop(self, text: str, send_enter: bool) -> tuple[str, bool]:
+        # Spoken send: a configured word at an edge ("computer send") is
+        # stripped, and the rest is delivered AND submitted with Enter — the
+        # spoken equivalent of stop+paste+Enter. Mainly for hands-free use.
+        send_kw, text = match_send(text, self.cfg.effective_send_keywords, threshold=self.cfg.routing_threshold)
+        if send_kw:
+            log(f"⏎ Send keyword “{send_kw}” — delivering and pressing Enter.")
+            return text, True
+
+        # Spoken stop: like send but delivered *without* Enter — the word is
+        # stripped and the rest is pasted as-is (stop+paste). Only checked
+        # when no send word matched (send wins if both somehow appear).
+        stop_kw, text = match_send(text, self.cfg.effective_stop_keywords, threshold=self.cfg.routing_threshold)
+        if stop_kw:
+            log(f"⏹ Stop keyword “{stop_kw}” — delivering without Enter.")
+        return text, send_enter
+
+    def _announce_route(self, target, label: str, keyword) -> None:
+        icon = (getattr(target, "icon", "") or "🎙") if target else "🎙"
+        via = f"“{keyword}”" if keyword else "no keyword → default"
+        self._emit("busy", label, f"→ {label} ({via})")
+        # Fuse the match onto the overlay (icon + preset + keyword); falls
+        # back to a desktop notification only when there's no overlay.
+        if self.routing_cb:
+            try:
+                self.routing_cb(icon, label, keyword)
+            except Exception:  # noqa: BLE001 - UI must not break the engine
+                pass
+        self._rnotify(f"{icon} {label}", f"matched: {via}")
+        log(f"→ routed to {label} (matched: {via})")
+
+    def _overlay_token_cb(self):
+        """on_token callback that streams the rewrite into the overlay bubble."""
+        # Use a deque to stream the last ~400 chars to the overlay so
+        # Pango never has to lay out a 15 000-char code block on each
+        # token, and "".join() stays O(window) not O(total).
+        from collections import deque
+        _window: deque[str] = deque()
+        _window_len: list[int] = [0]
+        _OVERLAY_CHARS = 400
+
+        _thinking_frames = ["⏳ Thinking.", "⏳ Thinking..", "⏳ Thinking...", "⏳ Thinking"]
+        _thinking_state: list[int] = [0]
+        _first_token: list[bool] = [False]
+
+        def _pulse_thinking(_s=_thinking_state, _f=_first_token) -> bool:
+            if _f[0]:
+                return False
+            self.text_cb(_thinking_frames[_s[0] % len(_thinking_frames)])
+            _s[0] += 1
+            return True
+
+        try:
+            from gi.repository import GLib as _GLib  # type: ignore
+            # idle_add ensures timeout_add runs on the GTK main thread —
+            # calling timeout_add from a background thread is not safe.
+            _GLib.idle_add(lambda: _GLib.timeout_add(400, _pulse_thinking) and False)
+        except Exception:  # noqa: BLE001
+            pass
+
+        def on_token(delta: str,
+                     _w=_window, _wl=_window_len, _f=_first_token) -> None:
+            _f[0] = True
+            _w.append(delta)
+            _wl[0] += len(delta)
+            # Trim old tokens from the front to stay within the window.
+            while _wl[0] > _OVERLAY_CHARS and len(_w) > 1:
+                _wl[0] -= len(_w[0])
+                _w.popleft()
+            self.text_cb("".join(_w))
+
+        return on_token
+
+    def _rewrite_failed(self, label: str, msg: str, log_msg: str, notify: bool) -> None:
+        self._emit("error", label, msg)
+        if notify:
+            self._dnotify("Rewrite failed", msg, "critical")
+        log(log_msg)
+        if self.text_cb:
+            self.text_cb(f"✗ {msg}")
+
+    def _rewrite(self, target: Workflow, text: str, label: str) -> str | None:
+        """LLM rewrite step; None when the pipeline must stop."""
+        if not text:
+            self._emit("idle", label, "Only a keyword heard")
+            log("Only the keyword was heard — nothing to type.")
+            return None
+        self._emit("busy", label, "Rewriting…")
+        self._dnotify(f"⌛ {label}", "Rewriting…")
+        # Show the transcribed text immediately so the user sees what was heard.
+        if self.text_cb:
+            self.text_cb(f"📝 {text}")
+        # Stream the rewrite into the overlay so you watch the model write
+        # (the bubble updates token-by-token). The delivered text is still
+        # the complete result, typed once the rewrite finishes.
+        on_token = self._overlay_token_cb() if self.text_cb else None
+
+        # Use the preset's pinned engine when set, else the active one.
+        engine_name = getattr(target, "llm_engine", "") or ""
+        llm_engine = (
+            next((e for e in self.cfg.llm_engines if e.name == engine_name), None)
+            or self.cfg.active_llm
+        )
+        try:
+            text = llm.chat(
+                llm_engine,
+                target.prompt,
+                text,
+                model=target.model or None,
+                temperature=target.temperature,
+                timeout=self.cfg.timeout,
+                on_token=on_token,
+                abort_event=self._abort_event,
+            )
+        except LLMError as exc:
+            self._rewrite_failed(label, str(exc), f"ERROR ({label} rewrite): {exc}", notify=True)
+            return None
+        except Exception as exc:  # noqa: BLE001 - guard against any uncaught error
+            self._rewrite_failed(label, f"LLM error: {exc}",
+                                 f"ERROR ({label} rewrite unexpected): {exc}", notify=False)
+            return None
+
+        if self._abort_event.is_set():
+            log(f"✗ {label}: cancelled during rewrite.")
+            return None
+
+        # Sanity-check: reject responses that are >80 % whitespace —
+        # a model that's cold-starting or misconfigured sometimes streams
+        # spaces or blank lines instead of real output.
+        non_ws = sum(1 for c in text if not c.isspace())
+        if non_ws < max(1, len(text) * 0.20):
+            msg = "LLM returned mostly whitespace — discarded"
+            self._rewrite_failed(label, msg, f"ERROR ({label}): {msg} (len={len(text)})", notify=False)
+            return None
+        return text
+
+    def _deliver_result(self, text: str, label: str, window_id, send_enter: bool) -> None:
+        deliver(
+            text,
+            mode=self.cfg.output,
+            window_id=window_id,
+            type_delay_ms=self.cfg.type_delay_ms,
+        )
+        if send_enter:
+            from .paste import press_enter
+            press_enter(window_id)
+        self._emit("done", label, text)
+        log(f"✓ {label}: {text[:120]}")
+        self._dnotify(f"✓ {label}", text[:80] + ("…" if len(text) > 80 else ""))
 
     # -- hotkeys --------------------------------------------------------------
     def _build_mapping(self) -> dict:

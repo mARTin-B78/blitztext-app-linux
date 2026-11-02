@@ -100,15 +100,8 @@ def validate_sound_path(path: str) -> str | None:
     return resolved_str
 
 
-def play(path: str = "", *, fallback: str | None = None) -> "subprocess.Popen | None":
-    """Play `path` (WAV/MP3/OGG/FLAC/…); fallback to a freedesktop system sound.
-
-    User-supplied paths are validated via :func:`validate_sound_path` before
-    being passed to any audio player.  Invalid or unsafe paths are silently
-    ignored (the fallback sound is still attempted).
-
-    Returns the Popen object so callers can terminate a preview, or None.
-    """
+def _resolve_target(path: str, fallback: str | None) -> str:
+    """Validated user path, else the freedesktop fallback sound, else ""."""
     target = ""
     if path:
         safe = validate_sound_path(path)
@@ -118,16 +111,33 @@ def play(path: str = "", *, fallback: str | None = None) -> "subprocess.Popen | 
         fd = _FREEDESKTOP.format(name=fallback)
         if os.path.exists(fd):
             target = fd
+    return target
+
+
+def _player_supports(player: str, wav_only: bool, ext: str) -> bool:
+    if not shutil.which(player):
+        return False
+    if wav_only and ext != ".wav":
+        return False
+    return not (player == "paplay" and ext not in _NATIVE_EXTS)
+
+
+def play(path: str = "", *, fallback: str | None = None) -> "subprocess.Popen | None":
+    """Play `path` (WAV/MP3/OGG/FLAC/…); fallback to a freedesktop system sound.
+
+    User-supplied paths are validated via :func:`validate_sound_path` before
+    being passed to any audio player.  Invalid or unsafe paths are silently
+    ignored (the fallback sound is still attempted).
+
+    Returns the Popen object so callers can terminate a preview, or None.
+    """
+    target = _resolve_target(path, fallback)
     if not target:
         return None
 
     ext = os.path.splitext(target)[1].lower()
     for player, extra, wav_only in _PLAYERS:
-        if not shutil.which(player):
-            continue
-        if wav_only and ext != ".wav":
-            continue
-        if player == "paplay" and ext not in _NATIVE_EXTS:
+        if not _player_supports(player, wav_only, ext):
             continue
         try:
             proc = subprocess.Popen(

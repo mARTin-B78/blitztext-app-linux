@@ -4,7 +4,8 @@ Runs a background thread that captures audio and streams it to a Wyoming
 server (e.g. rhasspy/wyoming-openwakeword). When a detection event occurs, 
 it triggers the main daemon.
 
-Respects /tmp/wake_muted to allow easy desktop integration via scripts.
+Respects a per-user mute flag file (see MUTE_FILE) to allow easy desktop
+integration via scripts.
 """
 
 from __future__ import annotations
@@ -20,7 +21,13 @@ from urllib.parse import urlparse
 
 from . import logbuffer
 
-MUTE_FILE = "/tmp/wake_muted"
+# Per-user location (XDG_RUNTIME_DIR is 0700 per user): a fixed /tmp name let
+# any local user plant the flag (mute someone else's wakeword) or a symlink.
+MUTE_FILE = os.path.join(
+    os.environ.get("XDG_RUNTIME_DIR")
+    or os.path.join(os.path.expanduser("~"), ".cache", "blitztext"),
+    "blitztext-wake_muted",
+)
 
 
 def is_muted() -> bool:
@@ -32,11 +39,101 @@ def set_muted(muted: bool) -> None:
     """Pause (create flag) or resume (remove flag) wakeword detection."""
     try:
         if muted:
+            os.makedirs(os.path.dirname(MUTE_FILE), mode=0o700, exist_ok=True)
             open(MUTE_FILE, "a").close()
         elif os.path.exists(MUTE_FILE):
             os.remove(MUTE_FILE)
     except OSError as e:  # noqa: BLE001 - mute is best-effort, never crash
         logbuffer.log(f"[wakeword] Could not update mute flag: {e}", level="WARNING")
+
+
+_AUDIO_FORMAT = {"rate": 16000, "width": 2, "channels": 1}
+
+
+def _send_json(sock, obj) -> None:
+    sock.sendall((json.dumps(obj) + "\n").encode("utf-8"))
+
+
+def _connect(sock, uri: str) -> None:
+    parsed = urlparse(uri)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 10400
+    sock.settimeout(5.0)
+    sock.connect((host, port))
+
+
+def _send_start(sock, names: list) -> None:
+    _send_json(sock, {"type": "detect", "data": {"names": names}})
+    _send_json(sock, {"type": "audio-start", "data": dict(_AUDIO_FORMAT)})
+
+
+def _send_chunk(sock, chunk: bytes) -> None:
+    _send_json(sock, {"type": "audio-chunk", "data": dict(_AUDIO_FORMAT),
+                      "payload_length": len(chunk)})
+    sock.sendall(chunk)
+
+
+def _recv_line(sock) -> bytes:
+    """Read one header line byte-wise; a result without trailing newline means EOF."""
+    line = b""
+    while not line.endswith(b"\n"):
+        byte = sock.recv(1)
+        if not byte:
+            break
+        line += byte
+    return line
+
+
+def _read_event_body(sock, msg: dict) -> None:
+    """Read the event's separate ``data`` block and skip its payload.
+
+    Wyoming sends the event's `data` as a separate `data_length` block after the
+    header line (not inline) — newer servers like wyoming-microwakeword always
+    do. Read it so the wake-word name is available and the stream stays in sync.
+    """
+    data_len = msg.get("data_length", 0)
+    if data_len > 0:
+        data_bytes = b""
+        while len(data_bytes) < data_len:
+            r = sock.recv(min(data_len - len(data_bytes), 4096))
+            if not r:
+                break
+            data_bytes += r
+        try:
+            msg["data"] = json.loads(data_bytes.decode("utf-8"))
+        except Exception:
+            pass
+
+    remaining = msg.get("payload_length", 0)
+    while remaining > 0:
+        received = sock.recv(min(remaining, 4096))
+        if not received:
+            break
+        remaining -= len(received)
+
+
+def _pw_record_cmd(mic: str) -> list[str]:
+    """Recording subprocess command (16kHz, 16-bit, mono)."""
+    cmd = ["pw-record", "--rate=16000", "--channels=1", "--format=s16", "-"]
+    if mic:
+        cmd.extend(["--target", mic])
+    return cmd
+
+
+def _pump_mic(proc, stop_event, sock) -> None:
+    while not stop_event.is_set() and proc.poll() is None:
+        chunk = proc.stdout.read(3200)  # 100ms of 16kHz 16-bit mono
+        if not chunk:
+            break
+        _send_chunk(sock, chunk)
+
+
+def _stop_proc(proc) -> None:
+    proc.terminate()
+    try:
+        proc.wait(timeout=1.0)
+    except subprocess.TimeoutExpired:
+        proc.kill()
 
 
 class WakewordListener:
@@ -72,108 +169,44 @@ class WakewordListener:
                 time.sleep(3)  # Retry backoff
 
     def _stream(self):
-        parsed = urlparse(self.uri)
-        host = parsed.hostname or "127.0.0.1"
-        port = parsed.port or 10400
-
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(5.0)
-            sock.connect((host, port))
+            _connect(sock, self.uri)
             logbuffer.log(f"[wakeword] Connected to {self.uri}")
-            
-            # Request detection for all configured models
-            detect_msg = {"type": "detect", "data": {"names": self.models}}
-            sock.sendall((json.dumps(detect_msg) + "\n").encode("utf-8"))
 
-            audio_start = {"type": "audio-start", "data": {"rate": 16000, "width": 2, "channels": 1}}
-            sock.sendall((json.dumps(audio_start) + "\n").encode("utf-8"))
+            # Request detection for all configured models
+            _send_start(sock, self.models)
 
             # Start reading thread
             read_active = True
-            
-            def read_loop():
-                try:
-                    sock.settimeout(1.0)
-                    while read_active and not self._stop_event.is_set():
-                        try:
-                            # Read line
-                            line = b""
-                            while not line.endswith(b"\n"):
-                                byte = sock.recv(1)
-                                if not byte:
-                                    break
-                                line += byte
-                            
-                            if not line:
-                                break
-
-                            msg = json.loads(line.decode("utf-8"))
-
-                            # Wyoming sends the event's `data` as a separate
-                            # `data_length` block after the header line (not
-                            # inline) — newer servers like wyoming-microwakeword
-                            # always do. Read it so the wake-word name is
-                            # available and the stream stays in sync.
-                            data_len = msg.get("data_length", 0)
-                            if data_len > 0:
-                                data_bytes = b""
-                                while len(data_bytes) < data_len:
-                                    r = sock.recv(min(data_len - len(data_bytes), 4096))
-                                    if not r:
-                                        break
-                                    data_bytes += r
-                                try:
-                                    msg["data"] = json.loads(data_bytes.decode("utf-8"))
-                                except Exception:
-                                    pass
-
-                            payload_len = msg.get("payload_length", 0)
-                            if payload_len > 0:
-                                # Consume payload
-                                remaining = payload_len
-                                while remaining > 0:
-                                    received = sock.recv(min(remaining, 4096))
-                                    if not received:
-                                        break
-                                    remaining -= len(received)
-
-                            if msg.get("type") == "detection":
-                                name = msg.get("data", {}).get("name", "")
-                                self._handle_detection(name)
-                        except socket.timeout:
-                            pass
-                except Exception:
-                    pass
-            
-            reader_thread = threading.Thread(target=read_loop, daemon=True)
+            reader_thread = threading.Thread(
+                target=self._read_loop, args=(sock, lambda: read_active), daemon=True)
             reader_thread.start()
 
-            # Start recording subprocess (16kHz, 16-bit, mono)
-            cmd = ["pw-record", "--rate=16000", "--channels=1", "--format=s16", "-"]
-            if self.mic:
-                cmd.extend(["--target", self.mic])
-            
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-            
+            proc = subprocess.Popen(_pw_record_cmd(self.mic),
+                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             try:
-                while not self._stop_event.is_set() and proc.poll() is None:
-                    # Read chunk
-                    chunk = proc.stdout.read(3200) # 100ms of 16kHz 16-bit mono
-                    if not chunk:
-                        break
-                    
-                    # Send chunk
-                    header = {"type": "audio-chunk", "data": {"rate": 16000, "width": 2, "channels": 1}, "payload_length": len(chunk)}
-                    sock.sendall((json.dumps(header) + "\n").encode("utf-8"))
-                    sock.sendall(chunk)
+                _pump_mic(proc, self._stop_event, sock)
             finally:
                 read_active = False
-                proc.terminate()
-                try:
-                    proc.wait(timeout=1.0)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
+                _stop_proc(proc)
                 reader_thread.join(timeout=1.0)
+
+    def _read_loop(self, sock, is_active) -> None:
+        try:
+            sock.settimeout(1.0)
+            while is_active() and not self._stop_event.is_set():
+                try:
+                    line = _recv_line(sock)
+                    if not line:
+                        break
+                    msg = json.loads(line.decode("utf-8"))
+                    _read_event_body(sock, msg)
+                    if msg.get("type") == "detection":
+                        self._handle_detection(msg.get("data", {}).get("name", ""))
+                except socket.timeout:
+                    pass
+        except Exception:
+            pass
 
     def _handle_detection(self, name: str = ""):
         if time.time() < self._cooldown_until:
@@ -244,129 +277,79 @@ class WakewordActionListener:
                 time.sleep(2)
 
     def _stream(self) -> None:
-        parsed = urlparse(self.uri)
-        host = parsed.hostname or "127.0.0.1"
-        port = parsed.port or 10400
-
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(5.0)
-            sock.connect((host, port))
+            _connect(sock, self.uri)
             logbuffer.log(f"[wakeword-action] Connected — listening for {list(self.model_callbacks)}")
-
-            detect_msg = {"type": "detect", "data": {"names": list(self.model_callbacks)}}
-            sock.sendall((json.dumps(detect_msg) + "\n").encode("utf-8"))
-
-            audio_start = {"type": "audio-start",
-                           "data": {"rate": 16000, "width": 2, "channels": 1}}
-            sock.sendall((json.dumps(audio_start) + "\n").encode("utf-8"))
+            _send_start(sock, list(self.model_callbacks))
 
             read_active = True
-
-            def read_loop() -> None:
-                try:
-                    sock.settimeout(1.0)
-                    while read_active and not self._stop_event.is_set():
-                        try:
-                            line = b""
-                            while not line.endswith(b"\n"):
-                                byte = sock.recv(1)
-                                if not byte:
-                                    return
-                                line += byte
-                            if not line:
-                                return
-                            msg = json.loads(line.decode("utf-8"))
-
-                            # Read the separate `data` block (see WakewordListener)
-                            # — without it the detection name is blank, so the
-                            # wrong action (or none) fires.
-                            data_len = msg.get("data_length", 0)
-                            if data_len > 0:
-                                data_bytes = b""
-                                while len(data_bytes) < data_len:
-                                    r = sock.recv(min(data_len - len(data_bytes), 4096))
-                                    if not r:
-                                        break
-                                    data_bytes += r
-                                try:
-                                    msg["data"] = json.loads(data_bytes.decode("utf-8"))
-                                except Exception:
-                                    pass
-
-                            payload_len = msg.get("payload_length", 0)
-                            if payload_len > 0:
-                                remaining = payload_len
-                                while remaining > 0:
-                                    chunk = sock.recv(min(remaining, 4096))
-                                    if not chunk:
-                                        break
-                                    remaining -= len(chunk)
-
-                            if msg.get("type") == "detection":
-                                name = msg.get("data", {}).get("name", "")
-                                if not name:
-                                    continue  # ignore nameless detections
-                                cb = self.model_callbacks.get(name)
-                                if cb is None:
-                                    # Partial match — some servers add/omit a lang
-                                    # suffix. Guard against empty name matching all.
-                                    for k, v in self.model_callbacks.items():
-                                        if k and (name.startswith(k) or k.startswith(name)):
-                                            cb = v
-                                            break
-                                if cb:
-                                    logbuffer.log(
-                                        f"[wakeword-action] '{name}' detected — firing action")
-                                    self._stop_event.set()   # one-shot: stop after first fire
-                                    cb()
-                        except socket.timeout:
-                            pass
-                except Exception:
-                    pass
-
-            reader = threading.Thread(target=read_loop, daemon=True)
+            reader = threading.Thread(
+                target=self._read_loop, args=(sock, lambda: read_active), daemon=True)
             reader.start()
-
-            def send_chunk(chunk: bytes) -> None:
-                header = {"type": "audio-chunk",
-                          "data": {"rate": 16000, "width": 2, "channels": 1},
-                          "payload_length": len(chunk)}
-                sock.sendall((json.dumps(header) + "\n").encode("utf-8"))
-                sock.sendall(chunk)
 
             if self.external_audio:
                 # Audio is fed in via feed() from the shared recorder capture —
                 # no own pw-record, so no contention on the mic device.
                 try:
-                    while not self._stop_event.is_set():
-                        try:
-                            chunk = self._audio_q.get(timeout=0.2)
-                        except queue.Empty:
-                            continue
-                        if chunk is None:
-                            break
-                        send_chunk(chunk)
+                    self._pump_fed_audio(sock)
                 finally:
                     read_active = False
                     reader.join(timeout=1.0)
                 return
 
-            cmd = ["pw-record", "--rate=16000", "--channels=1", "--format=s16", "-"]
-            if self.mic:
-                cmd.extend(["--target", self.mic])
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-
+            proc = subprocess.Popen(_pw_record_cmd(self.mic),
+                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             try:
-                while not self._stop_event.is_set() and proc.poll() is None:
-                    chunk = proc.stdout.read(3200)
-                    if not chunk:
-                        break
-                    send_chunk(chunk)
+                _pump_mic(proc, self._stop_event, sock)
             finally:
                 read_active = False
-                proc.terminate()
-                try:
-                    proc.wait(timeout=1.0)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
+                _stop_proc(proc)
                 reader.join(timeout=1.0)
+
+    def _pump_fed_audio(self, sock) -> None:
+        while not self._stop_event.is_set():
+            try:
+                chunk = self._audio_q.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            if chunk is None:
+                break
+            _send_chunk(sock, chunk)
+
+    def _read_loop(self, sock, is_active) -> None:
+        try:
+            sock.settimeout(1.0)
+            while is_active() and not self._stop_event.is_set():
+                try:
+                    line = _recv_line(sock)
+                    if not line.endswith(b"\n"):
+                        return  # EOF
+                    msg = json.loads(line.decode("utf-8"))
+                    # Read the separate `data` block — without it the detection
+                    # name is blank, so the wrong action (or none) fires.
+                    _read_event_body(sock, msg)
+                    if msg.get("type") == "detection":
+                        self._on_detection(msg.get("data", {}).get("name", ""))
+                except socket.timeout:
+                    pass
+        except Exception:
+            pass
+
+    def _match_callback(self, name: str):
+        cb = self.model_callbacks.get(name)
+        if cb is None:
+            # Partial match — some servers add/omit a lang
+            # suffix. Guard against empty name matching all.
+            for k, v in self.model_callbacks.items():
+                if k and (name.startswith(k) or k.startswith(name)):
+                    return v
+        return cb
+
+    def _on_detection(self, name: str) -> None:
+        if not name:
+            return  # ignore nameless detections
+        cb = self._match_callback(name)
+        if cb:
+            logbuffer.log(f"[wakeword-action] '{name}' detected — firing action")
+            self._stop_event.set()   # one-shot: stop after first fire
+            cb()

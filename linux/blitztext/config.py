@@ -27,6 +27,11 @@ def _tts_fallback(name: str) -> str:
         return ""
 
 
+DEFAULT_LLM_URL = "https://api.openai.com/v1"
+DEFAULT_TTS_URL = "http://localhost:8023/v1"
+DEFAULT_WAKEWORD_URI = "tcp://127.0.0.1:10400"
+
+
 @dataclass
 class Workflow:
     name: str
@@ -53,7 +58,7 @@ class Workflow:
 @dataclass
 class TTSEngine:
     name: str
-    url: str = "http://localhost:8023/v1"
+    url: str = DEFAULT_TTS_URL
     model: str = "tts-1"
     api_key_env: str = ""
     extra_payload: str = '{"app": "Blitztext"}'
@@ -62,7 +67,7 @@ class TTSEngine:
 class WakewordEngine:
     """A wyoming-openwakeword endpoint to compare in the wakeword benchmark."""
     name: str = ""
-    uri: str = "tcp://127.0.0.1:10400"
+    uri: str = DEFAULT_WAKEWORD_URI
     model: str = "okay_computer"
     cancel_model: str = ""   # wakeword model(s) that cancel an in-progress recording
     send_model: str = ""     # wakeword model(s) that finish + send (Enter) a recording
@@ -135,7 +140,7 @@ class Config:
     compute_type: str = "auto"    # auto | int8 | float16 | int8_float16
     beam_size: int = 5
     # rewrite (OpenAI-compatible)
-    base_url: str = "https://api.openai.com/v1"
+    base_url: str = DEFAULT_LLM_URL
     api_key_env: str = "OPENAI_API_KEY"
     rewrite_model: str = "gpt-4o-mini"
     temperature: float = 0.3
@@ -167,7 +172,7 @@ class Config:
     # wakeword
     wakeword_enabled: bool = False
     wakeword_active: str = ""   # name of selected WakewordEngine preset, "" = custom
-    wakeword_uri: str = "tcp://127.0.0.1:10400"
+    wakeword_uri: str = DEFAULT_WAKEWORD_URI
     wakeword_model: str = "okay_computer"
     wakeword_sound_detected: str = ""   # WAV played when the wakeword fires (speak now)
     wakeword_sound_done: str = ""        # WAV played when the command is captured
@@ -220,7 +225,7 @@ class Config:
             return e
         if self.talk_engines:
             return self.talk_engines[0]
-        return TTSEngine("Default", "http://localhost:8023/v1", "tts-1")
+        return TTSEngine("Default", DEFAULT_TTS_URL, "tts-1")
 
     @property
     def active_stt(self) -> STTEngine:
@@ -322,6 +327,43 @@ class Config:
         return os.environ.get(self.api_key_env) or None
 
 
+def _load_wakeword_engines(cfg: Config, data: dict) -> None:
+    # Wakeword engines for the benchmark (optional; benchmark falls back to the
+    # live [wakeword] config when none are listed).
+    cfg.wakeword_engines = [
+        WakewordEngine(
+            name=e.get("name", ""),
+            uri=e.get("uri", DEFAULT_WAKEWORD_URI),
+            model=e.get("model", "okay_computer"),
+            cancel_model=e.get("cancel_model", ""),
+            send_model=e.get("send_model", ""),
+            stop_model=e.get("stop_model", ""),
+        )
+        for e in data.get("wakeword_engine", [])
+    ]
+    # Migration: ensure at least one engine exists so the CRUD UI always has a row.
+    if not cfg.wakeword_engines:
+        cfg.wakeword_engines = [WakewordEngine(
+            name=cfg.wakeword_active or "Local wyoming-openwakeword",
+            uri=cfg.wakeword_uri,
+            model=cfg.wakeword_model,
+            cancel_model=cfg.wakeword_cancel_model,
+            send_model=cfg.wakeword_send_model,
+            stop_model=cfg.wakeword_stop_model,
+        )]
+    # Migration: older configs stored cancel/send globally; seed them onto the
+    # active engine so per-profile values aren't blank on first load.
+    if cfg.wakeword_cancel_model or cfg.wakeword_send_model or cfg.wakeword_stop_model:
+        active = next((e for e in cfg.wakeword_engines if e.name == cfg.wakeword_active),
+                      cfg.wakeword_engines[0])
+        if not active.cancel_model:
+            active.cancel_model = cfg.wakeword_cancel_model
+        if not active.send_model:
+            active.send_model = cfg.wakeword_send_model
+        if not active.stop_model:
+            active.stop_model = cfg.wakeword_stop_model
+
+
 def load(path: Path = CONFIG_PATH) -> Config:
     """Load config from TOML, creating a default file on first run."""
     if not path.exists():
@@ -355,7 +397,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
         device=w.get("device", "auto"),
         compute_type=w.get("compute_type", "auto"),
         beam_size=int(w.get("beam_size", 5)),
-        base_url=r.get("base_url", "https://api.openai.com/v1").rstrip("/"),
+        base_url=r.get("base_url", DEFAULT_LLM_URL).rstrip("/"),
         api_key_env=r.get("api_key_env", "OPENAI_API_KEY"),
         rewrite_model=r.get("model", "gpt-4o-mini"),
         temperature=float(r.get("temperature", 0.3)),
@@ -382,7 +424,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
         sound_after=snd.get("after", ""),
         wakeword_enabled=bool(ww.get("enabled", False)),
         wakeword_active=ww.get("active", ""),
-        wakeword_uri=ww.get("uri", "tcp://127.0.0.1:10400"),
+        wakeword_uri=ww.get("uri", DEFAULT_WAKEWORD_URI),
         wakeword_model=ww.get("model", "okay_computer"),
         wakeword_sound_detected=ww.get("sound_detected", ""),
         wakeword_sound_done=ww.get("sound_done", ""),
@@ -441,40 +483,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
     ] or [STTEngine("Local faster-whisper", "local", model=cfg.model)]
     cfg.stt_active = data.get("stt", {}).get("active", cfg.stt_engines[0].name)
 
-    # Wakeword engines for the benchmark (optional; benchmark falls back to the
-    # live [wakeword] config when none are listed).
-    cfg.wakeword_engines = [
-        WakewordEngine(
-            name=e.get("name", ""),
-            uri=e.get("uri", "tcp://127.0.0.1:10400"),
-            model=e.get("model", "okay_computer"),
-            cancel_model=e.get("cancel_model", ""),
-            send_model=e.get("send_model", ""),
-            stop_model=e.get("stop_model", ""),
-        )
-        for e in data.get("wakeword_engine", [])
-    ]
-    # Migration: ensure at least one engine exists so the CRUD UI always has a row.
-    if not cfg.wakeword_engines:
-        cfg.wakeword_engines = [WakewordEngine(
-            name=cfg.wakeword_active or "Local wyoming-openwakeword",
-            uri=cfg.wakeword_uri,
-            model=cfg.wakeword_model,
-            cancel_model=cfg.wakeword_cancel_model,
-            send_model=cfg.wakeword_send_model,
-            stop_model=cfg.wakeword_stop_model,
-        )]
-    # Migration: older configs stored cancel/send globally; seed them onto the
-    # active engine so per-profile values aren't blank on first load.
-    if cfg.wakeword_cancel_model or cfg.wakeword_send_model or cfg.wakeword_stop_model:
-        active = next((e for e in cfg.wakeword_engines if e.name == cfg.wakeword_active),
-                      cfg.wakeword_engines[0])
-        if not active.cancel_model:
-            active.cancel_model = cfg.wakeword_cancel_model
-        if not active.send_model:
-            active.send_model = cfg.wakeword_send_model
-        if not active.stop_model:
-            active.stop_model = cfg.wakeword_stop_model
+    _load_wakeword_engines(cfg, data)
 
     # Wakeword model catalogs (Download… dialog). Empty on first run / older
     # configs → seed with the built-in sources.
@@ -492,7 +501,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
     cfg.llm_engines = [
         LLMEngine(
             name=e["name"],
-            url=e.get("url", "https://api.openai.com/v1").rstrip("/"),
+            url=e.get("url", DEFAULT_LLM_URL).rstrip("/"),
             model=e.get("model", "gpt-4o-mini"),
             api_key_env=e.get("api_key_env", ""),
             temperature=float(e.get("temperature", cfg.temperature)),
@@ -505,16 +514,38 @@ def load(path: Path = CONFIG_PATH) -> Config:
     cfg.talk_engines = [
         TTSEngine(
             name=e["name"],
-            url=e.get("url", "http://localhost:8023/v1").rstrip("/"),
+            url=e.get("url", DEFAULT_TTS_URL).rstrip("/"),
             model=e.get("model", "tts-1"),
             api_key_env=_tts_fallback(e.get("api_key_env", "")),
             extra_payload=e.get("extra_payload", '{"app": "Blitztext"}'),
         )
         for e in data.get("talk_engine", [])
-    ] or [TTSEngine("Local TTS", "http://localhost:8023/v1", "tts-1")]
+    ] or [TTSEngine("Local TTS", DEFAULT_TTS_URL, "tts-1")]
     cfg.talk_active = data.get("talk", {}).get("active", cfg.talk_engines[0].name)
 
     return cfg
+
+
+def _workflow_entry(wf: Workflow) -> dict:
+    """TOML table for one workflow; optional fields only when set."""
+    entry: dict = {"name": wf.name, "hotkey": wf.hotkey, "mode": wf.mode}
+    if wf.keywords:
+        entry["keywords"] = wf.keywords
+    if wf.prompt:
+        entry["prompt"] = wf.prompt
+    if wf.model:
+        entry["model"] = wf.model
+    if wf.temperature is not None:
+        entry["temperature"] = wf.temperature
+    if wf.llm_engine:
+        entry["llm_engine"] = wf.llm_engine
+    if wf.stt_engine:
+        entry["stt_engine"] = wf.stt_engine
+    if wf.description:
+        entry["description"] = wf.description
+    if wf.icon and wf.icon != "⚡":
+        entry["icon"] = wf.icon
+    return entry
 
 
 def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
@@ -646,24 +677,7 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
         "workflow": [],
     }
     for wf in cfg.workflows:
-        entry: dict = {"name": wf.name, "hotkey": wf.hotkey, "mode": wf.mode}
-        if wf.keywords:
-            entry["keywords"] = wf.keywords
-        if wf.prompt:
-            entry["prompt"] = wf.prompt
-        if wf.model:
-            entry["model"] = wf.model
-        if wf.temperature is not None:
-            entry["temperature"] = wf.temperature
-        if wf.llm_engine:
-            entry["llm_engine"] = wf.llm_engine
-        if wf.stt_engine:
-            entry["stt_engine"] = wf.stt_engine
-        if wf.description:
-            entry["description"] = wf.description
-        if wf.icon and wf.icon != "⚡":
-            entry["icon"] = wf.icon
-        data["workflow"].append(entry)
+        data["workflow"].append(_workflow_entry(wf))
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("wb") as fh:
@@ -763,7 +777,7 @@ send_keywords = []
 
 [wakeword]
 # Hands-free dictation using an external wyoming-openwakeword server.
-# Respects the /tmp/wake_muted file to disable listening.
+# Respects the $XDG_RUNTIME_DIR/blitztext-wake_muted file to disable listening.
 enabled = false
 uri = "tcp://127.0.0.1:10400"
 model = "okay_computer"

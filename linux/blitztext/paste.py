@@ -48,15 +48,19 @@ def _focus(window_id: str | None) -> None:
 _TYPE_THRESHOLD = 300
 
 
+def _require_input_tool(wayland: bool) -> None:
+    if not wayland and not shutil.which("xdotool"):
+        raise RuntimeError("xdotool not found; cannot type into the focused window.")
+    if wayland and not shutil.which("wtype") and not shutil.which("ydotool"):
+        raise RuntimeError("wtype or ydotool not found; cannot type in Wayland session.")
+
+
 def deliver(text: str, *, mode: str = "type", window_id: str | None = None, type_delay_ms: int = 4) -> None:
     if not text:
         return
 
     wayland = _is_wayland()
-    if not wayland and not shutil.which("xdotool"):
-        raise RuntimeError("xdotool not found; cannot type into the focused window.")
-    if wayland and not shutil.which("wtype") and not shutil.which("ydotool"):
-        raise RuntimeError("wtype or ydotool not found; cannot type in Wayland session.")
+    _require_input_tool(wayland)
 
     _focus(window_id)
     # Give the user time to release the hotkey modifiers before we synthesize input.
@@ -72,15 +76,22 @@ def deliver(text: str, *, mode: str = "type", window_id: str | None = None, type
         # If clipboard isn't available we fall through to xdotool type as before.
 
     if mode == "paste" and _set_clipboard(text):
-        if wayland:
-            if shutil.which("wtype"):
-                subprocess.run(["wtype", "-M", "ctrl", "v", "-m", "ctrl"], check=False)
-            else:
-                subprocess.run(["ydotool", "key", "ctrl+v"], check=False)
-        else:
-            subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+v"], check=False)
+        _send_paste_keys(wayland)
         return
+    _type_text(text, wayland, type_delay_ms)
 
+
+def _send_paste_keys(wayland: bool) -> None:
+    if wayland:
+        if shutil.which("wtype"):
+            subprocess.run(["wtype", "-M", "ctrl", "v", "-m", "ctrl"], check=False)
+        else:
+            subprocess.run(["ydotool", "key", "ctrl+v"], check=False)
+    else:
+        subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+v"], check=False)
+
+
+def _type_text(text: str, wayland: bool, type_delay_ms: int) -> None:
     if wayland:
         if shutil.which("wtype"):
             subprocess.run(["wtype", "-d", str(type_delay_ms), "--", text], check=False)

@@ -198,6 +198,20 @@ def synthesize(tts_url: str, text: str, *, model: str, voice: str,
     return _wav_to_pcm16k(raw)
 
 
+def _voice_names(data) -> list[str]:
+    """Voice names from ["a", …], {"voices": …} or {"data": [{id}…]}."""
+    items = (data.get("voices") or data.get("data") or []) if isinstance(data, dict) else data
+    out: list[str] = []
+    for it in items or []:
+        if isinstance(it, str):
+            out.append(it)
+        elif isinstance(it, dict):
+            name = it.get("id") or it.get("name") or it.get("voice")
+            if name:
+                out.append(str(name))
+    return out
+
+
 def list_voices(tts_url: str, *, api_key_env: str = "", timeout: float = 8.0) -> list[str]:
     """Best-effort voice discovery (Kokoro/XTTS expose /audio/voices or /voices).
 
@@ -215,15 +229,7 @@ def list_voices(tts_url: str, *, api_key_env: str = "", timeout: float = 8.0) ->
                 data = json.loads(resp.read())
         except Exception:  # noqa: BLE001 - endpoint optional/non-standard
             continue
-        items = data.get("voices") or data.get("data") or [] if isinstance(data, dict) else data
-        out: list[str] = []
-        for it in items or []:
-            if isinstance(it, str):
-                out.append(it)
-            elif isinstance(it, dict):
-                name = it.get("id") or it.get("name") or it.get("voice")
-                if name:
-                    out.append(str(name))
+        out = _voice_names(data)
         if out:
             return out
     return []

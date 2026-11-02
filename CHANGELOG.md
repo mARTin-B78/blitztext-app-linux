@@ -2,12 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.03.74] - 2026-11-02
+
+### Changed
+- Update popup now shows the changelog of all versions since the installed one (fetched from the tagged release) instead of only the one-line release body.
+- Linux code (except the settings window) split into smaller helpers to clear SonarQube complexity/duplication findings; no behaviour change.
+
+### Fixed
+- Settings window: saving no longer risks a `TypeError` from a leftover `show_errors` argument on the TTS-engine commit (`_talk_commit`) after the refactor.
+- "Thinking..." overlay animation now shows during an LLM rewrite (a mis-placed `as _GLib` in a comment left `_GLib` undefined, so the pulse was silently skipped).
+- **Security:** the wakeword pause flag moved from the shared `/tmp/wake_muted` to the per-user `$XDG_RUNTIME_DIR/blitztext-wake_muted` (fallback `~/.cache/blitztext/`, created 0700). Another local user could plant the old file to mute your wakeword, or a symlink in its place. External scripts that touched `/tmp/wake_muted` must use the new path.
+
 ## [2.03.73] - 2026-11-01
 
 ### Changed
 - Version bump to test the in-app updater; no functional change.
 - Update check now tells "No update found" / "up to date" apart from "Could not reach GitHub".
-- Update popup now shows the changelog of all versions since the installed one (fetched from the tagged release) instead of only the one-line release body.
 
 ## [2.03.72] - 2026-11-01
 

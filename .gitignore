@@ -39,3 +39,10 @@ Screenshots/Settings - new/
 Screenshots/Settings-old/
 Screenshots/Welcome Setup/
 SONARQUBE-LLM-GUIDE.md
+
+# Coverage / Sonar
+coverage.xml
+.coverage
+.coverage.*
+htmlcov/
+.scannerwork/

@@ -103,6 +103,42 @@ def list_models(base_url: str, api_key_env: str = "", timeout: float = 5.0, api_
     return [m.id for m in list_models_meta(base_url, api_key_env, timeout, api_key)]
 
 
+def _get_json(url: str, headers: dict, timeout: float) -> dict | None:
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, json.JSONDecodeError, OSError):
+        return None
+
+
+def _models_from_listing(data) -> list[ModelMeta] | None:
+    """Parse an OpenAI or Ollama /models response; None = try the next probe."""
+    if not isinstance(data, dict):
+        return None
+    items = data.get("data")
+    if isinstance(items, list):
+        result = [ModelMeta(id=m["id"], languages=m.get("language") or [])
+                  for m in items if isinstance(m, dict) and m.get("id")]
+        if result:
+            return result
+    items = data.get("models")
+    if isinstance(items, list):  # Ollama shape
+        return [ModelMeta(id=m.get("name") or m.get("model", ""))
+                for m in items if m.get("name") or m.get("model")]
+    return None
+
+
+def _models_from_metadata(data) -> list[ModelMeta]:
+    """Parse an NVIDIA Riva / NIM /metadata response."""
+    if isinstance(data, dict):
+        for info in data.get("modelInfo") or []:
+            name = info.get("shortName") or info.get("modelUrl") or ""
+            if name:
+                return [ModelMeta(id=name.split(":")[0])]
+    return []
+
+
 def list_models_meta(base_url: str, api_key_env: str = "", timeout: float = 5.0,
                      api_key: str = "") -> list[ModelMeta]:
     """Like list_models() but returns ModelMeta with language info when available."""
@@ -116,37 +152,38 @@ def list_models_meta(base_url: str, api_key_env: str = "", timeout: float = 5.0,
     if key:
         headers["Authorization"] = f"Bearer {key}"
 
-    def _get(url: str) -> dict | None:
-        try:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except (urllib.error.URLError, json.JSONDecodeError, OSError):
-            return None
-
     # 1. Standard OpenAI /models — faster-whisper-server also returns "language"
-    data = _get(base + "/models")
-    if isinstance(data, dict):
-        items = data.get("data")
-        if isinstance(items, list):
-            result = [ModelMeta(id=m["id"], languages=m.get("language") or [])
-                      for m in items if isinstance(m, dict) and m.get("id")]
-            if result:
-                return result
-        items = data.get("models")
-        if isinstance(items, list):  # Ollama shape
-            return [ModelMeta(id=m.get("name") or m.get("model", ""))
-                    for m in items if m.get("name") or m.get("model")]
-
+    result = _models_from_listing(_get_json(base + "/models", headers, timeout))
+    if result is not None:
+        return result
     # 2. NVIDIA Riva / NIM
-    data = _get(base + "/metadata")
-    if isinstance(data, dict):
-        for info in data.get("modelInfo") or []:
-            name = info.get("shortName") or info.get("modelUrl") or ""
-            if name:
-                return [ModelMeta(id=name.split(":")[0])]
+    return _models_from_metadata(_get_json(base + "/metadata", headers, timeout))
 
-    return []
+
+_RSS_METRICS = ("process_resident_memory_bytes", "container_memory_rss")
+
+
+def _metric_line_mb(line: str) -> float | None:
+    for metric in _RSS_METRICS:
+        if line.startswith(metric):
+            parts = line.split()
+            if len(parts) >= 2:
+                try:
+                    return float(parts[-1]) / (1024 * 1024)  # bytes → MB
+                except ValueError:
+                    pass
+    return None
+
+
+def _parse_rss_mb(text: str) -> float | None:
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("#"):
+            continue
+        mb = _metric_line_mb(line)
+        if mb is not None:
+            return mb
+    return None
 
 
 def probe_server_ram_mb(base_url: str, timeout: float = 3.0) -> float | None:
@@ -169,26 +206,11 @@ def probe_server_ram_mb(base_url: str, timeout: float = 3.0) -> float | None:
     if api_base_metrics != candidates[0]:
         candidates.append(api_base_metrics)
 
-    def _parse(text: str) -> float | None:
-        for line in text.splitlines():
-            line = line.strip()
-            if line.startswith("#"):
-                continue
-            for metric in ("process_resident_memory_bytes", "container_memory_rss"):
-                if line.startswith(metric):
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        try:
-                            return float(parts[-1]) / (1024 * 1024)  # bytes → MB
-                        except ValueError:
-                            pass
-        return None
-
     for url in candidates:
         try:
             req = urllib.request.Request(url)
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                result = _parse(resp.read().decode("utf-8", "replace"))
+                result = _parse_rss_mb(resp.read().decode("utf-8", "replace"))
                 if result is not None:
                     return result
         except Exception:

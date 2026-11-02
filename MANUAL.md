@@ -146,7 +146,8 @@ Start dictation with a spoken keyword via an external
 > are its *only* feedback — that's why they're independent of the manual "Play
 > audio cues" switch, and why an empty field means silence (not a system chime).
 > You can also pause/resume detection from the tray ("Pause wakeword"), which
-> toggles the `/tmp/wake_muted` flag.
+> toggles the `$XDG_RUNTIME_DIR/blitztext-wake_muted` flag
+> (fallback `~/.cache/blitztext/blitztext-wake_muted`).
 
 > **The two sound pairs differ by trigger *and* by empty-behaviour:**
 >

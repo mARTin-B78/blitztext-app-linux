@@ -10,26 +10,21 @@ import os
 
 from . import tts
 
-def _read_clip(primary=False):
+def _read_clip_cmds(primary):
+    cmds = []
     if os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland":
-        cmd = ["wl-paste", "-p"] if primary else ["wl-paste"]
+        cmds.append(["wl-paste", "-p"] if primary else ["wl-paste"])
+    cmds.append(["xclip", "-o", "-selection", "primary" if primary else "clipboard"])
+    cmds.append(["xsel", "-o", "--primary" if primary else "--clipboard"])
+    return cmds
+
+def _read_clip(primary=False):
+    for cmd in _read_clip_cmds(primary):
         if shutil.which(cmd[0]):
             try:
                 return subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
             except Exception:
                 pass
-    if shutil.which("xclip"):
-        cmd = ["xclip", "-o", "-selection", "primary" if primary else "clipboard"]
-        try:
-            return subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
-    if shutil.which("xsel"):
-        cmd = ["xsel", "-o", "--primary" if primary else "--clipboard"]
-        try:
-            return subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
     return b""
 
 def _write_clip(data):
@@ -98,18 +93,23 @@ def get_selected_text():
 # ~1200 chars is ~80 s of speech: far below the server's max-seq-len cap (2048 tokens ~170 s).
 MAX_CHUNK_CHARS = 1200
 
+def _pack_sentences(para, chunks, cur, limit):
+    """Append the paragraph's sentences to `cur`, flushing full chunks; returns new `cur`."""
+    for sent in re.split(r"(?<=[.!?…])\s+", para.strip()):
+        if not sent:
+            continue
+        if cur and len(cur) + len(sent) + 1 > limit:
+            chunks.append(cur)
+            cur = ""
+        cur = f"{cur} {sent}" if cur else sent
+    return cur
+
 def split_text(text, limit=MAX_CHUNK_CHARS):
     """Split at paragraph/sentence ends only, packing up to `limit` chars.
     A single sentence longer than `limit` stays whole (never cut mid-sentence)."""
     chunks, cur = [], ""
     for para in re.split(r"\n\s*\n", text):
-        for sent in re.split(r"(?<=[.!?…])\s+", para.strip()):
-            if not sent:
-                continue
-            if cur and len(cur) + len(sent) + 1 > limit:
-                chunks.append(cur)
-                cur = ""
-            cur = f"{cur} {sent}" if cur else sent
+        cur = _pack_sentences(para, chunks, cur, limit)
         # paragraph end: flush if the next paragraph would likely not fit anyway
         if len(cur) > limit * 0.7:
             chunks.append(cur)
@@ -117,6 +117,37 @@ def split_text(text, limit=MAX_CHUNK_CHARS):
     if cur:
         chunks.append(cur)
     return chunks
+
+_ERROR_TITLE = "Blitztalk Error"
+
+def _extra_payload(engine):
+    """Engine's extra JSON payload as a dict ({} when unset or invalid)."""
+    extra = {}
+    if hasattr(engine, "extra_payload") and engine.extra_payload:
+        try:
+            extra = json.loads(engine.extra_payload)
+            if not isinstance(extra, dict):
+                extra = {}
+        except Exception:
+            extra = {}
+    return extra
+
+def _speak(req):
+    """Fetch one TTS clip and pipe it through ffplay; raises on failure."""
+    with tts.urlopen(req, timeout=60) as response:
+        player = subprocess.Popen(
+            ["ffplay", "-nodisp", "-autoexit", "-hide_banner", "-i", "-"],
+            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        try:
+            with player.stdin:
+                shutil.copyfileobj(response, player.stdin)
+            if player.wait(timeout=120):
+                raise RuntimeError("Audio player failed.")
+        finally:
+            if player.poll() is None:
+                player.kill()
+                player.wait()
 
 def play(cfg, _notify_func):
     text = get_selected_text()
@@ -129,24 +160,17 @@ def play(cfg, _notify_func):
 
     engine = cfg.active_talk
     if not engine or not engine.url:
-        _notify_func("Blitztalk Error", "No TTS engine configured.", "critical")
+        _notify_func(_ERROR_TITLE, "No TTS engine configured.", "critical")
         return
         
     try:
         url = tts.base_url(engine.url) + "/audio/speech"
         headers = {"Content-Type": "application/json", **tts.auth_headers(engine.api_key_env, engine.url)}
     except RuntimeError as exc:
-        _notify_func("Blitztalk Error", str(exc), "critical")
+        _notify_func(_ERROR_TITLE, str(exc), "critical")
         return
 
-    extra = {}
-    if hasattr(engine, "extra_payload") and engine.extra_payload:
-        try:
-            extra = json.loads(engine.extra_payload)
-            if not isinstance(extra, dict):
-                extra = {}
-        except Exception:
-            extra = {}
+    extra = _extra_payload(engine)
 
     # play() already runs in its own thread, so chunks are played sequentially here
     for chunk in split_text(text):
@@ -158,23 +182,10 @@ def play(cfg, _notify_func):
         payload.update(extra)
         req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers)
         try:
-            with tts.urlopen(req, timeout=60) as response:
-                player = subprocess.Popen(
-                    ["ffplay", "-nodisp", "-autoexit", "-hide_banner", "-i", "-"],
-                    stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                )
-                try:
-                    with player.stdin:
-                        shutil.copyfileobj(response, player.stdin)
-                    if player.wait(timeout=120):
-                        raise RuntimeError("Audio player failed.")
-                finally:
-                    if player.poll() is None:
-                        player.kill()
-                        player.wait()
+            _speak(req)
         except urllib.error.HTTPError as exc:
-            _notify_func("Blitztalk Error", f"TTS HTTP {exc.code}. Check the endpoint and API key.", "critical")
+            _notify_func(_ERROR_TITLE, f"TTS HTTP {exc.code}. Check the endpoint and API key.", "critical")
             return
-        except Exception as e:
-            _notify_func("Blitztalk Error", "Audio request or playback failed. Check the endpoint and audio player.", "critical")
+        except Exception:
+            _notify_func(_ERROR_TITLE, "Audio request or playback failed. Check the endpoint and audio player.", "critical")
             return

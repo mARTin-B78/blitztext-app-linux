@@ -678,7 +678,6 @@ class SetupWizard:
 
     def _apply_to_cfg(self) -> None:
         from .config import save
-        from .stt import STTEngine
         cfg = self.cfg
 
         # Trigger / keyboard mode
@@ -704,7 +703,28 @@ class SetupWizard:
                     name="Default", uri=self._ww_uri, model=self._ww_model)]
             cfg.wakeword_active = cfg.wakeword_engines[0].name
 
-        # STT
+        self._apply_stt(cfg)
+
+        # LLM
+        if self._llm_enabled:
+            cfg.base_url      = self._llm_url
+            cfg.rewrite_model = self._llm_model
+            cfg.api_key_env   = self._llm_key
+            from .llm import LLMEngine
+            llm_eng = LLMEngine("Default", self._llm_url,
+                                self._llm_model, self._llm_key)
+            if cfg.llm_engines:
+                cfg.llm_engines[0] = llm_eng
+            else:
+                cfg.llm_engines = [llm_eng]
+            cfg.llm_active = llm_eng.name
+
+        # Mark setup as complete so the wizard doesn't auto-show again.
+        cfg.setup_complete = True
+        save(cfg)
+
+    def _apply_stt(self, cfg) -> None:
+        from .stt import STTEngine
         if self._stt_local:
             local_eng = STTEngine(name="Local Whisper", type="local",
                                   model=self._stt_size)
@@ -727,24 +747,6 @@ class SetupWizard:
             else:
                 cfg.stt_engines.append(remote_eng)
             cfg.stt_active = remote_eng.name
-
-        # LLM
-        if self._llm_enabled:
-            cfg.base_url      = self._llm_url
-            cfg.rewrite_model = self._llm_model
-            cfg.api_key_env   = self._llm_key
-            from .llm import LLMEngine
-            llm_eng = LLMEngine("Default", self._llm_url,
-                                self._llm_model, self._llm_key)
-            if cfg.llm_engines:
-                cfg.llm_engines[0] = llm_eng
-            else:
-                cfg.llm_engines = [llm_eng]
-            cfg.llm_active = llm_eng.name
-
-        # Mark setup as complete so the wizard doesn't auto-show again.
-        cfg.setup_complete = True
-        save(cfg)
 
     # ------------------------------------------------------------------
     # UI toggle helpers

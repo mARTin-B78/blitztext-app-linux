@@ -38,6 +38,14 @@ class RealtimeURLs:
     websocket_url: str
 
 
+def _single_language(codes_csv: str) -> str:
+    """Collapse a comma-list of language codes to one (prefer en-US)."""
+    codes = [c.strip() for c in codes_csv.split(",") if c.strip()]
+    if "en-US" in codes:
+        return "en-US"
+    return codes[0] if codes else ""
+
+
 def realtime_urls(base_url: str) -> RealtimeURLs:
     """Build the HTTP session URL and WebSocket URL from a user base URL."""
     raw = (base_url or "").strip().rstrip("/")
@@ -207,8 +215,7 @@ class RivaRealtimeStreamer:
         if not lang:
             existing = (updated.get("input_audio_transcription") or {}).get("language", "")
             if "," in existing:
-                codes = [c.strip() for c in existing.split(",") if c.strip()]
-                lang = "en-US" if "en-US" in codes else (codes[0] if codes else "")
+                lang = _single_language(existing)
         if lang:
             updated.setdefault("input_audio_transcription", {})
             updated["input_audio_transcription"]["language"] = lang
@@ -249,23 +256,29 @@ class RivaRealtimeStreamer:
                 raw = await asyncio.wait_for(websocket.recv(), timeout=1.0)
             except asyncio.TimeoutError:
                 continue
-            event = json.loads(raw)
-            kind = event.get("type", "")
-            if kind == "conversation.item.input_audio_transcription.delta":
-                text = (event.get("delta") or "").strip()
-                if text and self.on_text:
-                    self.on_text(text, False)
-            elif kind == "conversation.item.input_audio_transcription.completed":
-                text = (event.get("transcript") or "").strip()
-                if text and self.on_text:
-                    self.on_text(text, True)
-                if event.get("is_last_result"):
-                    return
-            elif kind == "conversation.item.input_audio_transcription.failed":
-                raise StreamingSTTError(event.get("error", {}).get("message", "Transcription failed."))
-            elif kind == "error":
-                err = event.get("error", {})
-                raise StreamingSTTError(err.get("message") or str(err) or "Realtime STT error.")
+            if self._handle_event(json.loads(raw)):
+                return
+
+    def _handle_event(self, event: dict) -> bool:
+        """Dispatch one realtime event; True once the last result arrived."""
+        kind = event.get("type", "")
+        if kind == "conversation.item.input_audio_transcription.delta":
+            self._emit_text(event.get("delta"), False)
+        elif kind == "conversation.item.input_audio_transcription.completed":
+            self._emit_text(event.get("transcript"), True)
+            if event.get("is_last_result"):
+                return True
+        elif kind == "conversation.item.input_audio_transcription.failed":
+            raise StreamingSTTError(event.get("error", {}).get("message", "Transcription failed."))
+        elif kind == "error":
+            err = event.get("error", {})
+            raise StreamingSTTError(err.get("message") or str(err) or "Realtime STT error.")
+        return False
+
+    def _emit_text(self, raw_text, final: bool) -> None:
+        text = (raw_text or "").strip()
+        if text and self.on_text:
+            self.on_text(text, final)
 
     def _resolve_device(self, sd):
         if not self.device:

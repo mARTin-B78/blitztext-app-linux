@@ -46,10 +46,12 @@ _MAX_TEXT_H = 120
 
 _FPS_MS = 33            # ~30 fps animation tick
 
+_LISTENING = "Listening…"
+
 # Phase → (mic colour, label). Recording/streaming pulse; others are steady.
 _PHASES = {
-    "recording": ((1.0, 0.27, 0.23), "Listening…"),
-    "streaming": ((1.0, 0.27, 0.23), "Listening…"),
+    "recording": ((1.0, 0.27, 0.23), _LISTENING),
+    "streaming": ((1.0, 0.27, 0.23), _LISTENING),
     "busy": ((1.0, 0.74, 0.16), "Transcribing…"),
     "done": ((0.30, 0.80, 0.36), ""),
     "error": ((1.0, 0.35, 0.35), "Error"),
@@ -65,7 +67,7 @@ class Overlay:
         self._visible = False
         self._state = "recording"
         self._text = ""
-        self._phase_label = "Listening…"
+        self._phase_label = _LISTENING
         # Matched-preset banner (fused in from voice routing instead of a separate
         # desktop notification): the preset's emoji, its name, and the spoken
         # keyword that selected it.
@@ -262,7 +264,10 @@ class Overlay:
             self._cancel_hide()
         elif state in ("done", "idle", "error"):
             # Linger on the final text, then fade out. Errors stay a touch longer.
-            delay = 2500 if state == "error" else (1600 if self._text else 700)
+            if state == "error":
+                delay = 2500
+            else:
+                delay = 1600 if self._text else 700
             self._schedule_hide(delay)
         self._area.queue_draw()
         return False
@@ -383,7 +388,6 @@ class Overlay:
         w = _WIDTH
         body_top = _TAIL_H if self._tail_up else 0
         body_h = self._height - _TAIL_H
-        body_bottom = body_top + body_h
 
         # Bubble + tail as one path, so the fill/stroke wrap the tail cleanly.
         self._bubble_path(cr, 0, body_top, w, body_h)
@@ -405,7 +409,7 @@ class Overlay:
 
         # × cancel button (top-right corner, recording/streaming/busy).
         if self._on_cancel_cb and self._state in ("recording", "streaming", "busy"):
-            self._draw_cancel_btn(cr, body_top)
+            self._draw_cancel_btn(cr)
 
         # Phase label by the waveform — only when there's no preset banner and no text.
         # Shift left to leave room for the × button.
@@ -561,7 +565,7 @@ class Overlay:
         cr.move_to(right_x - tw, cy - th / 2)
         PangoCairo.show_layout(cr, layout)
 
-    def _draw_cancel_btn(self, cr, body_top) -> None:
+    def _draw_cancel_btn(self, cr) -> None:
         x, y, w, h = self._cancel_btn_rect
         cx_btn = x + w / 2
         cy_btn = y + h / 2
