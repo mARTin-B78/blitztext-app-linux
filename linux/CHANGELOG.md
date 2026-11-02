@@ -15,6 +15,7 @@ The version is defined in [`pyproject.toml`](pyproject.toml).
 - Settings window code (`gtksettings.py`) restructured into smaller helpers to clear SonarQube complexity/duplication findings; no behaviour change.
 - Engine, wakeword, benchmark, STT, TTS and UI modules (all except `gtksettings.py`) split into smaller helpers with shared constants to clear SonarQube complexity/duplication/naming findings; no behaviour change, new characterization tests.
 - Settings window: `_talk_commit` no longer returns an always-true flag; removed the dead "commit failed" branches at its callers (SonarQube S3516).
+- Sonar: added sonar-project.properties; GTK UI modules excluded from coverage
 
 ### Fixed
 - Settings window: saving no longer risks a `TypeError` from a leftover `show_errors` argument on the TTS-engine commit (`_talk_commit`) after the refactor.

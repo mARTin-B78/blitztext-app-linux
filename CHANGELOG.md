@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - Update popup now shows the changelog of all versions since the installed one (fetched from the tagged release) instead of only the one-line release body.
 - Linux code (except the settings window) split into smaller helpers to clear SonarQube complexity/duplication findings; no behaviour change.
+- Sonar: added sonar-project.properties; GTK UI modules excluded from coverage
 
 ### Fixed
 - Settings window: saving no longer risks a `TypeError` from a leftover `show_errors` argument on the TTS-engine commit (`_talk_commit`) after the refactor.
