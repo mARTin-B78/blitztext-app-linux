@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 The version is defined in [`pyproject.toml`](pyproject.toml).
 
+## [2.03.75] - 2026-11-02
+
+### Fixed
+- **Wakeword Unbounded Read**: Fixed a potential denial-of-service vulnerability where maliciously large `payload_length` or `data_length` fields from a Wyoming server could cause unbounded memory allocation and blocking reads.
+
 ## [2.03.74] - 2026-11-02
 
 ### Changed

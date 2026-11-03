@@ -66,3 +66,9 @@ def test_bench_result_metrics():
     assert abs(r.recall - 2 / 3) < 1e-9
     assert r.false_fires == 1
     assert r.recall_by_voice() == {"nova": (1, 2), "onyx": (1, 1)}
+
+def test_drain_detections_rejects_huge_payloads():
+    import pytest
+    chunk = (json.dumps({"type": "audio-chunk", "payload_length": 2000000}) + "\n").encode() + b"abc"
+    with pytest.raises(ValueError, match="exceeds 1MB limit"):
+        wb._drain_detections(chunk)
