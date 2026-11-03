@@ -192,3 +192,35 @@ def test_feed_ignored_without_external_audio():
     lst = wakeword.WakewordActionListener("tcp://x:1", {"a": print}, "")
     lst.feed(b"abc")
     assert lst._audio_q.empty()
+
+def test_listener_rejects_huge_payloads(monkeypatch):
+    import pytest
+    monkeypatch.setattr(wakeword, "is_muted", lambda: False)
+
+    def script_data(conn):
+        _event(conn, "info", {"a": "b"}, inline=False)
+
+    srv1 = FakeServer(script_data)
+    lst1 = wakeword.WakewordListener(srv1.uri, ["x"], "", lambda: None)
+
+    def script_payload(conn):
+        _event(conn, "info", payload=b"x")
+
+    srv2 = FakeServer(script_payload)
+    lst2 = wakeword.WakewordListener(srv2.uri, ["x"], "", lambda: None)
+
+    with mock.patch.object(wakeword.subprocess, "Popen", return_value=FakeProc()):
+        # Send massive lengths in FakeServer's script directly, which causes ValueError in _read_event_body
+        def patched_script_data(conn):
+            hdr = json.dumps({"type": "info", "data_length": 2000000}).encode()
+            conn.sendall(hdr + b"\n" + b"x")
+        srv1.script = patched_script_data
+
+        def patched_script_payload(conn):
+            hdr = json.dumps({"type": "info", "payload_length": 2000000}).encode()
+            conn.sendall(hdr + b"\n" + b"x")
+        srv2.script = patched_script_payload
+
+        # Exception should be caught and logged, stream closes/retries (tested via no hang)
+        lst1._stream()
+        lst2._stream()
