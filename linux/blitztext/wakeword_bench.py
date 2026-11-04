@@ -323,6 +323,8 @@ def _drain_detections(buf: bytes) -> tuple[bytes, int]:
         except (ValueError, UnicodeDecodeError):
             return rest, found
         plen = msg.get("payload_length", 0) or 0
+        if plen < 0 or plen > 1000000:
+            raise ValueError(f"wyoming payload length {plen} out of bounds")
         if len(rest) < plen:
             return buf, found  # payload not fully arrived yet; wait for more
         rest = rest[plen:]

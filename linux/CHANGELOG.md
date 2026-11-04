@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 The version is defined in [`pyproject.toml`](pyproject.toml).
 
+## [2.03.76] - 2026-11-04
+
+### Security
+- Fixed a denial of service vulnerability in Wyoming protocol message parsing by bounding `data_length` and `payload_length` values.
+
 ## [2.03.75] - 2026-11-04
 
 ### Fixed
