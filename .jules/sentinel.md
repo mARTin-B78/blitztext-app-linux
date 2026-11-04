@@ -1,0 +1,3 @@
+## 2026-11-04 — Fix unbounded read in Wyoming protocol parsing
+**Learning:** The Wyoming protocol network parsing loops parse a newline-framed JSON metadata event and read a binary payload whose length is determined by the payload_length or data_length attributes. A maliciously crafted message can define a huge payload length, causing an unbounded read which could block the process indefinitely. Bounds checking is required to terminate bad requests.
+**Action:** Added boundaries on payload_length and data_length to raise a ValueError if lengths exceed 1MB or are less than zero in _read_event_body, _drain_detections, and _wyoming_describe.
