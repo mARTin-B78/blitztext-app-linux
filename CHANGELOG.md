@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.03.75] - 2026-11-04
+
+### Fixed
+- TTS "no API key" error now explains that session keys are lost on restart and where to re-enter the key (Settings or the launch environment). Test added.
+
 ## [2.03.74] - 2026-11-02
 
 ### Changed

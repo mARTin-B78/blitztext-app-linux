@@ -109,6 +109,16 @@ class TTSConnectionTests(unittest.TestCase):
             self.assertEqual(tts.auth_headers("TEST_ENV", "http://localhost:4000"),
                              {"Authorization": "Bearer synthetic-env-key"})
 
+    def test_talk_engine_uses_session_key_without_env_and_errors_with_neither(self):
+        url = "http://192.168.178.8:4000/v1"
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(RuntimeError) as error:
+                tts.auth_headers("LITELLM_API_KEY", url)
+            self.assertIn("session key", str(error.exception))
+            tts.set_session_key(url, "synthetic-direct-key")
+            self.assertEqual(tts.auth_headers("LITELLM_API_KEY", url),
+                             {"Authorization": "Bearer synthetic-direct-key"})
+
     def test_direct_key_authenticates_models_voices_and_probe(self):
         url = "http://localhost:4000/v1"
         tts.set_session_key(url, "synthetic-direct-key")

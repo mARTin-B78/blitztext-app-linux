@@ -73,7 +73,7 @@ def auth_headers(api_key_env: str, url: str = "") -> dict[str, str]:
         return {}
     key = key or os.environ.get(api_key_env)
     if not key:
-        raise RuntimeError("The API Key Env variable is not set. Set it in the app's launch environment and restart Blitztext.")
+        raise RuntimeError("No API key: the API Key Env variable is not set and no session key is entered for this URL (session keys are lost on restart). Re-enter it in Settings or set the variable in the launch environment.")
     if any(ord(char) < 33 or ord(char) > 126 for char in key):
         raise RuntimeError("The API key contains invalid characters. Check the API key field or launch environment.")
     return {"Authorization": f"Bearer {key}"}
