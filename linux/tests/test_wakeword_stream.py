@@ -194,7 +194,7 @@ def test_feed_ignored_without_external_audio():
     assert lst._audio_q.empty()
 
 
-def test_listener_rejects_huge_payload(monkeypatch):
+def test_listener_rejects_huge_payload():
     def script(conn):
         conn.sendall(b'{"type": "info", "payload_length": 20000000}\n')
 
