@@ -192,3 +192,17 @@ def test_feed_ignored_without_external_audio():
     lst = wakeword.WakewordActionListener("tcp://x:1", {"a": print}, "")
     lst.feed(b"abc")
     assert lst._audio_q.empty()
+
+
+def test_listener_rejects_huge_payload(monkeypatch):
+    def script(conn):
+        conn.sendall(b'{"type": "info", "payload_length": 20000000}\n')
+
+    srv = FakeServer(script)
+    hits = []
+    lst = wakeword.WakewordListener(srv.uri, ["hey"], "mymic", lambda: hits.append(1))
+    proc = FakeProc()
+    with mock.patch.object(wakeword.subprocess, "Popen", return_value=proc):
+        lst._stream()
+    assert hits == []
+    assert proc.terminated

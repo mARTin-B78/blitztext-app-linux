@@ -92,6 +92,8 @@ def _read_event_body(sock, msg: dict) -> None:
     do. Read it so the wake-word name is available and the stream stays in sync.
     """
     data_len = msg.get("data_length", 0)
+    if data_len < 0 or data_len > 10485760:
+        raise ValueError(f"Invalid data_length: {data_len}")
     if data_len > 0:
         data_bytes = b""
         while len(data_bytes) < data_len:
@@ -105,6 +107,8 @@ def _read_event_body(sock, msg: dict) -> None:
             pass
 
     remaining = msg.get("payload_length", 0)
+    if remaining < 0 or remaining > 10485760:
+        raise ValueError(f"Invalid payload_length: {remaining}")
     while remaining > 0:
         received = sock.recv(min(remaining, 4096))
         if not received:
