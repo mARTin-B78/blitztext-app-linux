@@ -114,7 +114,7 @@ class TTSConnectionTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(RuntimeError) as error:
                 tts.auth_headers("LITELLM_API_KEY", url)
-            self.assertIn("session key", str(error.exception))
+            self.assertIn("No API key", str(error.exception))
             tts.set_session_key(url, "synthetic-direct-key")
             self.assertEqual(tts.auth_headers("LITELLM_API_KEY", url),
                              {"Authorization": "Bearer synthetic-direct-key"})
@@ -171,9 +171,14 @@ class TTSConnectionTests(unittest.TestCase):
                 self.visible = value
             def set_input_purpose(self, value):
                 self.purpose = value
+            def set_tooltip_text(self, value):
+                pass
+            def pack_start(self, *args):
+                pass
 
         scope = {"__name__": "blitztext.gtksettings", "__package__": "blitztext", "_entry": Entry, "_labeled": MagicMock(),
-                 "Gtk": SimpleNamespace(InputPurpose=SimpleNamespace(PASSWORD="password"))}
+                 "Gtk": SimpleNamespace(InputPurpose=SimpleNamespace(PASSWORD="password"),
+                                        Button=lambda **kw: Entry(), Box=lambda **kw: Entry())}
         exec(compile(ast.Module(body=[helper], type_ignores=[]), "gtksettings.py", "exec"), scope)
         url = Entry("http://localhost:4000")
         field = scope["_tts_session_key_field"](None, url)

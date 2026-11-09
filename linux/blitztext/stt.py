@@ -139,6 +139,15 @@ def _models_from_metadata(data) -> list[ModelMeta]:
     return []
 
 
+def _stored_key(url: str) -> str:
+    """Key saved in Settings for this URL (shared store with TTS/LLM); "" if none."""
+    from . import tts
+    try:
+        return tts.session_key(url)
+    except RuntimeError:
+        return ""
+
+
 def list_models_meta(base_url: str, api_key_env: str = "", timeout: float = 5.0,
                      api_key: str = "") -> list[ModelMeta]:
     """Like list_models() but returns ModelMeta with language info when available."""
@@ -148,7 +157,7 @@ def list_models_meta(base_url: str, api_key_env: str = "", timeout: float = 5.0,
         return []
     base = _api_base(base_url)
     headers: dict[str, str] = {}
-    key = api_key or (os.environ.get(api_key_env) if api_key_env else None)
+    key = api_key or _stored_key(base_url) or (os.environ.get(api_key_env) if api_key_env else None)
     if key:
         headers["Authorization"] = f"Bearer {key}"
 
@@ -299,7 +308,7 @@ def _transcribe_remote(engine: STTEngine, audio_path: Path, *, language: str, pr
         fields["prompt"] = prompt
 
     headers = {}
-    key = os.environ.get(engine.api_key_env) if engine.api_key_env else None
+    key = _stored_key(engine.url) or (os.environ.get(engine.api_key_env) if engine.api_key_env else None)
     if key:
         headers["Authorization"] = f"Bearer {key}"
 
@@ -311,6 +320,8 @@ def _transcribe_remote(engine: STTEngine, audio_path: Path, *, language: str, pr
             raw = resp.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:300]
+        if key:
+            detail = detail.replace(key, "***")  # never echo the key
         raise STTError(f"HTTP {exc.code} from {endpoint}: {detail}") from exc
     except urllib.error.URLError as exc:
         raise STTError(f"Cannot reach {endpoint}: {exc.reason}") from exc

@@ -375,14 +375,22 @@ def _entry(text="", placeholder="") -> Gtk.Entry:
 
 
 def _tts_session_key_field(parent, url_entry, tooltip=""):
+    """Masked API key field for a URL; keys are saved per URL (see tts.set_session_key)."""
     from . import tts
     entry = _entry(tts.session_key(url_entry.get_text()), placeholder="Paste API key (optional)")
     entry.set_visibility(False)
     entry.set_input_purpose(Gtk.InputPurpose.PASSWORD)
-    _labeled(parent, "API key (session only)", entry,
-             tooltip=tooltip or "Used immediately for this TTS URL in Talk and Benchmark. Kept only in memory; "
-                                "re-enter after quitting or Save & Restart. Clear to use API Key Env instead.")
-    entry.connect("changed", lambda widget: tts.set_session_key(url_entry.get_text(), widget.get_text()))
+    remove = Gtk.Button(label="Remove")
+    remove.set_tooltip_text("Remove the saved API key for this URL")
+    remove.connect("clicked", lambda _b: entry.set_text(""))
+    box = Gtk.Box(spacing=6); box.pack_start(entry, True, True, 0); box.pack_start(remove, False, False, 0)
+    _labeled(parent, "API key (saved)", box,
+             tooltip=tooltip or "Saved for this URL (file readable only by you, in your Blitztext config folder) "
+                                "and kept across restarts. Remove or clear it to delete. Takes precedence over API Key Env.")
+    def on_changed(widget):
+        ok = tts.set_session_key(url_entry.get_text(), widget.get_text())
+        widget.set_tooltip_text(None if ok else "Could not save the key to disk; it is only kept until you quit.")
+    entry.connect("changed", on_changed)
     url_entry.connect("changed", lambda widget: entry.set_text(tts.session_key(widget.get_text())))
     return entry
 
@@ -2364,7 +2372,9 @@ class SettingsDialog:
                                   tooltip="Which Whisper model to load. For Internal: tiny (fastest) → large-v3 (most accurate). "
                                           "For a server, press ⟳ to fetch available models from its URL.")
         self.stt_key  = _labeled(cfg_card, "API key env", _entry(placeholder="e.g. GROQ_API_KEY   (optional)"),
-                                 tooltip="Name of the environment variable that holds your API key. Leave blank for local servers.")
+                                 tooltip="Name of the environment variable that holds your API key (NOT the key itself; "
+                                         "use the API key field below). Leave blank for local servers.")
+        self.stt_secret = _tts_session_key_field(cfg_card, self.stt_url)
         self.stt_timeout = _labeled(cfg_card, "Timeout (s)", _entry(placeholder="30"),
                                     tooltip="Seconds to wait for a transcription response. "
                                             "Increase for slow servers (e.g. WhisperX with diarization can take 60–120 s). "
@@ -2453,8 +2463,7 @@ class SettingsDialog:
                                   tooltip="Which language model to use for rewriting. Press ⟳ on the URL field to fetch available models.")
         self.llm_secret = _tts_session_key_field(
             cfg_card, self.llm_url,
-            tooltip="Used immediately for this LLM URL. Kept only in memory; re-enter after quitting or "
-                    "Save & Restart.")
+            tooltip="Saved for this LLM URL and kept across restarts. Remove or clear it to delete.")
         self.llm_temp = _labeled(cfg_card, "Temperature", _entry(placeholder="0.3"),
                                  tooltip="How creative the rewrite is, 0.0–1.0. 0.3 is a good default.")
         self.llm_url.connect("changed", lambda _e: self._schedule_models("llm"))
@@ -2508,7 +2517,10 @@ class SettingsDialog:
         e.type = _type_key(self.stt_type, _STT_TYPES, "local")
         e.url = self.stt_url.get_text().strip().rstrip("/")
         e.model = _combo_text(self.stt_model)
-        e.api_key_env = self.stt_key.get_text().strip()
+        from . import tts
+        e.api_key_env = tts.adopt_literal_key(e.url, self.stt_key.get_text().strip())  # a pasted key -> key store
+        if not e.api_key_env:
+            self.stt_key.set_text("")
         try:
             e.timeout = max(5, int(self.stt_timeout.get_text().strip() or "30"))
         except ValueError:

@@ -364,6 +364,15 @@ def _load_wakeword_engines(cfg: Config, data: dict) -> None:
             active.stop_model = cfg.wakeword_stop_model
 
 
+def _adopt(url: str, env_value: str) -> str:
+    """Move a literal API key typed into an 'API key env' field into the key store."""
+    from . import tts
+    try:
+        return tts.adopt_literal_key(url, env_value)
+    except RuntimeError:
+        return env_value
+
+
 def load(path: Path = CONFIG_PATH) -> Config:
     """Load config from TOML, creating a default file on first run."""
     if not path.exists():
@@ -476,7 +485,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
             type=e.get("type", "local"),
             url=e.get("url", "").rstrip("/"),
             model=e.get("model", ""),
-            api_key_env=e.get("api_key_env", ""),
+            api_key_env=_adopt(e.get("url", ""), e.get("api_key_env", "")),
             timeout=int(e.get("timeout", 30)),
         )
         for e in data.get("stt_engine", [])
@@ -503,7 +512,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
             name=e["name"],
             url=e.get("url", DEFAULT_LLM_URL).rstrip("/"),
             model=e.get("model", "gpt-4o-mini"),
-            api_key_env=e.get("api_key_env", ""),
+            api_key_env=_adopt(e.get("url", DEFAULT_LLM_URL), e.get("api_key_env", "")),
             temperature=float(e.get("temperature", cfg.temperature)),
             type=e.get("type", "cloud"),
         )
@@ -516,7 +525,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
             name=e["name"],
             url=e.get("url", DEFAULT_TTS_URL).rstrip("/"),
             model=e.get("model", "tts-1"),
-            api_key_env=_tts_fallback(e.get("api_key_env", "")),
+            api_key_env=_tts_fallback(_adopt(e.get("url", DEFAULT_TTS_URL), e.get("api_key_env", ""))),
             extra_payload=e.get("extra_payload", '{"app": "Blitztext"}'),
         )
         for e in data.get("talk_engine", [])
