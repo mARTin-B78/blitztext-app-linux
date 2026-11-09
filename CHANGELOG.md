@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.03.77] - 2026-11-09
+
+### Fixed
+- Enforce Wyoming payload lengths to prevent Denial of Service via unbound reads and excessive memory consumption.
+
 ## [2.03.76] - 2026-11-09
 
 ### Added
