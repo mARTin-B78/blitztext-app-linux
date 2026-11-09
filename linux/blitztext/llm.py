@@ -15,6 +15,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Callable
 
+from . import tts
 from .stt import reachable
 
 
@@ -31,7 +32,7 @@ class LLMEngine:
     def api_key(self) -> str | None:
         """Session key typed in Settings (in memory, per URL; same store as TTS) first,
         then the env var named by api_key_env (ignored unless a valid name)."""
-        from . import tts
+
         env = tts.clean_env_name(self.api_key_env)
         key = tts.session_key(self.url) or (os.environ.get(env) if env else None)
         if key and any(ord(ch) < 33 or ord(ch) > 126 for ch in key):
@@ -89,7 +90,7 @@ def chat(
         engine.url.rstrip("/") + "/chat/completions", data=payload, headers=headers, method="POST"
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with tts.urlopen(req, timeout=timeout) as resp:
             if stream:
                 content = _read_stream(resp, on_token, abort_event)
             else:
@@ -97,6 +98,8 @@ def chat(
                 content = body["choices"][0]["message"]["content"]
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:300]
+        if api_key:
+            detail = detail.replace(api_key, "***")  # never echo the key
         raise LLMError(f"HTTP {exc.code}: {detail}") from exc
     except urllib.error.URLError as exc:
         raise LLMError(f"Connection failed: {exc.reason}") from exc

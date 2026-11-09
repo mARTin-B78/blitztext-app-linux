@@ -54,27 +54,31 @@ def _load_stored() -> dict[str, str]:
 
 def _save_stored(keys: dict[str, str]) -> None:
     path = _keys_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".keys-")  # mkstemp creates 0600
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(keys, fh)
+            fh.flush(); os.fsync(fh.fileno())
         os.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
 
 
-def set_session_key(url: str, key: str) -> bool:
+def set_session_key(url: str, key: str, persist: bool = True) -> bool:
     """Set (or, with an empty key, remove) the key for a URL; returns False if it could not be
-    saved to disk (the key then only lives in memory)."""
+    saved to disk or there is no URL (the key then only lives in memory). persist=False only
+    updates memory (call again with persist=True to save)."""
     if not url.strip():
-        return True
+        return False
     endpoint = base_url(url)
     if key:
         _session_keys[endpoint] = key
     else:
         _session_keys[endpoint] = ""  # explicit removal, hides any stored copy
+    if not persist:
+        return True
     stored = _load_stored()
     if key:
         stored[endpoint] = key
@@ -97,14 +101,30 @@ def session_key(url: str) -> str:
     return _session_keys[endpoint]
 
 
+_KEY_PREFIXES = ("sk-", "sk_", "gsk_", "xai-", "pk-", "pk_", "hf_", "ghp_", "rk-", "key-")
+
+
+def classify_env_value(value: str) -> str:
+    """"env" if value is plausibly an env var NAME, "key" if it looks like a literal API key."""
+    if not value:
+        return ""
+    if not re.fullmatch(r"[A-Za-z_]\w*", value, re.ASCII):
+        return "key"
+    if value in os.environ:
+        return "env"
+    low = value.lower()
+    if (len(value) > 40 or low.startswith(_KEY_PREFIXES)
+            or (any(c.islower() for c in value) and any(c.isdigit() for c in value))):
+        return "key"
+    return "env"
+
+
 def adopt_literal_key(url: str, env_value: str) -> str:
-    """An 'API key env' field that holds a literal key (not a valid env var name) is moved into
-    the key store; returns the value the field should keep ("" if it was a key)."""
-    if not env_value or clean_env_name(env_value) or not url.strip():
+    """An 'API key env' field that holds a literal key is moved into the key store (the latest
+    input wins); returns the value the field should keep ("" once the key is safely saved)."""
+    if classify_env_value(env_value) != "key" or not url.strip():
         return env_value
-    if not session_key(url):
-        set_session_key(url, env_value)
-    return ""
+    return "" if set_session_key(url, env_value) else env_value
 
 
 def validate_env_name(name: str) -> str:

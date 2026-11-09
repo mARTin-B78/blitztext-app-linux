@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
+from . import tts
+
 
 @dataclass
 class STTEngine:
@@ -106,7 +108,7 @@ def list_models(base_url: str, api_key_env: str = "", timeout: float = 5.0, api_
 def _get_json(url: str, headers: dict, timeout: float) -> dict | None:
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with tts.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, json.JSONDecodeError, OSError):
         return None
@@ -141,7 +143,7 @@ def _models_from_metadata(data) -> list[ModelMeta]:
 
 def _stored_key(url: str) -> str:
     """Key saved in Settings for this URL (shared store with TTS/LLM); "" if none."""
-    from . import tts
+
     try:
         return tts.session_key(url)
     except RuntimeError:
@@ -218,7 +220,7 @@ def probe_server_ram_mb(base_url: str, timeout: float = 3.0) -> float | None:
     for url in candidates:
         try:
             req = urllib.request.Request(url)
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with tts.urlopen(req, timeout=timeout) as resp:
                 result = _parse_rss_mb(resp.read().decode("utf-8", "replace"))
                 if result is not None:
                     return result
@@ -238,7 +240,7 @@ def detect_remote_device(base_url: str, timeout: float = 3.0) -> str:
     base = _api_base(base_url)
     try:
         req = urllib.request.Request(base + "/info")
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with tts.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         if isinstance(data, dict):
             dev = str(data.get("device") or data.get("compute_type") or "")
@@ -250,7 +252,7 @@ def detect_remote_device(base_url: str, timeout: float = 3.0) -> str:
         pass
     try:
         req = urllib.request.Request(base + "/metadata")
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with tts.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         if isinstance(data, dict) and data.get("modelInfo"):
             return "CUDA"  # NVIDIA NIM is always GPU
@@ -316,7 +318,7 @@ def _transcribe_remote(engine: STTEngine, audio_path: Path, *, language: str, pr
     headers["Content-Type"] = content_type
     req = urllib.request.Request(endpoint, data=body, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with tts.urlopen(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:300]

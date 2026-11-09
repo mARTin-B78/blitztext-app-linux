@@ -6,7 +6,7 @@ from unittest import mock
 
 import pytest
 
-from blitztext import paste, sound, stt, talk, wakeword_bench
+from blitztext import paste, sound, stt, talk, tts, wakeword_bench
 from blitztext.streaming import RivaRealtimeStreamer, StreamingSTTError
 
 
@@ -41,17 +41,17 @@ def _urlopen(responses):
     ({}, []),
 ])
 def test_list_models_meta(responses, expected):
-    with mock.patch.object(stt.urllib.request, "urlopen", side_effect=_urlopen(responses)):
+    with mock.patch.object(tts, "urlopen", side_effect=_urlopen(responses)):
         got = stt.list_models_meta("http://h/v1/transcribe")
     assert [(m.id, m.languages) for m in got] == expected
 
 
 def test_probe_server_ram_mb():
     text = b"# HELP x\nprocess_resident_memory_bytes abc\ncontainer_memory_rss 2097152\n"
-    with mock.patch.object(stt.urllib.request, "urlopen",
+    with mock.patch.object(tts, "urlopen",
                            side_effect=_urlopen({"http://h/v1/metrics": text})):
         assert stt.probe_server_ram_mb("http://h/v1") == 2.0
-    with mock.patch.object(stt.urllib.request, "urlopen",
+    with mock.patch.object(tts, "urlopen",
                            side_effect=_urlopen({"http://h/metrics": b"# process_resident_memory_bytes 1\n"})):
         assert stt.probe_server_ram_mb("http://h/v1") is None
 

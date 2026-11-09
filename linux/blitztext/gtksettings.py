@@ -387,10 +387,18 @@ def _tts_session_key_field(parent, url_entry, tooltip=""):
     _labeled(parent, "API key (saved)", box,
              tooltip=tooltip or "Saved for this URL (file readable only by you, in your Blitztext config folder) "
                                 "and kept across restarts. Remove or clear it to delete. Takes precedence over API Key Env.")
-    def on_changed(widget):
-        ok = tts.set_session_key(url_entry.get_text(), widget.get_text())
-        widget.set_tooltip_text(None if ok else "Could not save the key to disk; it is only kept until you quit.")
-    entry.connect("changed", on_changed)
+    def save(*_args):
+        url = url_entry.get_text()
+        ok = tts.set_session_key(url, entry.get_text())
+        entry.set_tooltip_text(None if ok else (
+            "Enter a URL first; the key is only kept until you quit." if not url.strip()
+            else "Could not save the key to disk; it is only kept until you quit."))
+        return False
+    # memory on every edit, disk only on focus-out / Enter / Remove (no write per keystroke)
+    entry.connect("changed", lambda widget: tts.set_session_key(url_entry.get_text(), widget.get_text(), persist=False))
+    entry.connect("focus-out-event", save)
+    entry.connect("activate", save)
+    remove.connect("clicked", save)
     url_entry.connect("changed", lambda widget: entry.set_text(tts.session_key(widget.get_text())))
     return entry
 

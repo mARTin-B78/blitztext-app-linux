@@ -6,7 +6,7 @@ import types
 
 import pytest
 
-from blitztext import streaming as st
+from blitztext import streaming as st, tts
 from blitztext.stt import STTEngine
 
 
@@ -238,7 +238,7 @@ def test_create_session_ok_and_errors(monkeypatch):
         return Resp(b'{"id": "sess"}')
 
     monkeypatch.setenv("FAKE_RT_KEY", "fake-key")
-    monkeypatch.setattr(urllib.request, "urlopen", ok)
+    monkeypatch.setattr(tts, "urlopen", ok)
     s = make(env="FAKE_RT_KEY")
     assert s._create_session("http://h/x") == {"id": "sess"}
     assert seen["req"].get_header("Authorization") == "Bearer fake-key"
@@ -247,7 +247,7 @@ def test_create_session_ok_and_errors(monkeypatch):
     def http_err(req, timeout):
         raise urllib.error.HTTPError("http://h/x", 503, "x", {}, io.BytesIO(b"overloaded"))
 
-    monkeypatch.setattr(urllib.request, "urlopen", http_err)
+    monkeypatch.setattr(tts, "urlopen", http_err)
     with pytest.raises(st.StreamingSTTError, match="HTTP 503.*overloaded") as ei:
         s._create_session("http://h/x")
     assert "fake-key" not in str(ei.value)
@@ -255,11 +255,11 @@ def test_create_session_ok_and_errors(monkeypatch):
     def url_err(req, timeout):
         raise urllib.error.URLError("refused")
 
-    monkeypatch.setattr(urllib.request, "urlopen", url_err)
+    monkeypatch.setattr(tts, "urlopen", url_err)
     with pytest.raises(st.StreamingSTTError, match="Cannot initialize"):
         s._create_session("http://h/x")
 
-    monkeypatch.setattr(urllib.request, "urlopen", lambda r, timeout: Resp(b"<html>"))
+    monkeypatch.setattr(tts, "urlopen", lambda r, timeout: Resp(b"<html>"))
     with pytest.raises(st.StreamingSTTError, match="Cannot initialize"):
         s._create_session("http://h/x")
 

@@ -21,6 +21,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Callable
 
+from . import tts
 from .stt import STTEngine
 
 TextCallback = Callable[[str, bool], None]
@@ -180,7 +181,7 @@ class RivaRealtimeStreamer:
         headers = {"Content-Type": "application/json", **self._auth_headers()}
         req = urllib.request.Request(url, data=body, headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with tts.urlopen(req, timeout=10) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:300]

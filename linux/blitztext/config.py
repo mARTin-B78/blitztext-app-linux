@@ -364,15 +364,6 @@ def _load_wakeword_engines(cfg: Config, data: dict) -> None:
             active.stop_model = cfg.wakeword_stop_model
 
 
-def _adopt(url: str, env_value: str) -> str:
-    """Move a literal API key typed into an 'API key env' field into the key store."""
-    from . import tts
-    try:
-        return tts.adopt_literal_key(url, env_value)
-    except RuntimeError:
-        return env_value
-
-
 def load(path: Path = CONFIG_PATH) -> Config:
     """Load config from TOML, creating a default file on first run."""
     if not path.exists():
@@ -380,6 +371,19 @@ def load(path: Path = CONFIG_PATH) -> Config:
 
     with path.open("rb") as fh:
         data = tomllib.load(fh)
+
+    adopted: list[bool] = []
+
+    def _adopt(url: str, env_value: str) -> str:
+        """Move a literal API key typed into an 'API key env' field into the key store."""
+        from . import tts
+        try:
+            kept = tts.adopt_literal_key(url, env_value)
+        except RuntimeError:
+            return env_value
+        if kept != env_value:
+            adopted.append(True)
+        return kept
 
     g = data.get("general", {})
     w = data.get("whisper", {})
@@ -532,6 +536,8 @@ def load(path: Path = CONFIG_PATH) -> Config:
     ] or [TTSEngine("Local TTS", DEFAULT_TTS_URL, "tts-1")]
     cfg.talk_active = data.get("talk", {}).get("active", cfg.talk_engines[0].name)
 
+    if adopted:  # drop the plaintext key from config.toml (atomic, 0600)
+        save(cfg, path)
     return cfg
 
 
@@ -689,8 +695,16 @@ def save(cfg: Config, path: Path = CONFIG_PATH) -> None:
         data["workflow"].append(_workflow_entry(wf))
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("wb") as fh:
-        tomli_w.dump(data, fh)
+    import tempfile
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".config-")  # 0600
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            tomli_w.dump(data, fh)
+            fh.flush(); os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def ensure_default(path: Path = CONFIG_PATH) -> Path:
