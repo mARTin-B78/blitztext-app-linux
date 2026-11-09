@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 The version is defined in [`pyproject.toml`](pyproject.toml).
 
+## [2.03.76] - 2026-11-09
+
+### Added
+- API keys for STT, TTS and LLM engines now persist across restarts in a 0600 key store (no longer session-only).
+
+### Changed
+- Literal API keys found in `config.toml` are migrated into the key store and removed from the config file.
+- The config file is saved atomically with 0600 permissions.
+
+### Security
+- HTTP redirects are only followed within the same origin, so keys are not forwarded to another host.
+
+Rollback: `git revert` the merge commit or reinstall the previous tag (v2.03.75).
+
 ## [2.03.75] - 2026-11-04
 
 ### Fixed
