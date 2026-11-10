@@ -764,6 +764,8 @@ def _wyoming_describe(host: str, port: int) -> dict:
             line += chunk
         info = json.loads(line.decode("utf-8"))
         payload_len = info.get("data_length", info.get("payload_length", 0))
+        if payload_len > 1048576:
+            raise ValueError(f"payload_length {payload_len} too large")
         payload = b""
         while len(payload) < payload_len:
             chunk = s.recv(payload_len - len(payload))

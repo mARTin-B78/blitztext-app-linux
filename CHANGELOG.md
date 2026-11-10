@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.03.77] - 2026-11-10
+
+### Security
+- Fixed an unbounded read DoS in the Wyoming protocol by limiting `data_length` and `payload_length` fields to 1 MB.
+
 ## [2.03.76] - 2026-11-09
 
 ### Added
