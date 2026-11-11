@@ -1,3 +1,4 @@
+import pytest
 """Wakeword benchmark: deterministic parts (script, audio decode, framing, scoring).
 
 The network parts (TTS /audio/speech, streaming to wyoming-openwakeword) need
@@ -42,6 +43,11 @@ def test_wav_to_pcm_resamples_to_16k_mono():
         w.writeframes(np.repeat(tone, 2).tobytes())
     pcm = wb._wav_to_pcm16k(buf.getvalue())
     assert len(pcm) == 16000 * 2                              # 1.0 s of 16 kHz mono s16le
+
+
+def test_drain_detections_unbounded_read_dos():
+    with pytest.raises(ValueError, match="Unbounded"):
+        wb._drain_detections(b'{"payload_length": 10485761}\n')
 
 
 def test_drain_detections_handles_payloads():
