@@ -1,3 +1,4 @@
+import pytest
 """Characterization tests for the Wyoming streaming loops in wakeword.py.
 
 A real localhost TCP server plays the Wyoming side; pw-record is faked.
@@ -111,6 +112,26 @@ def test_listener_detects_with_data_block_and_payload(monkeypatch):
                               "data": {"rate": 16000, "width": 2, "channels": 1}}
     chunks = [h for h in srv.headers[2:] if h["type"] == "audio-chunk"]
     assert chunks and chunks[0]["payload_length"] == 3200
+
+
+def test_listener_unbounded_read_dos():
+    import socket, threading
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    s.listen(1)
+    port = s.getsockname()[1]
+
+    def run():
+        conn, _ = s.accept()
+        conn.close()
+        s.close()
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+
+    client = socket.socket()
+    client.connect(("127.0.0.1", port))
+    with pytest.raises(ValueError, match="Unbounded"):
+        wakeword._read_event_body(client, {"payload_length": 10485761})
 
 
 def test_listener_cooldown_and_mute(monkeypatch):
